@@ -29,6 +29,15 @@ const AudioCall = () => {
   useEffect(() => {
     if (remoteAudioRef.current && remoteStream) {
       remoteAudioRef.current.srcObject = remoteStream;
+      // Explicit play() — autoPlay alone can be blocked by browser policy
+      remoteAudioRef.current.play().catch(e => {
+        console.warn('Audio autoplay blocked, retrying on user interaction:', e.message);
+        const playOnClick = () => {
+          remoteAudioRef.current?.play();
+          document.removeEventListener('click', playOnClick);
+        };
+        document.addEventListener('click', playOnClick);
+      });
     }
   }, [remoteStream]);
 

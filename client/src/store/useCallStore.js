@@ -577,7 +577,29 @@ const useCallStore = create((set, get) => ({
           const currentIce = get().iceState;
           if (currentIce === 'disconnected') {
             console.log('⚠️ Still disconnected after 5s, attempting ICE restart');
-            webrtcService.restartIce(remotePeerId).catch(() => {});
+            webrtcService.restartIce(remotePeerId)
+              .then((offer) => {
+                if (offer) {
+                  const socket = getSocket();
+                  if (socket) {
+                    if (get().isGroupCall) {
+                      socket.emit('group-call:offer', {
+                        groupId: get().groupId,
+                        targetUserId: remotePeerId,
+                        offer,
+                      });
+                    } else {
+                      socket.emit('call:renegotiate', {
+                        targetUserId: remotePeerId,
+                        offer,
+                      });
+                    }
+                  }
+                }
+              })
+              .catch((err) => {
+                console.error('ICE restart failed:', err);
+              });
           }
         }, 5000);
       }

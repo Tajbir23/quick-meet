@@ -45,6 +45,15 @@ const VideoCall = () => {
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
+      // Explicit play() — autoPlay alone can be blocked by browser policy
+      remoteVideoRef.current.play().catch(e => {
+        console.warn('Video autoplay blocked, retrying on user interaction:', e.message);
+        const playOnClick = () => {
+          remoteVideoRef.current?.play();
+          document.removeEventListener('click', playOnClick);
+        };
+        document.addEventListener('click', playOnClick);
+      });
     }
   }, [remoteStream]);
 

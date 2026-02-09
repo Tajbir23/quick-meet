@@ -244,8 +244,10 @@ class WebRTCService {
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
 
-    // Initialize ICE candidate queue
-    this.iceCandidateQueues.set(peerId, []);
+    // Initialize ICE candidate queue — preserve any candidates queued before PC existed
+    if (!this.iceCandidateQueues.has(peerId)) {
+      this.iceCandidateQueues.set(peerId, []);
+    }
 
     // ---- EVENT HANDLERS ----
 
