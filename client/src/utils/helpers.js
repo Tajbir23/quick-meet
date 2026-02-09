@@ -274,10 +274,45 @@ export const truncate = (text, maxLength = 50) => {
 
 /**
  * Play notification sound
+ * 
+ * Uses a shared AudioContext that is resumed after user gesture.
+ * Chrome blocks AudioContext creation before user interaction.
  */
+let _audioCtx = null;
+let _audioResumed = false;
+
+// Resume AudioContext on first user gesture (click/keydown/touch)
+const ensureAudioContext = () => {
+  if (!_audioCtx) {
+    _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (_audioCtx.state === 'suspended') {
+    _audioCtx.resume().catch(() => {});
+  }
+  return _audioCtx;
+};
+
+// Listen for first user gesture to unlock audio
+if (typeof document !== 'undefined') {
+  const unlockAudio = () => {
+    ensureAudioContext();
+    _audioResumed = true;
+    document.removeEventListener('click', unlockAudio);
+    document.removeEventListener('keydown', unlockAudio);
+    document.removeEventListener('touchstart', unlockAudio);
+  };
+  document.addEventListener('click', unlockAudio);
+  document.addEventListener('keydown', unlockAudio);
+  document.addEventListener('touchstart', unlockAudio);
+}
+
 export const playNotificationSound = (type = 'message') => {
   try {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const audioContext = ensureAudioContext();
+
+    // Don't play if AudioContext is still suspended (no user gesture yet)
+    if (audioContext.state === 'suspended') return;
+
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
 
@@ -289,12 +324,12 @@ export const playNotificationSound = (type = 'message') => {
       gainNode.gain.value = 0.3;
       oscillator.start();
       setTimeout(() => { oscillator.frequency.value = 523; }, 200);
-      setTimeout(() => { oscillator.stop(); }, 400);
+      setTimeout(() => { oscillator.stop(); audioContext.state !== 'closed' && gainNode.disconnect(); }, 400);
     } else {
       oscillator.frequency.value = 800;
       gainNode.gain.value = 0.1;
       oscillator.start();
-      setTimeout(() => { oscillator.stop(); }, 150);
+      setTimeout(() => { oscillator.stop(); audioContext.state !== 'closed' && gainNode.disconnect(); }, 150);
     }
   } catch (e) {
     // Audio not available, silently ignore

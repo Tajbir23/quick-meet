@@ -62,15 +62,24 @@ const useCallStore = create((set, get) => ({
         isIncoming: false,
       });
 
-      // Get local media
+      // Get local media — fallback to audio-only if camera unavailable
       const constraints = {
         audio: true,
         video: callType === 'video',
       };
-      const localStream = await webrtcService.getLocalStream(constraints);
+      let localStream;
+      try {
+        localStream = await webrtcService.getLocalStream(constraints);
+      } catch (mediaErr) {
+        if (callType === 'video') {
+          console.warn('Camera unavailable, falling back to audio-only:', mediaErr.message);
+          localStream = await webrtcService.getLocalStream({ audio: true, video: false });
+          set({ isVideoEnabled: false });
+        } else {
+          throw mediaErr;
+        }
+      }
       set({ localStream });
-
-      // Create peer connection
       webrtcService.createPeerConnection(targetUser.userId);
 
       // Set up callbacks
@@ -120,15 +129,24 @@ const useCallStore = create((set, get) => ({
         incomingCall: null, // Clear incoming call data immediately
       });
 
-      // Get local media
+      // Get local media — fallback to audio-only if camera unavailable
       const constraints = {
         audio: true,
         video: callType === 'video',
       };
-      const localStream = await webrtcService.getLocalStream(constraints);
+      let localStream;
+      try {
+        localStream = await webrtcService.getLocalStream(constraints);
+      } catch (mediaErr) {
+        if (callType === 'video') {
+          console.warn('Camera unavailable, falling back to audio-only:', mediaErr.message);
+          localStream = await webrtcService.getLocalStream({ audio: true, video: false });
+          set({ isVideoEnabled: false });
+        } else {
+          throw mediaErr;
+        }
+      }
       set({ localStream });
-
-      // Set up callbacks BEFORE handling offer
       get().setupWebRTCCallbacks(callerId);
 
       // Handle the offer and create answer
@@ -264,14 +282,12 @@ const useCallStore = create((set, get) => ({
 
     try {
       if (isScreenSharing) {
-        // Stop screen share, revert to camera
+        // Stop screen share, revert to camera (or null for audio-only calls)
         webrtcService.stopScreenShare();
 
-        // Revert video track in peer connections to camera
-        const cameraTrack = webrtcService.localStream?.getVideoTracks()[0];
-        if (cameraTrack) {
-          await webrtcService.replaceVideoTrack(cameraTrack);
-        }
+        // Revert video track in peer connections to camera (or null if audio-only)
+        const cameraTrack = webrtcService.localStream?.getVideoTracks()[0] || null;
+        await webrtcService.replaceVideoTrack(cameraTrack);
 
         // Revert local video to camera stream
         set({ isScreenSharing: false, localStream: webrtcService.localStream });
