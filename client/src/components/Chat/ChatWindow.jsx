@@ -3,6 +3,7 @@ import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
+import { formatDateSeparator, shouldShowDateSeparator } from '../../utils/helpers';
 
 const ChatWindow = () => {
   const { activeChat, messages, fetchMessages, isLoadingMessages, typingUsers, markAsRead } = useChatStore();
@@ -71,13 +72,27 @@ const ChatWindow = () => {
             chatMessages[index - 1]?.sender?._id !== msg.sender?._id
           );
 
+          // Show date separator when messages cross local calendar day boundary
+          const prevDate = index > 0 ? chatMessages[index - 1]?.createdAt : null;
+          const showDateSep = shouldShowDateSeparator(msg.createdAt, prevDate);
+
           return (
-            <MessageBubble
-              key={msg._id || index}
-              message={msg}
-              isMine={isMine}
-              showAvatar={showAvatar}
-            />
+            <div key={msg._id || index}>
+              {showDateSep && (
+                <div className="flex items-center justify-center py-3">
+                  <div className="flex-1 border-t border-dark-700" />
+                  <span className="px-3 text-xs text-dark-400 bg-dark-900 font-medium">
+                    {formatDateSeparator(msg.createdAt)}
+                  </span>
+                  <div className="flex-1 border-t border-dark-700" />
+                </div>
+              )}
+              <MessageBubble
+                message={msg}
+                isMine={isMine}
+                showAvatar={showAvatar}
+              />
+            </div>
           );
         })}
 

@@ -30,6 +30,14 @@
 
 require('dotenv').config();
 
+// ─── Force server process to UTC ────────────────────────────────
+// WHY: If the server is hosted in India (UTC+5:30), Date objects
+// can give misleading local strings. By pinning TZ=UTC, every
+// new Date() / Date.now() behaves identically regardless of where
+// the VPS is physically located. MongoDB already stores UTC, so
+// this makes the whole pipeline consistent.
+process.env.TZ = 'UTC';
+
 const https = require('https');
 const express = require('express');
 const cors = require('cors');

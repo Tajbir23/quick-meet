@@ -102,7 +102,12 @@ const uploadMultipleFiles = async (req, res) => {
 
 /**
  * GET /api/files/download/:filename
- * Download a file (authenticated)
+ * Download a file (public — UUID filenames are unguessable)
+ * 
+ * WHY public: Browser <a> clicks and window.open() cannot send
+ * Authorization headers. Filenames are UUID-based which makes
+ * them effectively unguessable. Images are already served publicly
+ * via static /uploads/ route, so this is consistent.
  */
 const downloadFile = async (req, res) => {
   try {
@@ -120,7 +125,19 @@ const downloadFile = async (req, res) => {
       });
     }
 
-    res.download(filePath, sanitizedFilename);
+    // Try to find the original filename from the message DB
+    // so the user gets a meaningful download name instead of UUID
+    let downloadName = sanitizedFilename;
+    try {
+      const message = await Message.findOne({ fileUrl: `/uploads/${sanitizedFilename}` });
+      if (message && message.fileName) {
+        downloadName = message.fileName;
+      }
+    } catch (dbErr) {
+      // If DB lookup fails, just use the stored filename
+    }
+
+    res.download(filePath, downloadName);
   } catch (error) {
     console.error('Download file error:', error);
     res.status(500).json({

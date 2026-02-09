@@ -90,6 +90,7 @@ const VideoCall = () => {
         {/* Remote video (main) */}
         {remoteStream ? (
           <video
+            id="remote-video"
             ref={remoteVideoRef}
             autoPlay
             playsInline

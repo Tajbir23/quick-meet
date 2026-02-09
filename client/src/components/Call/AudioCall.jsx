@@ -38,7 +38,7 @@ const AudioCall = () => {
   return (
     <div className="fixed inset-0 bg-gradient-to-b from-dark-800 to-dark-900 z-40 flex flex-col">
       {/* Hidden audio element for remote audio playback */}
-      <audio ref={remoteAudioRef} autoPlay playsInline />
+      <audio id="remote-audio" ref={remoteAudioRef} autoPlay playsInline />
 
       {/* Main content */}
       <div className="flex-1 flex flex-col items-center justify-center">

@@ -69,7 +69,7 @@ const setupPresenceHandlers = (io, socket, onlineUsers) => {
    * Heartbeat — client pings periodically to confirm connection is alive
    */
   socket.on('heartbeat', () => {
-    socket.emit('heartbeat:ack', { timestamp: Date.now() });
+    socket.emit('heartbeat:ack', { timestamp: new Date().toISOString() });
   });
 };
 

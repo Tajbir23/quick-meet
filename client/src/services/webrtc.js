@@ -105,9 +105,33 @@ class WebRTCService {
         );
       }
 
+      // Build audio constraints — support specific deviceId
+      let audioConstraints;
+      if (constraints.audio === false) {
+        audioConstraints = false;
+      } else if (constraints.audioDeviceId) {
+        audioConstraints = { ...MEDIA_CONSTRAINTS.audio, deviceId: { exact: constraints.audioDeviceId } };
+      } else if (typeof constraints.audio === 'object') {
+        audioConstraints = constraints.audio;
+      } else {
+        audioConstraints = MEDIA_CONSTRAINTS.audio;
+      }
+
+      // Build video constraints — support specific deviceId
+      let videoConstraints;
+      if (constraints.video === false) {
+        videoConstraints = false;
+      } else if (constraints.videoDeviceId) {
+        videoConstraints = { ...MEDIA_CONSTRAINTS.video, deviceId: { exact: constraints.videoDeviceId } };
+      } else if (typeof constraints.video === 'object') {
+        videoConstraints = constraints.video;
+      } else {
+        videoConstraints = MEDIA_CONSTRAINTS.video;
+      }
+
       const finalConstraints = {
-        audio: constraints.audio !== undefined ? constraints.audio : MEDIA_CONSTRAINTS.audio,
-        video: constraints.video !== undefined ? constraints.video : MEDIA_CONSTRAINTS.video,
+        audio: audioConstraints,
+        video: videoConstraints,
       };
 
       this.localStream = await navigator.mediaDevices.getUserMedia(finalConstraints);
@@ -569,6 +593,101 @@ class WebRTCService {
         await sender.replaceTrack(newTrack);
         console.log(`🔄 Replaced video track for ${peerId}`);
       }
+    }
+  }
+
+  // ============================================
+  // DEVICE SWITCHING (mid-call)
+  // ============================================
+
+  /**
+   * Switch microphone to a different audio input device mid-call.
+   * Gets a new audio track from the selected device and replaces
+   * the existing track in all peer connections.
+   */
+  async switchAudioDevice(deviceId) {
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        audio: { ...MEDIA_CONSTRAINTS.audio, deviceId: { exact: deviceId } },
+      });
+      const newTrack = newStream.getAudioTracks()[0];
+      if (!newTrack) throw new Error('No audio track from device');
+
+      // Replace in all peer connections
+      for (const [peerId, pc] of this.peerConnections) {
+        const sender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+        if (sender) {
+          await sender.replaceTrack(newTrack);
+        }
+      }
+
+      // Replace in local stream
+      if (this.localStream) {
+        const oldTrack = this.localStream.getAudioTracks()[0];
+        if (oldTrack) {
+          this.localStream.removeTrack(oldTrack);
+          oldTrack.stop();
+        }
+        this.localStream.addTrack(newTrack);
+      }
+
+      console.log('🎤 Switched audio device to:', deviceId);
+      return true;
+    } catch (error) {
+      console.error('Failed to switch audio device:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Switch camera to a different video input device mid-call.
+   */
+  async switchVideoDevice(deviceId) {
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: { ...MEDIA_CONSTRAINTS.video, deviceId: { exact: deviceId } },
+      });
+      const newTrack = newStream.getVideoTracks()[0];
+      if (!newTrack) throw new Error('No video track from device');
+
+      // Replace in all peer connections
+      await this.replaceVideoTrack(newTrack);
+
+      // Replace in local stream
+      if (this.localStream) {
+        const oldTrack = this.localStream.getVideoTracks()[0];
+        if (oldTrack) {
+          this.localStream.removeTrack(oldTrack);
+          oldTrack.stop();
+        }
+        this.localStream.addTrack(newTrack);
+      }
+
+      console.log('📹 Switched video device to:', deviceId);
+      return true;
+    } catch (error) {
+      console.error('Failed to switch video device:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Set audio output device (speaker/headphone) on a given audio/video element.
+   * Uses HTMLMediaElement.setSinkId() — Chrome/Edge support.
+   */
+  async setAudioOutput(element, deviceId) {
+    try {
+      if (element && typeof element.setSinkId === 'function') {
+        await element.setSinkId(deviceId);
+        console.log('🔊 Audio output set to:', deviceId);
+        return true;
+      } else {
+        console.warn('setSinkId not supported in this browser');
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to set audio output:', error);
+      throw error;
     }
   }
 

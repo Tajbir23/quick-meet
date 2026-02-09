@@ -317,6 +317,53 @@ const useCallStore = create((set, get) => ({
   },
 
   // ============================================
+  // DEVICE SWITCHING (mid-call)
+  // ============================================
+
+  /**
+   * Switch microphone input device during an active call
+   */
+  switchAudioDevice: async (deviceId) => {
+    try {
+      await webrtcService.switchAudioDevice(deviceId);
+      console.log('🎤 Audio input switched to:', deviceId);
+    } catch (error) {
+      console.error('Failed to switch audio device:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Switch camera input device during an active call
+   */
+  switchVideoDevice: async (deviceId) => {
+    try {
+      await webrtcService.switchVideoDevice(deviceId);
+      // Update localStream reference in store
+      set({ localStream: webrtcService.localStream });
+      console.log('📹 Video input switched to:', deviceId);
+    } catch (error) {
+      console.error('Failed to switch video device:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Switch audio output device (speaker / headphone)
+   * @param {HTMLMediaElement} audioElement - the <audio> or <video> element playing remote audio
+   * @param {string} deviceId - output device id
+   */
+  switchAudioOutput: async (audioElement, deviceId) => {
+    try {
+      await webrtcService.setAudioOutput(audioElement, deviceId);
+      console.log('🔊 Audio output switched to:', deviceId);
+    } catch (error) {
+      console.error('Failed to switch audio output:', error);
+      throw error;
+    }
+  },
+
+  // ============================================
   // GROUP CALL ACTIONS
   // ============================================
 

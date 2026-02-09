@@ -1,11 +1,50 @@
-import { Download, FileText } from 'lucide-react';
-import { getInitials, stringToColor, formatTime, isImageFile, formatFileSize } from '../../utils/helpers';
+import { useState } from 'react';
+import { Download, FileText, Loader2 } from 'lucide-react';
+import { getInitials, stringToColor, formatMessageTime, isImageFile, formatFileSize } from '../../utils/helpers';
 import { SERVER_URL } from '../../utils/constants';
 
 const MessageBubble = ({ message, isMine, showAvatar }) => {
+  const [downloading, setDownloading] = useState(false);
   const isSystem = message.type === 'system';
   const hasFile = message.fileUrl;
   const isImage = hasFile && isImageFile(message.fileMimeType);
+
+  /**
+   * Download file — opens the public download URL in a new tab.
+   * If that fails, falls back to fetch+blob with auth headers.
+   */
+  const handleDownload = async (e) => {
+    e.preventDefault();
+    if (downloading) return;
+
+    const filename = message.fileUrl.split('/').pop();
+    const downloadUrl = `${SERVER_URL}/api/files/download/${filename}`;
+
+    // Try direct link first (works because download route is now public)
+    try {
+      setDownloading(true);
+
+      // Use fetch+blob so browser triggers a real Save-As download
+      const res = await fetch(downloadUrl);
+      if (!res.ok) throw new Error('Download failed');
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = message.fileName || filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Download error:', err);
+      // Fallback: open URL directly
+      window.open(downloadUrl, '_blank');
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   // System message (user joined/left, etc.)
   if (isSystem) {
@@ -60,13 +99,12 @@ const MessageBubble = ({ message, isMine, showAvatar }) => {
 
             {/* Non-image file attachment */}
             {hasFile && !isImage && (
-              <a
-                href={`${SERVER_URL}/api/files/download/${message.fileUrl.split('/').pop()}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`flex items-center gap-2 p-2 rounded-lg mb-2 ${
+              <button
+                onClick={handleDownload}
+                disabled={downloading}
+                className={`w-full flex items-center gap-2 p-2 rounded-lg mb-2 text-left cursor-pointer hover:opacity-80 transition-opacity ${
                   isMine ? 'bg-primary-700/50' : 'bg-dark-600/50'
-                }`}
+                } ${downloading ? 'opacity-60' : ''}`}
               >
                 <FileText size={20} className="flex-shrink-0" />
                 <div className="min-w-0 flex-1">
@@ -75,8 +113,11 @@ const MessageBubble = ({ message, isMine, showAvatar }) => {
                     <p className="text-xs opacity-60">{formatFileSize(message.fileSize)}</p>
                   )}
                 </div>
-                <Download size={16} className="flex-shrink-0 opacity-60" />
-              </a>
+                {downloading
+                  ? <Loader2 size={16} className="flex-shrink-0 opacity-60 animate-spin" />
+                  : <Download size={16} className="flex-shrink-0 opacity-60" />
+                }
+              </button>
             )}
 
             {/* Text content */}
@@ -84,9 +125,9 @@ const MessageBubble = ({ message, isMine, showAvatar }) => {
               <p className="whitespace-pre-wrap break-words">{message.content}</p>
             )}
 
-            {/* Timestamp */}
+            {/* Timestamp — always in user's local timezone */}
             <p className={`text-[10px] mt-1 ${isMine ? 'text-primary-200' : 'text-dark-500'} text-right`}>
-              {formatTime(message.createdAt)}
+              {formatMessageTime(message.createdAt)}
             </p>
           </div>
         </div>

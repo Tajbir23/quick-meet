@@ -1,14 +1,17 @@
 /**
  * ============================================
  * CallControls — Audio/Video/Screen/EndCall buttons
+ * + Device Selector (settings gear)
  * ============================================
  */
 
+import { useState } from 'react';
 import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
-  PhoneOff, MoreVertical
+  PhoneOff, Settings
 } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
+import DeviceSelector from './DeviceSelector';
 import toast from 'react-hot-toast';
 
 const CallControls = ({ compact = false }) => {
@@ -23,6 +26,8 @@ const CallControls = ({ compact = false }) => {
     endCall,
   } = useCallStore();
 
+  const [showDeviceSelector, setShowDeviceSelector] = useState(false);
+
   const handleScreenShare = async () => {
     try {
       await toggleScreenShare();
@@ -35,7 +40,20 @@ const CallControls = ({ compact = false }) => {
   const iconSize = compact ? 18 : 22;
 
   return (
-    <div className="flex items-center justify-center gap-3">
+    <div className="relative flex items-center justify-center gap-3">
+      {/* Device Selector (Settings gear) */}
+      <button
+        onClick={() => setShowDeviceSelector(!showDeviceSelector)}
+        className={`${btnSize} rounded-full flex items-center justify-center transition-all ${
+          showDeviceSelector
+            ? 'bg-primary-500/20 text-primary-400'
+            : 'bg-dark-700 hover:bg-dark-600 text-white'
+        }`}
+        title="Device settings"
+      >
+        <Settings size={iconSize} />
+      </button>
+
       {/* Mic toggle */}
       <button
         onClick={toggleAudio}
@@ -85,6 +103,11 @@ const CallControls = ({ compact = false }) => {
       >
         <PhoneOff size={iconSize} />
       </button>
+
+      {/* Device selector panel */}
+      {showDeviceSelector && (
+        <DeviceSelector onClose={() => setShowDeviceSelector(false)} />
+      )}
     </div>
   );
 };

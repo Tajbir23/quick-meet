@@ -60,7 +60,7 @@ const setupChatHandlers = (io, socket, onlineUsers) => {
       io.to(senderSocketId).emit('message:read:ack', {
         messageId,
         readBy: socket.userId,
-        readAt: new Date(),
+        readAt: new Date().toISOString(), // Always send UTC ISO string
       });
     }
   });
