@@ -267,12 +267,14 @@ const useCallStore = create((set, get) => ({
         // Stop screen share, revert to camera
         webrtcService.stopScreenShare();
 
+        // Revert video track in peer connections to camera
         const cameraTrack = webrtcService.localStream?.getVideoTracks()[0];
         if (cameraTrack) {
           await webrtcService.replaceVideoTrack(cameraTrack);
         }
 
-        set({ isScreenSharing: false });
+        // Revert local video to camera stream
+        set({ isScreenSharing: false, localStream: webrtcService.localStream });
 
         if (socket) {
           if (isGroupCall) {
@@ -296,7 +298,8 @@ const useCallStore = create((set, get) => ({
           get().toggleScreenShare(); // Will stop screen share
         };
 
-        set({ isScreenSharing: true });
+        // Update local video to show screen share preview
+        set({ isScreenSharing: true, localStream: screenStream });
 
         if (socket) {
           if (isGroupCall) {

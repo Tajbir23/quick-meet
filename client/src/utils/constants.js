@@ -66,11 +66,9 @@ export const MEDIA_CONSTRAINTS = {
 // Screen share constraints
 export const SCREEN_CONSTRAINTS = {
   video: {
-    cursor: 'always',
-    displaySurface: 'monitor',
     width: { ideal: 1920 },
     height: { ideal: 1080 },
-    frameRate: { ideal: 30 },
+    frameRate: { ideal: 15, max: 30 },
   },
   audio: false,
 };

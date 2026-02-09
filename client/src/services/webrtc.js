@@ -187,11 +187,17 @@ class WebRTCService {
    */
   async startScreenShare() {
     try {
-      if (!navigator.mediaDevices.getDisplayMedia) {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
         throw new Error('Screen sharing is not supported in your browser.');
       }
 
-      this.screenStream = await navigator.mediaDevices.getDisplayMedia(SCREEN_CONSTRAINTS);
+      try {
+        this.screenStream = await navigator.mediaDevices.getDisplayMedia(SCREEN_CONSTRAINTS);
+      } catch (constraintErr) {
+        // Fallback: some browsers reject advanced constraints
+        console.warn('Retrying screen share with basic constraints:', constraintErr.message);
+        this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      }
 
       // When user stops sharing via browser UI (clicking "Stop sharing")
       this.screenStream.getVideoTracks()[0].onended = () => {
@@ -601,16 +607,32 @@ class WebRTCService {
    */
   async replaceVideoTrack(newTrack) {
     for (const [peerId, pc] of this.peerConnections) {
-      const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-      if (sender) {
-        await sender.replaceTrack(newTrack);
-        console.log(`🔄 Replaced video track for ${peerId}`);
-      } else {
-        // No video sender exists (audio-only call) — add the track
-        // This triggers renegotiation via onnegotiationneeded
-        const stream = this.localStream || new MediaStream();
-        pc.addTrack(newTrack, stream);
-        console.log(`➕ Added video track to audio-only connection with ${peerId}`);
+      try {
+        // Find video sender — first by track, then by transceiver
+        let sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+
+        // Fallback: find via transceiver (handles null/ended track cases)
+        if (!sender) {
+          const transceiver = pc.getTransceivers().find(
+            t => t.sender && (t.receiver?.track?.kind === 'video' || t.mid?.includes('video'))
+          );
+          if (transceiver) {
+            sender = transceiver.sender;
+          }
+        }
+
+        if (sender) {
+          await sender.replaceTrack(newTrack);
+          console.log(`🔄 Replaced video track for ${peerId}`);
+        } else {
+          // No video sender exists (audio-only call) — add the track
+          // This triggers renegotiation via onnegotiationneeded
+          const stream = this.localStream || new MediaStream();
+          pc.addTrack(newTrack, stream);
+          console.log(`➕ Added video track to audio-only connection with ${peerId}`);
+        }
+      } catch (err) {
+        console.error(`Failed to replace video track for ${peerId}:`, err);
       }
     }
   }
