@@ -2,6 +2,7 @@ import useChatStore from '../../store/useChatStore';
 import useGroupStore from '../../store/useGroupStore';
 import useAuthStore from '../../store/useAuthStore';
 import { getInitials, stringToColor, formatTime, truncate } from '../../utils/helpers';
+import { MessageCircle } from 'lucide-react';
 
 const ChatList = ({ searchQuery }) => {
   const { users, setActiveChat, unread, isUserOnline } = useChatStore();
@@ -17,14 +18,20 @@ const ChatList = ({ searchQuery }) => {
 
   if (filteredUsers.length === 0) {
     return (
-      <div className="p-4 text-center text-dark-500 text-sm">
-        {searchQuery ? 'No users found' : 'No conversations yet'}
+      <div className="p-8 text-center">
+        <MessageCircle size={32} className="mx-auto text-dark-600 mb-3" />
+        <p className="text-dark-400 text-sm font-medium">
+          {searchQuery ? 'No users found' : 'No conversations yet'}
+        </p>
+        <p className="text-dark-500 text-xs mt-1">
+          {searchQuery ? 'Try a different search' : 'Select a user to start chatting'}
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="py-2">
+    <div className="py-1">
       {filteredUsers.map(user => {
         const online = isUserOnline(user._id);
         const unreadCount = unread[user._id] || 0;
@@ -43,30 +50,30 @@ const ChatList = ({ searchQuery }) => {
             {/* Avatar */}
             <div className="relative flex-shrink-0">
               <div
-                className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white"
+                className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold text-white"
                 style={{ backgroundColor: stringToColor(user.username) }}
               >
                 {getInitials(user.username)}
               </div>
-              <span className={`absolute bottom-0 right-0 ${online ? 'online-dot' : 'offline-dot'}`} />
+              <span className={`absolute -bottom-0.5 -right-0.5 ${online ? 'online-dot' : 'offline-dot'}`} />
             </div>
 
             {/* Info */}
             <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-white truncate">{user.username}</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-white truncate">{user.username}</p>
                 {user.lastSeen && (
-                  <span className="text-xs text-dark-500">{formatTime(user.lastSeen)}</span>
+                  <span className="text-[11px] text-dark-500 flex-shrink-0">{formatTime(user.lastSeen)}</span>
                 )}
               </div>
-              <p className="text-xs text-dark-400 truncate">
-                {online ? 'Online' : 'Tap to chat'}
+              <p className="text-xs text-dark-400 truncate mt-0.5">
+                {online ? <span className="text-emerald-400">Online</span> : 'Tap to chat'}
               </p>
             </div>
 
             {/* Unread badge */}
             {unreadCount > 0 && (
-              <span className="badge badge-primary">{unreadCount > 99 ? '99+' : unreadCount}</span>
+              <span className="badge badge-primary animate-scale-in">{unreadCount > 99 ? '99+' : unreadCount}</span>
             )}
           </button>
         );

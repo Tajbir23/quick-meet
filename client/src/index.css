@@ -10,6 +10,12 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  /* Prevent iOS zoom on input focus */
+  touch-action: manipulation;
 }
 
 body {
@@ -17,33 +23,62 @@ body {
   background-color: #0f172a;
   color: #f8fafc;
   min-height: 100vh;
+  min-height: 100dvh; /* dynamic viewport height for mobile */
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
+/* Prevent pull-to-refresh on mobile */
+html, body {
+  overscroll-behavior-y: none;
 }
 
-::-webkit-scrollbar-track {
-  background: #1e293b;
+/* Custom scrollbar - desktop only */
+@media (min-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #1e293b;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+  }
 }
 
-::-webkit-scrollbar-thumb {
-  background: #475569;
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+/* Thin scrollbar on mobile */
+@media (max-width: 767px) {
+  ::-webkit-scrollbar {
+    width: 3px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 3px;
+  }
 }
 
 /* ============================================
-   Chat Styles
+   Component Styles
    ============================================ */
 
 @layer components {
+  /* Chat bubbles */
   .chat-bubble {
-    @apply max-w-[70%] rounded-2xl px-4 py-2 text-sm break-words;
+    @apply rounded-2xl px-4 py-2 text-sm break-words;
+    max-width: 85%;
+  }
+  @media (min-width: 768px) {
+    .chat-bubble {
+      max-width: 70%;
+    }
   }
 
   .chat-bubble-sent {
@@ -54,43 +89,62 @@ body {
     @apply bg-dark-700 text-dark-100 rounded-bl-md;
   }
 
+  /* Sidebar items - larger touch target on mobile */
   .sidebar-item {
-    @apply flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer
-           transition-all duration-200 hover:bg-dark-700/50;
+    @apply flex items-center gap-3 px-4 py-3.5 cursor-pointer
+           transition-all duration-200 hover:bg-dark-700/50 active:bg-dark-700/70;
+  }
+  @media (min-width: 768px) {
+    .sidebar-item {
+      @apply py-3 rounded-lg;
+    }
   }
 
   .sidebar-item-active {
     @apply bg-dark-700 border-l-2 border-primary-500;
   }
 
+  /* Buttons - min touch target 44px on mobile */
   .btn-primary {
-    @apply bg-primary-600 hover:bg-primary-700 text-white font-medium
-           px-4 py-2 rounded-lg transition-colors duration-200
+    @apply bg-primary-600 hover:bg-primary-700 active:bg-primary-800 text-white font-medium
+           px-4 py-2.5 rounded-xl transition-all duration-200
            disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   .btn-secondary {
-    @apply bg-dark-700 hover:bg-dark-600 text-dark-100 font-medium
-           px-4 py-2 rounded-lg transition-colors duration-200;
+    @apply bg-dark-700 hover:bg-dark-600 active:bg-dark-500 text-dark-100 font-medium
+           px-4 py-2.5 rounded-xl transition-all duration-200;
   }
 
   .btn-danger {
-    @apply bg-red-600 hover:bg-red-700 text-white font-medium
-           px-4 py-2 rounded-lg transition-colors duration-200;
+    @apply bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-medium
+           px-4 py-2.5 rounded-xl transition-all duration-200;
   }
 
   .btn-icon {
-    @apply p-2 rounded-full transition-all duration-200
-           hover:bg-dark-700/50 active:scale-95;
+    @apply p-2.5 rounded-full transition-all duration-200
+           hover:bg-dark-700/50 active:scale-90 active:bg-dark-700/70;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
+  /* Input fields - larger on mobile */
   .input-field {
-    @apply w-full bg-dark-800 border border-dark-600 rounded-lg
-           px-4 py-2.5 text-dark-100 placeholder-dark-400
+    @apply w-full bg-dark-800 border border-dark-600 rounded-xl
+           px-4 py-3 text-dark-100 placeholder-dark-400 text-base
            focus:outline-none focus:ring-2 focus:ring-primary-500/50
            focus:border-primary-500 transition-all duration-200;
   }
+  @media (min-width: 768px) {
+    .input-field {
+      @apply py-2.5 text-sm;
+    }
+  }
 
+  /* Badges */
   .badge {
     @apply inline-flex items-center justify-center min-w-[20px] h-5
            px-1.5 text-xs font-bold rounded-full;
@@ -104,6 +158,7 @@ body {
     @apply bg-emerald-500 text-white;
   }
 
+  /* Online indicators */
   .online-dot {
     @apply w-3 h-3 bg-emerald-500 rounded-full border-2 border-dark-900;
   }
@@ -122,7 +177,7 @@ body {
   }
 
   .video-grid-2 {
-    @apply grid-cols-2;
+    @apply grid-cols-1 md:grid-cols-2;
   }
 
   .video-grid-3 {
@@ -135,7 +190,7 @@ body {
 
   .video-grid-5,
   .video-grid-6 {
-    @apply grid-cols-3 grid-rows-2;
+    @apply grid-cols-2 md:grid-cols-3 grid-rows-2;
   }
 }
 
@@ -170,4 +225,63 @@ body {
 @keyframes typingBounce {
   0%, 80%, 100% { transform: scale(0); }
   40% { transform: scale(1); }
+}
+
+/* Audio waveform bars */
+@keyframes audioWave {
+  0%, 100% { height: 8px; }
+  50% { height: 24px; }
+}
+
+.audio-wave-bar {
+  @apply w-1 bg-primary-400 rounded-full;
+  animation: audioWave 1s ease-in-out infinite;
+}
+
+.audio-wave-bar:nth-child(1) { animation-delay: 0s; }
+.audio-wave-bar:nth-child(2) { animation-delay: 0.15s; }
+.audio-wave-bar:nth-child(3) { animation-delay: 0.3s; }
+.audio-wave-bar:nth-child(4) { animation-delay: 0.45s; }
+.audio-wave-bar:nth-child(5) { animation-delay: 0.6s; }
+
+/* ============================================
+   Safe Area (iPhone notch, etc.)
+   ============================================ */
+
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.safe-left {
+  padding-left: env(safe-area-inset-left, 0);
+}
+
+.safe-right {
+  padding-right: env(safe-area-inset-right, 0);
+}
+
+/* ============================================
+   Mobile-specific fixes
+   ============================================ */
+
+/* Prevent iOS rubber-band scrolling on body */
+@supports (-webkit-touch-callout: none) {
+  .h-screen {
+    height: 100vh;
+    height: 100dvh;
+  }
+}
+
+/* Better select styling on mobile */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
 }

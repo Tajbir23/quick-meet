@@ -2,20 +2,17 @@
  * ============================================
  * DeviceSelector Component
  * ============================================
- * 
- * Dropdown panel to select microphone, camera,
- * and speaker devices during an active call.
- * Uses useMediaDevices hook for enumeration.
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { X, Mic, Speaker, Camera } from 'lucide-react';
 import useMediaDevices from '../../hooks/useMediaDevices';
 import useCallStore from '../../store/useCallStore';
 
 const DeviceSelector = ({ onClose }) => {
   const { devices, selectedDevices, selectDevice, enumerateDevices } = useMediaDevices();
   const { switchAudioDevice, switchVideoDevice, switchAudioOutput, callType } = useCallStore();
-  const [switching, setSwitching] = useState(null); // track which is switching
+  const [switching, setSwitching] = useState(null);
   const [error, setError] = useState(null);
   const panelRef = useRef(null);
 
@@ -42,7 +39,7 @@ const DeviceSelector = ({ onClose }) => {
       selectDevice('audioInput', deviceId);
       await switchAudioDevice(deviceId);
     } catch (err) {
-      setError('মাইক্রোফোন পরিবর্তন করতে সমস্যা হয়েছে');
+      setError('Failed to switch microphone');
       console.error(err);
     } finally {
       setSwitching(null);
@@ -56,7 +53,7 @@ const DeviceSelector = ({ onClose }) => {
       selectDevice('videoInput', deviceId);
       await switchVideoDevice(deviceId);
     } catch (err) {
-      setError('ক্যামেরা পরিবর্তন করতে সমস্যা হয়েছে');
+      setError('Failed to switch camera');
       console.error(err);
     } finally {
       setSwitching(null);
@@ -68,13 +65,12 @@ const DeviceSelector = ({ onClose }) => {
       setSwitching('audioOutput');
       setError(null);
       selectDevice('audioOutput', deviceId);
-      // Find the remote audio/video element and switch its output
       const remoteAudio = document.querySelector('#remote-audio, #remote-video');
       if (remoteAudio) {
         await switchAudioOutput(remoteAudio, deviceId);
       }
     } catch (err) {
-      setError('স্পিকার পরিবর্তন করতে সমস্যা হয়েছে');
+      setError('Failed to switch speaker');
       console.error(err);
     } finally {
       setSwitching(null);
@@ -84,42 +80,43 @@ const DeviceSelector = ({ onClose }) => {
   return (
     <div
       ref={panelRef}
-      className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-gray-900 rounded-xl shadow-2xl border border-gray-700 p-4 w-80 z-50"
+      className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-dark-800 rounded-2xl shadow-2xl border border-dark-600 p-4 w-[calc(100vw-2rem)] max-w-xs z-50 animate-slide-up"
     >
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-white font-semibold text-sm">ডিভাইস সেটিংস</h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-white font-semibold text-sm">Device Settings</h3>
         <button
           onClick={onClose}
-          className="text-gray-400 hover:text-white transition-colors"
+          className="text-dark-400 hover:text-white transition-colors p-1 rounded-full hover:bg-dark-700"
         >
-          ✕
+          <X size={16} />
         </button>
       </div>
 
       {error && (
-        <div className="mb-3 p-2 bg-red-900/50 border border-red-700 rounded text-red-300 text-xs">
+        <div className="mb-3 p-2.5 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs">
           {error}
         </div>
       )}
 
       {/* Microphone Selection */}
       <div className="mb-3">
-        <label className="block text-gray-400 text-xs mb-1 flex items-center gap-1">
-          🎤 মাইক্রোফোন
-          {switching === 'audioInput' && <span className="animate-spin">⏳</span>}
+        <label className="flex items-center gap-2 text-dark-300 text-xs mb-1.5 font-medium">
+          <Mic size={13} />
+          Microphone
+          {switching === 'audioInput' && <span className="animate-spin text-primary-400">⏳</span>}
         </label>
         <select
           value={selectedDevices.audioInput || ''}
           onChange={(e) => handleAudioInputChange(e.target.value)}
           disabled={switching === 'audioInput'}
-          className="w-full bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+          className="w-full bg-dark-900 text-white text-sm rounded-xl px-3 py-2.5 border border-dark-600 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500/50 disabled:opacity-50 transition-all"
         >
           {devices.audioInput.length === 0 && (
-            <option value="">কোনো মাইক্রোফোন পাওয়া যায়নি</option>
+            <option value="">No microphone found</option>
           )}
           {devices.audioInput.map((device) => (
             <option key={device.deviceId} value={device.deviceId}>
-              {device.label || `মাইক্রোফোন ${device.deviceId.slice(0, 8)}`}
+              {device.label || `Microphone ${device.deviceId.slice(0, 8)}`}
             </option>
           ))}
         </select>
@@ -128,19 +125,20 @@ const DeviceSelector = ({ onClose }) => {
       {/* Speaker Selection */}
       {devices.audioOutput.length > 0 && (
         <div className="mb-3">
-          <label className="block text-gray-400 text-xs mb-1 flex items-center gap-1">
-            🔊 স্পিকার / হেডফোন
-            {switching === 'audioOutput' && <span className="animate-spin">⏳</span>}
+          <label className="flex items-center gap-2 text-dark-300 text-xs mb-1.5 font-medium">
+            <Speaker size={13} />
+            Speaker / Headphone
+            {switching === 'audioOutput' && <span className="animate-spin text-primary-400">⏳</span>}
           </label>
           <select
             value={selectedDevices.audioOutput || ''}
             onChange={(e) => handleAudioOutputChange(e.target.value)}
             disabled={switching === 'audioOutput'}
-            className="w-full bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+            className="w-full bg-dark-900 text-white text-sm rounded-xl px-3 py-2.5 border border-dark-600 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500/50 disabled:opacity-50 transition-all"
           >
             {devices.audioOutput.map((device) => (
               <option key={device.deviceId} value={device.deviceId}>
-                {device.label || `স্পিকার ${device.deviceId.slice(0, 8)}`}
+                {device.label || `Speaker ${device.deviceId.slice(0, 8)}`}
               </option>
             ))}
           </select>
@@ -150,30 +148,31 @@ const DeviceSelector = ({ onClose }) => {
       {/* Camera Selection (only for video calls) */}
       {callType === 'video' && (
         <div className="mb-3">
-          <label className="block text-gray-400 text-xs mb-1 flex items-center gap-1">
-            📹 ক্যামেরা
-            {switching === 'videoInput' && <span className="animate-spin">⏳</span>}
+          <label className="flex items-center gap-2 text-dark-300 text-xs mb-1.5 font-medium">
+            <Camera size={13} />
+            Camera
+            {switching === 'videoInput' && <span className="animate-spin text-primary-400">⏳</span>}
           </label>
           <select
             value={selectedDevices.videoInput || ''}
             onChange={(e) => handleVideoInputChange(e.target.value)}
             disabled={switching === 'videoInput'}
-            className="w-full bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+            className="w-full bg-dark-900 text-white text-sm rounded-xl px-3 py-2.5 border border-dark-600 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500/50 disabled:opacity-50 transition-all"
           >
             {devices.videoInput.length === 0 && (
-              <option value="">কোনো ক্যামেরা পাওয়া যায়নি</option>
+              <option value="">No camera found</option>
             )}
             {devices.videoInput.map((device) => (
               <option key={device.deviceId} value={device.deviceId}>
-                {device.label || `ক্যামেরা ${device.deviceId.slice(0, 8)}`}
+                {device.label || `Camera ${device.deviceId.slice(0, 8)}`}
               </option>
             ))}
           </select>
         </div>
       )}
 
-      <p className="text-gray-500 text-[10px] mt-2">
-        💡 কল চলাকালীন ডিভাইস পরিবর্তন করা যাবে
+      <p className="text-dark-500 text-[10px] mt-2 text-center">
+        Switch devices during an active call
       </p>
     </div>
   );

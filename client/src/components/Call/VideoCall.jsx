@@ -2,17 +2,10 @@
  * ============================================
  * VideoCall — Full-screen video call overlay
  * ============================================
- * 
- * WHY autoPlay + playsInline:
- * - autoPlay: Start playing as soon as stream is attached
- * - playsInline: iOS Safari requires this to avoid fullscreen
- * 
- * WHY muted on localVideo:
- * - Prevents echo feedback from hearing your own mic
  */
 
 import { useEffect, useRef } from 'react';
-import { PhoneOff, Maximize2, Minimize2 } from 'lucide-react';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import { useState } from 'react';
 import useCallStore from '../../store/useCallStore';
 import CallControls from './CallControls';
@@ -34,18 +27,17 @@ const VideoCall = () => {
   const remoteVideoRef = useRef(null);
   const [isLocalLarge, setIsLocalLarge] = useState(false);
 
-  // Attach local stream to video element
+  // Attach local stream
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
     }
   }, [localStream]);
 
-  // Attach remote stream to video element
+  // Attach remote stream
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
-      // Explicit play() — autoPlay alone can be blocked by browser policy
       remoteVideoRef.current.play().catch(e => {
         console.warn('Video autoplay blocked, retrying on user interaction:', e.message);
         const playOnClick = () => {
@@ -61,20 +53,20 @@ const VideoCall = () => {
   const isConnected = callStatus === CALL_STATUS.CONNECTED;
 
   return (
-    <div className="fixed inset-0 bg-dark-900 z-40 flex flex-col">
+    <div className="fixed inset-0 bg-dark-900 z-40 flex flex-col safe-top">
       {/* Status bar */}
-      <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/60 to-transparent p-4">
+      <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/70 via-black/40 to-transparent p-3 md:p-4 safe-top">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <div
-              className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+              className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white"
               style={{ backgroundColor: stringToColor(remoteUser?.username) }}
             >
               {getInitials(remoteUser?.username)}
             </div>
             <div>
-              <p className="text-white text-sm font-medium">{remoteUser?.username || 'Unknown'}</p>
-              <p className="text-dark-300 text-xs">
+              <p className="text-white text-sm font-semibold">{remoteUser?.username || 'Unknown'}</p>
+              <p className="text-white/60 text-xs">
                 {isConnecting && 'Connecting...'}
                 {isConnected && formatDuration(callDuration)}
                 {callStatus === CALL_STATUS.FAILED && 'Connection failed'}
@@ -82,14 +74,14 @@ const VideoCall = () => {
             </div>
           </div>
 
-          {/* ICE state indicator */}
-          <div className="flex items-center gap-2">
+          {/* ICE state */}
+          <div className="flex items-center gap-1.5 bg-black/30 rounded-full px-2.5 py-1 backdrop-blur-sm">
             <span className={`w-2 h-2 rounded-full ${
               iceState === 'connected' || iceState === 'completed' ? 'bg-emerald-400' :
               iceState === 'checking' ? 'bg-yellow-400 animate-pulse' :
               iceState === 'failed' ? 'bg-red-400' : 'bg-dark-400'
             }`} />
-            <span className="text-xs text-dark-400 capitalize">{iceState}</span>
+            <span className="text-[10px] text-white/60 capitalize">{iceState}</span>
           </div>
         </div>
       </div>
@@ -103,21 +95,23 @@ const VideoCall = () => {
             ref={remoteVideoRef}
             autoPlay
             playsInline
-            className={`w-full h-full object-cover ${isLocalLarge ? 'absolute top-4 right-4 w-48 h-36 rounded-lg z-20 shadow-2xl cursor-pointer' : ''}`}
+            className={`w-full h-full object-cover ${isLocalLarge ? 'absolute top-16 right-3 w-28 h-40 md:w-48 md:h-36 rounded-2xl z-20 shadow-2xl cursor-pointer border-2 border-dark-700/50' : ''}`}
             onClick={() => isLocalLarge && setIsLocalLarge(false)}
           />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center">
             <div
-              className="w-32 h-32 rounded-full flex items-center justify-center text-4xl font-bold mb-4"
+              className="w-28 h-28 md:w-32 md:h-32 rounded-full flex items-center justify-center text-4xl font-bold mb-4 shadow-2xl"
               style={{ backgroundColor: stringToColor(remoteUser?.username) }}
             >
               {getInitials(remoteUser?.username)}
             </div>
             {isConnecting && (
               <div className="flex items-center gap-2 mt-2">
-                <div className="typing-dots">
-                  <span /><span /><span />
+                <div className="flex gap-1">
+                  <div className="typing-dot" />
+                  <div className="typing-dot" />
+                  <div className="typing-dot" />
                 </div>
                 <p className="text-dark-400 text-sm">Calling...</p>
               </div>
@@ -125,13 +119,13 @@ const VideoCall = () => {
           </div>
         )}
 
-        {/* Local video (picture-in-picture) */}
+        {/* Local video (picture-in-picture) — responsive sizing */}
         {localStream && (
           <div
-            className={`absolute shadow-2xl border border-dark-600 overflow-hidden cursor-pointer transition-all ${
+            className={`absolute shadow-2xl overflow-hidden cursor-pointer transition-all duration-300 ${
               isLocalLarge
-                ? 'inset-0 rounded-none'
-                : 'bottom-24 right-4 w-48 h-36 rounded-lg z-20'
+                ? 'inset-0 rounded-none z-10'
+                : 'bottom-28 md:bottom-24 right-3 w-24 h-36 xs:w-28 xs:h-40 md:w-48 md:h-36 rounded-2xl z-20 border-2 border-dark-700/50'
             }`}
             onClick={() => setIsLocalLarge(!isLocalLarge)}
           >
@@ -154,7 +148,7 @@ const VideoCall = () => {
         {/* Swap button */}
         <button
           onClick={() => setIsLocalLarge(!isLocalLarge)}
-          className="absolute top-20 right-4 z-30 w-8 h-8 rounded-full bg-dark-700/70 flex items-center justify-center text-white hover:bg-dark-600"
+          className="absolute top-16 md:top-20 right-3 z-30 w-9 h-9 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/60 transition-all"
           title="Swap views"
         >
           {isLocalLarge ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
@@ -162,7 +156,7 @@ const VideoCall = () => {
       </div>
 
       {/* Controls */}
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-6">
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-4 pb-6 md:p-6 safe-bottom">
         <CallControls />
       </div>
     </div>

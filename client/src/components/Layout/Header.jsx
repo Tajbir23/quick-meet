@@ -1,5 +1,5 @@
 import {
-  Phone, Video, MoreVertical, ArrowLeft, Users, Monitor
+  Phone, Video, ArrowLeft, Users
 } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useCallStore from '../../store/useCallStore';
@@ -14,7 +14,7 @@ const Header = () => {
 
   if (!activeChat) {
     return (
-      <div className="h-16 bg-dark-800 border-b border-dark-700 flex items-center justify-center">
+      <div className="h-16 bg-dark-800 border-b border-dark-700 hidden md:flex items-center justify-center">
         <p className="text-dark-500 text-sm">Select a conversation to start messaging</p>
       </div>
     );
@@ -57,58 +57,60 @@ const Header = () => {
   };
 
   return (
-    <div className="h-16 bg-dark-800 border-b border-dark-700 flex items-center justify-between px-4">
-      <div className="flex items-center gap-3">
-        {/* Back button for mobile */}
+    <div className="h-14 md:h-16 bg-dark-800 border-b border-dark-700 flex items-center justify-between px-2 md:px-4 safe-top">
+      <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
+        {/* Back button — mobile only */}
         <button
           onClick={clearActiveChat}
-          className="btn-icon text-dark-400 md:hidden"
+          className="btn-icon text-dark-300 md:hidden flex-shrink-0"
         >
-          <ArrowLeft size={20} />
+          <ArrowLeft size={22} />
         </button>
 
         {/* Avatar */}
-        <div className="relative">
+        <div className="relative flex-shrink-0">
           <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+            className="w-9 h-9 md:w-10 md:h-10 rounded-full flex items-center justify-center text-sm font-bold text-white"
             style={{ backgroundColor: stringToColor(activeChat.name) }}
           >
-            {isGroup ? <Users size={18} className="text-white" /> : getInitials(activeChat.name)}
+            {isGroup ? <Users size={16} className="text-white" /> : getInitials(activeChat.name)}
           </div>
           {!isGroup && (
-            <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-dark-800 ${isOnline ? 'bg-emerald-400' : 'bg-dark-500'}`} />
+            <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-dark-800 ${isOnline ? 'bg-emerald-400' : 'bg-dark-500'}`} />
           )}
         </div>
 
         {/* Name & status */}
-        <div>
-          <h3 className="text-sm font-medium text-white">{activeChat.name}</h3>
-          <p className="text-xs text-dark-400">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold text-white truncate">{activeChat.name}</h3>
+          <p className="text-xs text-dark-400 truncate">
             {isGroup
               ? `${activeChat.memberCount || 0} members`
-              : isOnline ? 'Online' : 'Offline'
+              : isOnline
+                ? <span className="text-emerald-400">Online</span>
+                : 'Offline'
             }
           </p>
         </div>
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5 md:gap-1 flex-shrink-0">
         <button
           onClick={handleAudioCall}
-          className="btn-icon text-dark-400 hover:text-primary-400"
+          className="btn-icon text-dark-400 hover:text-primary-400 hover:bg-primary-500/10"
           title="Audio call"
           disabled={inCall}
         >
-          <Phone size={18} />
+          <Phone size={20} />
         </button>
         <button
           onClick={handleVideoCall}
-          className="btn-icon text-dark-400 hover:text-primary-400"
+          className="btn-icon text-dark-400 hover:text-primary-400 hover:bg-primary-500/10"
           title="Video call"
           disabled={inCall}
         >
-          <Video size={18} />
+          <Video size={20} />
         </button>
       </div>
     </div>

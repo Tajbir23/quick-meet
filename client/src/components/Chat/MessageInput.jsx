@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from 'react';
-import { Send, Paperclip, Smile, X } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { Send, Paperclip, X } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import FileUpload from '../Common/FileUpload';
 import toast from 'react-hot-toast';
@@ -10,6 +10,14 @@ const MessageInput = () => {
   const { activeChat, sendMessage, emitTyping } = useChatStore();
   const typingTimeoutRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 120) + 'px';
+    }
+  }, [content]);
 
   const handleTyping = useCallback(() => {
     if (!activeChat) return;
@@ -72,13 +80,13 @@ const MessageInput = () => {
   if (!activeChat) return null;
 
   return (
-    <div className="border-t border-dark-700 bg-dark-800 p-4">
+    <div className="border-t border-dark-700 bg-dark-800 p-2.5 md:p-4 safe-bottom">
       {/* File upload area */}
       {showFileUpload && (
-        <div className="mb-3 p-3 bg-dark-700 rounded-lg relative">
+        <div className="mb-2.5 p-3 bg-dark-700 rounded-xl relative animate-slide-down">
           <button
             onClick={() => setShowFileUpload(false)}
-            className="absolute top-2 right-2 text-dark-400 hover:text-white"
+            className="absolute top-2 right-2 text-dark-400 hover:text-white p-1 rounded-full hover:bg-dark-600"
           >
             <X size={16} />
           </button>
@@ -91,7 +99,7 @@ const MessageInput = () => {
         {/* Attachment button */}
         <button
           onClick={() => setShowFileUpload(!showFileUpload)}
-          className={`btn-icon flex-shrink-0 mb-0.5 ${showFileUpload ? 'text-primary-400' : 'text-dark-400 hover:text-dark-200'}`}
+          className={`btn-icon flex-shrink-0 ${showFileUpload ? 'text-primary-400 bg-primary-500/10' : 'text-dark-400 hover:text-dark-200'}`}
         >
           <Paperclip size={20} />
         </button>
@@ -108,8 +116,8 @@ const MessageInput = () => {
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
             rows={1}
-            className="input-field resize-none py-2.5 pr-12 min-h-[42px] max-h-32"
-            style={{ height: 'auto', overflowY: content.split('\n').length > 3 ? 'auto' : 'hidden' }}
+            className="input-field resize-none py-2.5 md:py-2.5 pr-4 min-h-[44px] max-h-[120px] text-[16px] md:text-sm leading-relaxed"
+            style={{ overflow: content.split('\n').length > 3 ? 'auto' : 'hidden' }}
           />
         </div>
 
@@ -117,9 +125,13 @@ const MessageInput = () => {
         <button
           onClick={handleSend}
           disabled={!content.trim()}
-          className="btn-primary flex-shrink-0 p-2.5 rounded-full disabled:opacity-30"
+          className={`flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center transition-all ${
+            content.trim()
+              ? 'bg-primary-600 hover:bg-primary-700 active:bg-primary-800 text-white shadow-lg shadow-primary-500/20'
+              : 'bg-dark-700 text-dark-500'
+          }`}
         >
-          <Send size={18} />
+          <Send size={18} className={content.trim() ? 'translate-x-0.5' : ''} />
         </button>
       </div>
     </div>

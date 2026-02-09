@@ -36,31 +36,33 @@ const CallControls = ({ compact = false }) => {
     }
   };
 
-  const btnSize = compact ? 'w-10 h-10' : 'w-12 h-12';
-  const iconSize = compact ? 18 : 22;
+  const btnBase = compact
+    ? 'w-12 h-12 md:w-11 md:h-11'
+    : 'w-14 h-14 md:w-12 md:h-12';
+  const iconSize = compact ? 20 : 24;
 
   return (
-    <div className="relative flex items-center justify-center gap-3">
+    <div className="relative flex items-center justify-center gap-3 md:gap-3">
       {/* Device Selector (Settings gear) */}
       <button
         onClick={() => setShowDeviceSelector(!showDeviceSelector)}
-        className={`${btnSize} rounded-full flex items-center justify-center transition-all ${
+        className={`${btnBase} rounded-full flex items-center justify-center transition-all ${
           showDeviceSelector
-            ? 'bg-primary-500/20 text-primary-400'
-            : 'bg-dark-700 hover:bg-dark-600 text-white'
+            ? 'bg-primary-500/20 text-primary-400 ring-2 ring-primary-400/30'
+            : 'bg-dark-700/80 hover:bg-dark-600 text-white backdrop-blur-sm'
         }`}
         title="Device settings"
       >
-        <Settings size={iconSize} />
+        <Settings size={iconSize - 2} />
       </button>
 
       {/* Mic toggle */}
       <button
         onClick={toggleAudio}
-        className={`${btnSize} rounded-full flex items-center justify-center transition-all ${
+        className={`${btnBase} rounded-full flex items-center justify-center transition-all ${
           isAudioEnabled
-            ? 'bg-dark-700 hover:bg-dark-600 text-white'
-            : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+            ? 'bg-dark-700/80 hover:bg-dark-600 text-white backdrop-blur-sm'
+            : 'bg-red-500/20 text-red-400 ring-2 ring-red-400/30'
         }`}
         title={isAudioEnabled ? 'Mute' : 'Unmute'}
       >
@@ -71,10 +73,10 @@ const CallControls = ({ compact = false }) => {
       {callType === 'video' && (
         <button
           onClick={toggleVideo}
-          className={`${btnSize} rounded-full flex items-center justify-center transition-all ${
+          className={`${btnBase} rounded-full flex items-center justify-center transition-all ${
             isVideoEnabled
-              ? 'bg-dark-700 hover:bg-dark-600 text-white'
-              : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+              ? 'bg-dark-700/80 hover:bg-dark-600 text-white backdrop-blur-sm'
+              : 'bg-red-500/20 text-red-400 ring-2 ring-red-400/30'
           }`}
           title={isVideoEnabled ? 'Camera off' : 'Camera on'}
         >
@@ -82,13 +84,13 @@ const CallControls = ({ compact = false }) => {
         </button>
       )}
 
-      {/* Screen share */}
+      {/* Screen share - hidden on very small mobile */}
       <button
         onClick={handleScreenShare}
-        className={`${btnSize} rounded-full flex items-center justify-center transition-all ${
+        className={`${btnBase} rounded-full flex items-center justify-center transition-all hidden sm:flex ${
           isScreenSharing
-            ? 'bg-primary-500/20 text-primary-400 hover:bg-primary-500/30'
-            : 'bg-dark-700 hover:bg-dark-600 text-white'
+            ? 'bg-primary-500/20 text-primary-400 ring-2 ring-primary-400/30'
+            : 'bg-dark-700/80 hover:bg-dark-600 text-white backdrop-blur-sm'
         }`}
         title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
       >
@@ -98,7 +100,7 @@ const CallControls = ({ compact = false }) => {
       {/* End call */}
       <button
         onClick={endCall}
-        className={`${btnSize} rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-all`}
+        className={`${btnBase} rounded-full bg-red-500 hover:bg-red-600 active:bg-red-700 text-white flex items-center justify-center transition-all shadow-lg shadow-red-500/25`}
         title="End call"
       >
         <PhoneOff size={iconSize} />

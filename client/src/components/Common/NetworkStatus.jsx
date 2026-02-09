@@ -53,7 +53,7 @@ const NetworkStatus = () => {
   // Reconnected banner
   if (showReconnected && isOnline && socketConnected) {
     return (
-      <div className="fixed top-0 left-0 right-0 z-50 bg-emerald-500 text-white py-2 px-4 text-center text-sm flex items-center justify-center gap-2 animate-slide-in">
+      <div className="fixed top-0 left-0 right-0 z-50 bg-emerald-500 text-white py-2.5 px-4 text-center text-sm font-medium flex items-center justify-center gap-2 animate-slide-down safe-top shadow-lg">
         <Wifi size={16} />
         Connection restored
       </div>
@@ -62,7 +62,7 @@ const NetworkStatus = () => {
 
   // Offline / disconnected banner
   return (
-    <div className="fixed top-0 left-0 right-0 z-50 bg-red-500 text-white py-2 px-4 text-center text-sm flex items-center justify-center gap-2 animate-slide-in">
+    <div className="fixed top-0 left-0 right-0 z-50 bg-red-500 text-white py-2.5 px-4 text-center text-sm font-medium flex items-center justify-center gap-2 animate-slide-down safe-top shadow-lg">
       <WifiOff size={16} />
       {!isOnline
         ? 'You are offline. Check your internet connection.'

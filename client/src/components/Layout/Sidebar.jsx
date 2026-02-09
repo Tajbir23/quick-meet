@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  MessageCircle, Users, Search, LogOut, Plus, Settings, Hash
+  MessageCircle, Users, Search, LogOut, Plus, Hash, X
 } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import useChatStore from '../../store/useChatStore';
@@ -32,63 +32,78 @@ const Sidebar = () => {
   ];
 
   return (
-    <div className="w-80 bg-dark-800 border-r border-dark-700 flex flex-col h-full">
+    <div className="w-full bg-dark-800 border-r border-dark-700 flex flex-col h-full safe-top">
       {/* Header */}
       <div className="p-4 border-b border-dark-700">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <div
-              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+              className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold text-white shadow-lg"
               style={{ backgroundColor: stringToColor(user?.username) }}
             >
               {getInitials(user?.username)}
             </div>
             <div>
-              <p className="text-sm font-medium text-white">{user?.username}</p>
-              <p className="text-xs text-emerald-400 flex items-center gap-1">
-                <span className="w-2 h-2 bg-emerald-400 rounded-full" />
+              <p className="text-sm font-semibold text-white">{user?.username}</p>
+              <p className="text-xs text-emerald-400 flex items-center gap-1.5">
+                <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
                 Online
               </p>
             </div>
           </div>
-          <button onClick={handleLogout} className="btn-icon text-dark-400 hover:text-red-400">
+          <button
+            onClick={handleLogout}
+            className="btn-icon text-dark-400 hover:text-red-400 hover:bg-red-500/10"
+          >
             <LogOut size={18} />
           </button>
         </div>
 
         {/* Search */}
         <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-dark-400" />
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-dark-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search..."
-            className="input-field pl-9 py-2 text-sm"
+            placeholder="Search conversations..."
+            className="input-field pl-10 py-2.5 text-sm bg-dark-900/50"
           />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-dark-400 hover:text-dark-200 p-1"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-dark-700">
+      <div className="flex border-b border-dark-700 bg-dark-800/50">
         {tabs.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-3 text-xs font-medium transition-colors
+            className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-xs font-medium transition-all relative
               ${activeTab === tab.id
-                ? 'text-primary-400 border-b-2 border-primary-400'
-                : 'text-dark-400 hover:text-dark-200'
+                ? 'text-primary-400'
+                : 'text-dark-400 hover:text-dark-200 active:text-dark-100'
               }`}
           >
-            <tab.icon size={14} />
-            {tab.label}
+            <tab.icon size={16} />
+            <span className="hidden xs:inline">{tab.label}</span>
+            {/* Active indicator */}
+            {activeTab === tab.id && (
+              <div className="absolute bottom-0 left-1/4 right-1/4 h-0.5 bg-primary-400 rounded-full" />
+            )}
           </button>
         ))}
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overscroll-contain">
         {activeTab === 'chats' && (
           <ChatList searchQuery={searchQuery} />
         )}
@@ -98,7 +113,7 @@ const Sidebar = () => {
             <div className="p-3">
               <button
                 onClick={() => setShowCreateGroup(true)}
-                className="btn-primary w-full flex items-center justify-center gap-2 py-2 text-sm"
+                className="btn-primary w-full flex items-center justify-center gap-2 py-2.5 text-sm"
               >
                 <Plus size={16} />
                 Create Group

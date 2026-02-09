@@ -18,10 +18,13 @@ function App() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-dark-900 flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-dark-900 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-dark-300 text-sm">Loading Quick Meet...</p>
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center mx-auto mb-4 animate-pulse">
+            <span className="text-white text-2xl font-bold">Q</span>
+          </div>
+          <div className="w-8 h-8 border-3 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-dark-400 text-sm font-medium">Loading Quick Meet...</p>
         </div>
       </div>
     );

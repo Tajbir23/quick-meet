@@ -2,9 +2,6 @@
  * ============================================
  * IncomingCall — Modal overlay for incoming calls
  * ============================================
- * 
- * Shows caller info with accept/reject buttons.
- * Plays a ringtone oscillator for visibility.
  */
 
 import { useEffect, useRef } from 'react';
@@ -38,18 +35,22 @@ const IncomingCall = () => {
   const callerName = incomingCall.callerName || 'Unknown';
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center animate-fade-in">
-      <div className="bg-dark-800 rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4 animate-slide-up">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in safe-top safe-bottom">
+      <div className="bg-dark-800 rounded-3xl p-6 md:p-8 shadow-2xl max-w-sm w-full animate-bounce-in border border-dark-700/50">
         {/* Caller avatar */}
         <div className="flex flex-col items-center mb-8">
-          <div className="relative mb-4">
+          <div className="relative mb-5">
+            {/* Pulse rings */}
+            <div className="absolute inset-0 rounded-full bg-primary-400/10 animate-ping" style={{ animationDuration: '2s' }} />
+            <div className="absolute -inset-3 rounded-full border-2 border-primary-400/10 animate-ping" style={{ animationDuration: '3s' }} />
+            
             <div
-              className="w-24 h-24 rounded-full flex items-center justify-center text-2xl font-bold animate-pulse"
+              className="relative w-24 h-24 md:w-28 md:h-28 rounded-full flex items-center justify-center text-3xl md:text-4xl font-bold text-white shadow-2xl"
               style={{ backgroundColor: stringToColor(callerName) }}
             >
               {getInitials(callerName)}
             </div>
-            <div className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-dark-700 flex items-center justify-center">
+            <div className="absolute -bottom-1 -right-1 w-9 h-9 rounded-full bg-dark-700 border-2 border-dark-800 flex items-center justify-center shadow-lg">
               {isVideoCall ? (
                 <Video size={16} className="text-primary-400" />
               ) : (
@@ -58,34 +59,34 @@ const IncomingCall = () => {
             </div>
           </div>
 
-          <h3 className="text-xl font-semibold text-white mb-1">{callerName}</h3>
+          <h3 className="text-xl md:text-2xl font-bold text-white mb-1">{callerName}</h3>
           <p className="text-dark-400 text-sm">
-            Incoming {isVideoCall ? 'video' : 'audio'} call...
+            Incoming {isVideoCall ? 'video' : 'audio'} call
           </p>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center justify-center gap-6">
+        {/* Actions — large touch targets */}
+        <div className="flex items-center justify-center gap-8 md:gap-10">
           {/* Reject */}
           <button
             onClick={rejectCall}
-            className="flex flex-col items-center gap-2 group"
+            className="flex flex-col items-center gap-2.5 group"
           >
-            <div className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition-all group-hover:scale-110">
-              <PhoneOff size={24} className="text-white" />
+            <div className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-600 active:bg-red-700 flex items-center justify-center transition-all group-active:scale-90 shadow-lg shadow-red-500/30">
+              <PhoneOff size={26} className="text-white" />
             </div>
-            <span className="text-xs text-dark-400">Decline</span>
+            <span className="text-xs text-dark-400 font-medium">Decline</span>
           </button>
 
           {/* Accept */}
           <button
             onClick={acceptCall}
-            className="flex flex-col items-center gap-2 group"
+            className="flex flex-col items-center gap-2.5 group"
           >
-            <div className="w-14 h-14 rounded-full bg-emerald-500 hover:bg-emerald-600 flex items-center justify-center transition-all group-hover:scale-110">
-              <Phone size={24} className="text-white" />
+            <div className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 flex items-center justify-center transition-all group-active:scale-90 shadow-lg shadow-emerald-500/30 animate-pulse">
+              <Phone size={26} className="text-white" />
             </div>
-            <span className="text-xs text-dark-400">Accept</span>
+            <span className="text-xs text-dark-400 font-medium">Accept</span>
           </button>
         </div>
       </div>

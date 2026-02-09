@@ -34,7 +34,7 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false }) => {
   const hasVideo = stream?.getVideoTracks().some(t => t.enabled);
 
   return (
-    <div className="relative bg-dark-800 rounded-lg overflow-hidden h-full w-full">
+    <div className="relative bg-dark-800 rounded-2xl overflow-hidden h-full w-full">
       {stream && hasVideo ? (
         <video
           ref={videoRef}
@@ -44,9 +44,9 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false }) => {
           className="w-full h-full object-cover"
         />
       ) : (
-        <div className="w-full h-full flex items-center justify-center">
+        <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-dark-800 to-dark-900">
           <div
-            className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold"
+            className="w-14 h-14 md:w-16 md:h-16 rounded-full flex items-center justify-center text-lg md:text-xl font-bold text-white"
             style={{ backgroundColor: stringToColor(name) }}
           >
             {getInitials(name)}
@@ -55,7 +55,7 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false }) => {
       )}
 
       {/* Name tag */}
-      <div className="absolute bottom-2 left-2 bg-black/50 px-2 py-1 rounded text-xs text-white flex items-center gap-1.5">
+      <div className="absolute bottom-2 left-2 bg-black/40 backdrop-blur-sm px-2.5 py-1 rounded-full text-xs text-white flex items-center gap-1.5">
         <span>{isLocal ? 'You' : name}</span>
         {isMuted && (
           <span className="text-red-400 text-[10px]">🔇</span>
@@ -83,21 +83,21 @@ const GroupCall = () => {
 
   const gridClass = useMemo(() => {
     if (totalParticipants <= 1) return 'grid-cols-1';
-    if (totalParticipants <= 2) return 'grid-cols-2';
+    if (totalParticipants <= 2) return 'grid-cols-1 md:grid-cols-2';
     if (totalParticipants <= 4) return 'grid-cols-2 grid-rows-2';
-    return 'grid-cols-3 grid-rows-2'; // 5-6 participants
+    return 'grid-cols-2 md:grid-cols-3 grid-rows-2'; // 5-6 participants
   }, [totalParticipants]);
 
   return (
     <div className="fixed inset-0 bg-dark-900 z-40 flex flex-col">
       {/* Header */}
-      <div className="bg-dark-800/80 backdrop-blur-sm p-4 flex items-center justify-between z-10">
+      <div className="bg-dark-800/80 backdrop-blur-sm px-4 py-3 flex items-center justify-between z-10 safe-top">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-primary-500/20 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-full bg-primary-500/20 flex items-center justify-center">
             <Users size={16} className="text-primary-400" />
           </div>
           <div>
-            <p className="text-white text-sm font-medium">
+            <p className="text-white text-sm font-semibold">
               Group Call
             </p>
             <p className="text-dark-400 text-xs">
@@ -109,15 +109,15 @@ const GroupCall = () => {
         {/* Quick end button */}
         <button
           onClick={endCall}
-          className="px-4 py-1.5 rounded-full bg-red-500 hover:bg-red-600 text-white text-sm flex items-center gap-2 transition-colors"
+          className="px-4 py-2 rounded-full bg-red-500 hover:bg-red-600 active:bg-red-700 text-white text-sm font-medium flex items-center gap-2 transition-colors shadow-lg shadow-red-500/20"
         >
           <PhoneOff size={14} />
-          Leave
+          <span className="hidden xs:inline">Leave</span>
         </button>
       </div>
 
       {/* Video grid */}
-      <div className={`flex-1 p-2 grid ${gridClass} gap-2`}>
+      <div className={`flex-1 p-1.5 md:p-2 grid ${gridClass} gap-1.5 md:gap-2`}>
         {/* Local video (self) */}
         <VideoTile
           stream={localStream}
@@ -137,17 +137,17 @@ const GroupCall = () => {
 
         {/* Empty slots if less than 2 */}
         {totalParticipants === 1 && (
-          <div className="bg-dark-800 rounded-lg flex items-center justify-center">
+          <div className="bg-dark-800 rounded-2xl flex items-center justify-center">
             <div className="text-center">
-              <Users size={32} className="mx-auto text-dark-600 mb-2" />
-              <p className="text-dark-500 text-sm">Waiting for others to join...</p>
+              <Users size={28} className="mx-auto text-dark-600 mb-2" />
+              <p className="text-dark-500 text-sm">Waiting for others...</p>
             </div>
           </div>
         )}
       </div>
 
       {/* Controls */}
-      <div className="bg-dark-800/80 backdrop-blur-sm p-4">
+      <div className="bg-dark-800/80 backdrop-blur-sm p-4 safe-bottom">
         <CallControls compact />
       </div>
     </div>

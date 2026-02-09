@@ -140,15 +140,17 @@ const FileUpload = ({ onUploaded }) => {
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
           onClick={() => inputRef.current?.click()}
-          className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all ${
+          className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all active:scale-[0.98] ${
             isDragging
               ? 'border-primary-400 bg-primary-500/10'
               : 'border-dark-600 hover:border-dark-500 hover:bg-dark-700/50'
           }`}
         >
-          <Upload size={24} className={`mx-auto mb-2 ${isDragging ? 'text-primary-400' : 'text-dark-500'}`} />
-          <p className="text-sm text-dark-400">
-            {isDragging ? 'Drop file here' : 'Click or drag file to upload'}
+          <div className={`w-10 h-10 rounded-full mx-auto mb-3 flex items-center justify-center ${isDragging ? 'bg-primary-500/20' : 'bg-dark-700'}`}>
+            <Upload size={20} className={isDragging ? 'text-primary-400' : 'text-dark-500'} />
+          </div>
+          <p className="text-sm text-dark-400 font-medium">
+            {isDragging ? 'Drop file here' : 'Tap or drag file to upload'}
           </p>
           <p className="text-xs text-dark-600 mt-1">
             Max {formatFileSize(MAX_FILE_SIZE)}
@@ -157,25 +159,25 @@ const FileUpload = ({ onUploaded }) => {
       ) : (
         /* File preview */
         <div className="space-y-3">
-          <div className="flex items-center gap-3 p-3 bg-dark-900 rounded-lg">
+          <div className="flex items-center gap-3 p-3 bg-dark-900 rounded-xl">
             {/* Preview / icon */}
             {preview ? (
-              <img src={preview} alt="Preview" className="w-12 h-12 rounded object-cover" />
+              <img src={preview} alt="Preview" className="w-12 h-12 rounded-lg object-cover" />
             ) : (
-              <div className="w-12 h-12 bg-dark-700 rounded flex items-center justify-center">
+              <div className="w-12 h-12 bg-dark-700 rounded-lg flex items-center justify-center">
                 {getFileIcon(file.type)}
               </div>
             )}
 
             {/* File info */}
             <div className="flex-1 min-w-0">
-              <p className="text-sm text-white truncate">{file.name}</p>
+              <p className="text-sm text-white truncate font-medium">{file.name}</p>
               <p className="text-xs text-dark-500">{formatFileSize(file.size)}</p>
             </div>
 
             {/* Remove */}
             {!isUploading && (
-              <button onClick={clearFile} className="text-dark-400 hover:text-red-400">
+              <button onClick={clearFile} className="btn-icon w-8 h-8 text-dark-400 hover:text-red-400">
                 <X size={16} />
               </button>
             )}
@@ -183,9 +185,9 @@ const FileUpload = ({ onUploaded }) => {
 
           {/* Progress bar */}
           {isUploading && (
-            <div className="w-full bg-dark-700 rounded-full h-1.5">
+            <div className="w-full bg-dark-700 rounded-full h-2">
               <div
-                className="bg-primary-500 h-1.5 rounded-full transition-all"
+                className="bg-primary-500 h-2 rounded-full transition-all"
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -195,9 +197,9 @@ const FileUpload = ({ onUploaded }) => {
           {!isUploading && (
             <button
               onClick={handleUpload}
-              className="btn-primary w-full py-2 text-sm flex items-center justify-center gap-2"
+              className="btn-primary w-full py-3 text-sm font-medium flex items-center justify-center gap-2"
             >
-              <Upload size={14} />
+              <Upload size={16} />
               Send File
             </button>
           )}

@@ -78,8 +78,8 @@ const GroupChat = ({ groupId, onClose }) => {
 
   if (isLoading) {
     return (
-      <div className="w-72 bg-dark-800 border-l border-dark-700 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+      <div className="fixed inset-0 md:relative md:inset-auto md:w-72 bg-dark-800 md:border-l border-dark-700 flex items-center justify-center z-30">
+        <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -87,62 +87,62 @@ const GroupChat = ({ groupId, onClose }) => {
   if (!group) return null;
 
   return (
-    <div className="w-72 bg-dark-800 border-l border-dark-700 flex flex-col h-full">
+    <div className="fixed inset-0 md:relative md:inset-auto md:w-72 bg-dark-800 md:border-l border-dark-700 flex flex-col h-full z-30">
       {/* Header */}
-      <div className="p-4 border-b border-dark-700">
+      <div className="p-4 border-b border-dark-700 safe-top">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">
             <Hash size={16} className="text-primary-400" />
             Group Info
           </h3>
-          <button onClick={onClose} className="btn-icon text-dark-400 hover:text-white">
-            <X size={16} />
+          <button onClick={onClose} className="btn-icon w-10 h-10 text-dark-400 hover:text-white">
+            <X size={18} />
           </button>
         </div>
-        <p className="text-lg font-medium text-white">{group.name}</p>
+        <p className="text-lg font-semibold text-white">{group.name}</p>
         {group.description && (
           <p className="text-xs text-dark-400 mt-1">{group.description}</p>
         )}
       </div>
 
       {/* Members list */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overscroll-contain">
         <div className="p-3 flex items-center justify-between">
-          <p className="text-xs text-dark-400 uppercase font-medium">
+          <p className="text-xs text-dark-400 uppercase font-medium tracking-wide">
             Members ({group.members?.length || 0})
           </p>
           {isAdmin && (
             <button
               onClick={() => setShowAddMember(!showAddMember)}
-              className="text-primary-400 hover:text-primary-300"
+              className="btn-icon w-8 h-8 text-primary-400 hover:text-primary-300"
               title="Add member"
             >
-              <UserPlus size={14} />
+              <UserPlus size={16} />
             </button>
           )}
         </div>
 
         {/* Add member panel */}
         {showAddMember && isAdmin && (
-          <div className="px-3 pb-3">
-            <div className="bg-dark-900 rounded-lg max-h-32 overflow-y-auto">
+          <div className="px-3 pb-3 animate-slide-down">
+            <div className="bg-dark-900 rounded-xl max-h-40 overflow-y-auto">
               {nonMembers.length === 0 ? (
-                <p className="text-dark-500 text-xs p-2 text-center">All users are members</p>
+                <p className="text-dark-500 text-xs p-3 text-center">All users are members</p>
               ) : (
                 nonMembers.map(u => (
                   <button
                     key={u._id}
                     onClick={() => handleAddMember(u._id)}
-                    className="w-full flex items-center gap-2 p-2 hover:bg-dark-800 text-left text-sm"
+                    className="w-full flex items-center gap-3 p-3 hover:bg-dark-800 active:bg-dark-700 text-left text-sm transition-colors"
                   >
                     <div
-                      className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold"
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white"
                       style={{ backgroundColor: stringToColor(u.username) }}
                     >
                       {getInitials(u.username)}
                     </div>
-                    <span className="text-dark-300 truncate">{u.username}</span>
-                    <UserPlus size={12} className="ml-auto text-primary-400" />
+                    <span className="text-dark-300 truncate flex-1">{u.username}</span>
+                    <UserPlus size={14} className="ml-auto text-primary-400" />
                   </button>
                 ))
               )}
@@ -151,7 +151,7 @@ const GroupChat = ({ groupId, onClose }) => {
         )}
 
         {/* Member list */}
-        <div className="divide-y divide-dark-700/30">
+        <div>
           {(group.members || []).map(member => {
             const memberId = member._id || member;
             const memberName = member.username || 'Unknown';
@@ -159,15 +159,15 @@ const GroupChat = ({ groupId, onClose }) => {
             const memberOnline = isOnline(memberId);
 
             return (
-              <div key={memberId} className="flex items-center gap-3 px-3 py-2.5">
+              <div key={memberId} className="flex items-center gap-3 px-3 py-3">
                 <div className="relative">
                   <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white"
                     style={{ backgroundColor: stringToColor(memberName) }}
                   >
                     {getInitials(memberName)}
                   </div>
-                  <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-dark-800 ${
+                  <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-dark-800 ${
                     memberOnline ? 'bg-emerald-400' : 'bg-dark-500'
                   }`} />
                 </div>
@@ -191,12 +191,12 @@ const GroupChat = ({ groupId, onClose }) => {
       </div>
 
       {/* Leave group */}
-      <div className="p-3 border-t border-dark-700">
+      <div className="p-3 border-t border-dark-700 safe-bottom">
         <button
           onClick={handleLeave}
-          className="w-full py-2 rounded-lg text-sm text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center gap-2"
+          className="w-full py-3 rounded-xl text-sm font-medium text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition-colors flex items-center justify-center gap-2"
         >
-          <LogOut size={14} />
+          <LogOut size={16} />
           Leave Group
         </button>
       </div>
