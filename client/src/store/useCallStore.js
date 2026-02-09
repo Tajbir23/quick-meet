@@ -102,45 +102,44 @@ const useCallStore = create((set, get) => ({
       const socket = getSocket();
       if (!socket) throw new Error('Socket not connected');
 
+      // Save call data before clearing (in case of race conditions)
+      const { callerId, callerName, offer, callType } = incomingCall;
+
+      // Set state to CALLING (not CONNECTED yet — wait for ICE to actually connect)
+      // This shows the call overlay with "Connecting..." status
       set({
-        callStatus: CALL_STATUS.CONNECTED,
-        callType: incomingCall.callType,
+        callStatus: CALL_STATUS.CALLING,
+        callType,
         remoteUser: {
-          userId: incomingCall.callerId,
-          username: incomingCall.callerName,
+          userId: callerId,
+          username: callerName,
         },
         isIncoming: true,
         isAudioEnabled: true,
-        isVideoEnabled: incomingCall.callType === 'video',
+        isVideoEnabled: callType === 'video',
+        incomingCall: null, // Clear incoming call data immediately
       });
 
       // Get local media
       const constraints = {
         audio: true,
-        video: incomingCall.callType === 'video',
+        video: callType === 'video',
       };
       const localStream = await webrtcService.getLocalStream(constraints);
       set({ localStream });
 
-      // Set up callbacks
-      get().setupWebRTCCallbacks(incomingCall.callerId);
+      // Set up callbacks BEFORE handling offer
+      get().setupWebRTCCallbacks(callerId);
 
       // Handle the offer and create answer
-      const answer = await webrtcService.handleOffer(
-        incomingCall.callerId,
-        incomingCall.offer
-      );
+      const answer = await webrtcService.handleOffer(callerId, offer);
 
       socket.emit('call:answer', {
-        callerId: incomingCall.callerId,
+        callerId,
         answer,
       });
 
-      // Clear incoming call
-      set({ incomingCall: null });
-
-      // Start call timer
-      get().startCallTimer();
+      // Timer will start when ICE state changes to 'connected'
     } catch (error) {
       console.error('Failed to accept call:', error);
       get().endCall();
@@ -486,6 +485,7 @@ const useCallStore = create((set, get) => ({
    */
   setupWebRTCCallbacks: (peerId) => {
     webrtcService.onRemoteStream = (remotePeerId, stream) => {
+      console.log('📥 Remote stream received from:', remotePeerId);
       if (get().isGroupCall) {
         set((state) => ({
           remoteStreams: {
@@ -529,6 +529,7 @@ const useCallStore = create((set, get) => ({
     };
 
     webrtcService.onIceStateChange = (remotePeerId, state) => {
+      console.log(`🧊 ICE state callback: ${state} for ${remotePeerId}`);
       set({ iceState: state });
 
       if (state === 'connected' || state === 'completed') {
@@ -537,8 +538,80 @@ const useCallStore = create((set, get) => ({
           get().startCallTimer();
         }
       }
+
       if (state === 'failed') {
-        set({ callStatus: CALL_STATUS.FAILED });
+        console.log('⚠️ ICE failed — attempting ICE restart...');
+        set({ callStatus: CALL_STATUS.RECONNECTING });
+
+        // Attempt ICE restart
+        webrtcService.restartIce(remotePeerId)
+          .then((offer) => {
+            if (offer) {
+              const socket = getSocket();
+              if (socket) {
+                if (get().isGroupCall) {
+                  socket.emit('group-call:offer', {
+                    groupId: get().groupId,
+                    targetUserId: remotePeerId,
+                    offer,
+                  });
+                } else {
+                  socket.emit('call:renegotiate', {
+                    targetUserId: remotePeerId,
+                    offer,
+                  });
+                }
+              }
+            }
+          })
+          .catch((err) => {
+            console.error('ICE restart failed:', err);
+            set({ callStatus: CALL_STATUS.FAILED });
+          });
+      }
+
+      if (state === 'disconnected') {
+        // Disconnected can recover — wait 5 seconds
+        set({ callStatus: CALL_STATUS.RECONNECTING });
+        setTimeout(() => {
+          const currentIce = get().iceState;
+          if (currentIce === 'disconnected') {
+            console.log('⚠️ Still disconnected after 5s, attempting ICE restart');
+            webrtcService.restartIce(remotePeerId).catch(() => {});
+          }
+        }, 5000);
+      }
+    };
+
+    // Handle renegotiation (for screen share adding video to audio call, etc.)
+    webrtcService.onNegotiationNeeded = async (remotePeerId) => {
+      const pc = webrtcService.peerConnections.get(remotePeerId);
+      // Only renegotiate when connection is stable (not during initial setup)
+      if (!pc || pc.signalingState !== 'stable') {
+        console.log('Skipping renegotiation — not in stable state');
+        return;
+      }
+
+      try {
+        console.log('🔄 Renegotiation needed, creating new offer');
+        const offer = await webrtcService.createOffer(remotePeerId);
+        const socket = getSocket();
+        if (socket) {
+          if (get().isGroupCall) {
+            socket.emit('group-call:offer', {
+              groupId: get().groupId,
+              targetUserId: remotePeerId,
+              offer,
+            });
+          } else {
+            socket.emit('call:renegotiate', {
+              targetUserId: remotePeerId,
+              offer,
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Renegotiation failed:', err);
       }
     };
   },

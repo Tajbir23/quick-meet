@@ -469,14 +469,25 @@ class WebRTCService {
     }
 
     try {
+      // Accept answer in both initial and renegotiation scenarios
       if (pc.signalingState === 'have-local-offer') {
         await pc.setRemoteDescription(new RTCSessionDescription(answer));
         console.log(`📥 Remote description (answer) set for ${peerId}`);
 
         // Process queued ICE candidates
         await this.processIceCandidateQueue(peerId);
+      } else if (pc.signalingState === 'stable') {
+        // Answer arrived after we already moved to stable (race condition)
+        console.warn(`Answer arrived but already stable for ${peerId}, ignoring`);
       } else {
-        console.warn(`Unexpected signaling state: ${pc.signalingState} for ${peerId}`);
+        console.warn(`Unexpected signaling state: ${pc.signalingState} for ${peerId}, queueing`);
+        // Try anyway — some browsers are lenient
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+          await this.processIceCandidateQueue(peerId);
+        } catch (innerErr) {
+          console.error('Failed to set remote description in unexpected state:', innerErr);
+        }
       }
     } catch (error) {
       console.error(`Failed to handle answer from ${peerId}:`, error);
@@ -592,6 +603,12 @@ class WebRTCService {
       if (sender) {
         await sender.replaceTrack(newTrack);
         console.log(`🔄 Replaced video track for ${peerId}`);
+      } else {
+        // No video sender exists (audio-only call) — add the track
+        // This triggers renegotiation via onnegotiationneeded
+        const stream = this.localStream || new MediaStream();
+        pc.addTrack(newTrack, stream);
+        console.log(`➕ Added video track to audio-only connection with ${peerId}`);
       }
     }
   }

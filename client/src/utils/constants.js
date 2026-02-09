@@ -11,17 +11,39 @@ export const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'https://localhost:
 // API base URL
 export const API_URL = `${SERVER_URL}/api`;
 
-// WebRTC STUN server configuration
-// WHY Google STUN: Free, reliable, globally distributed
-// STUN only discovers public IP — does NOT relay media (that's TURN)
-// Without TURN: Symmetric NAT ↔ Symmetric NAT connections WILL fail
+// WebRTC ICE Server Configuration
+// ─────────────────────────────────────────
+// STUN = discover your public IP (free, Google)
+// TURN = relay media when direct P2P fails (REQUIRED for production!)
+//
+// WITHOUT TURN: calls WILL fail when both users are behind NATs.
+// Configure TURN via .env:
+//   VITE_TURN_URL=turn:your-server.com:3478
+//   VITE_TURN_USERNAME=user
+//   VITE_TURN_CREDENTIAL=pass
+//
+// Recommended: Install coturn on your VPS (see README)
 export const ICE_SERVERS = {
   iceServers: [
+    // STUN servers (free, for NAT discovery)
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
-  ],
+    // TURN server (for relaying media when P2P fails)
+    // Configured via environment variables
+    ...(import.meta.env.VITE_TURN_URL ? [{
+      urls: import.meta.env.VITE_TURN_URL,
+      username: import.meta.env.VITE_TURN_USERNAME || '',
+      credential: import.meta.env.VITE_TURN_CREDENTIAL || '',
+    }] : []),
+    // Fallback TURN — also add UDP variant if TCP is specified
+    ...(import.meta.env.VITE_TURN_URL ? [{
+      urls: import.meta.env.VITE_TURN_URL.replace('turn:', 'turns:').replace(':3478', ':5349'),
+      username: import.meta.env.VITE_TURN_USERNAME || '',
+      credential: import.meta.env.VITE_TURN_CREDENTIAL || '',
+    }] : []),
+  ].filter(s => s.urls), // Remove any empty entries
   iceCandidatePoolSize: 10,
 };
 

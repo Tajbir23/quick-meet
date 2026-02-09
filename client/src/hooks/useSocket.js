@@ -91,14 +91,23 @@ const useSocket = () => {
     });
 
     socket.on('call:answer', async ({ answererId, answer }) => {
-      console.log(`📞 Call answered by ${answererId}`);
-      await webrtcService.handleAnswer(answererId, answer);
-      useCallStore.setState({ callStatus: 'connected' });
-      useCallStore.getState().startCallTimer();
+      try {
+        console.log(`📞 Call answered by ${answererId}`);
+        await webrtcService.handleAnswer(answererId, answer);
+        // Don't set CONNECTED here — let ICE state change handle it
+        // ICE will transition to 'connected' which sets CALL_STATUS.CONNECTED
+        console.log('📞 Answer processed, waiting for ICE connection...');
+      } catch (err) {
+        console.error('Failed to handle call answer:', err);
+      }
     });
 
     socket.on('call:ice-candidate', async ({ senderId, candidate }) => {
-      await webrtcService.handleIceCandidate(senderId, candidate);
+      try {
+        await webrtcService.handleIceCandidate(senderId, candidate);
+      } catch (err) {
+        console.error('Failed to handle ICE candidate:', err);
+      }
     });
 
     socket.on('call:rejected', ({ rejecterName, reason }) => {
@@ -117,21 +126,29 @@ const useSocket = () => {
     });
 
     socket.on('call:media-toggled', ({ userId, kind, enabled }) => {
-      // Update UI to show remote user muted/unmuted
       console.log(`Remote ${kind} ${enabled ? 'enabled' : 'disabled'} by ${userId}`);
     });
 
-    // Renegotiation (for screen share etc.)
+    // Renegotiation (for screen share, ICE restart, etc.)
     socket.on('call:renegotiate', async ({ userId, offer }) => {
-      const answer = await webrtcService.handleOffer(userId, offer);
-      socket.emit('call:renegotiate-answer', {
-        targetUserId: userId,
-        answer,
-      });
+      try {
+        console.log('🔄 Renegotiation offer received from:', userId);
+        const answer = await webrtcService.handleOffer(userId, offer);
+        socket.emit('call:renegotiate-answer', {
+          targetUserId: userId,
+          answer,
+        });
+      } catch (err) {
+        console.error('Failed to handle renegotiation:', err);
+      }
     });
 
     socket.on('call:renegotiate-answer', async ({ userId, answer }) => {
-      await webrtcService.handleAnswer(userId, answer);
+      try {
+        await webrtcService.handleAnswer(userId, answer);
+      } catch (err) {
+        console.error('Failed to handle renegotiation answer:', err);
+      }
     });
 
     // ============================================
@@ -139,13 +156,21 @@ const useSocket = () => {
     // ============================================
 
     socket.on('group-call:existing-peers', async ({ groupId, peers }) => {
-      console.log(`📞 Group call: ${peers.length} existing peers`);
-      await useCallStore.getState().handleExistingPeers(peers);
+      try {
+        console.log(`📞 Group call: ${peers.length} existing peers`);
+        await useCallStore.getState().handleExistingPeers(peers);
+      } catch (err) {
+        console.error('Failed to handle existing peers:', err);
+      }
     });
 
     socket.on('group-call:peer-joined', async ({ userId, username }) => {
-      console.log(`📞 Group call: ${username} joined`);
-      await useCallStore.getState().handleGroupPeerJoined(userId, username);
+      try {
+        console.log(`📞 Group call: ${username} joined`);
+        await useCallStore.getState().handleGroupPeerJoined(userId, username);
+      } catch (err) {
+        console.error('Failed to handle peer joined:', err);
+      }
     });
 
     socket.on('group-call:peer-left', ({ userId, username }) => {
@@ -154,22 +179,35 @@ const useSocket = () => {
     });
 
     socket.on('group-call:offer', async ({ groupId, callerId, offer }) => {
-      const answer = await webrtcService.handleOffer(callerId, offer);
-      useCallStore.getState().setupWebRTCCallbacks(callerId);
+      try {
+        // Set up callbacks BEFORE handling offer
+        useCallStore.getState().setupWebRTCCallbacks(callerId);
+        const answer = await webrtcService.handleOffer(callerId, offer);
 
-      socket.emit('group-call:answer', {
-        groupId,
-        targetUserId: callerId,
-        answer,
-      });
+        socket.emit('group-call:answer', {
+          groupId,
+          targetUserId: callerId,
+          answer,
+        });
+      } catch (err) {
+        console.error('Failed to handle group call offer:', err);
+      }
     });
 
     socket.on('group-call:answer', async ({ answererId, answer }) => {
-      await webrtcService.handleAnswer(answererId, answer);
+      try {
+        await webrtcService.handleAnswer(answererId, answer);
+      } catch (err) {
+        console.error('Failed to handle group call answer:', err);
+      }
     });
 
     socket.on('group-call:ice-candidate', async ({ senderId, candidate }) => {
-      await webrtcService.handleIceCandidate(senderId, candidate);
+      try {
+        await webrtcService.handleIceCandidate(senderId, candidate);
+      } catch (err) {
+        console.error('Failed to handle group ICE candidate:', err);
+      }
     });
 
     socket.on('group-call:error', ({ message }) => {

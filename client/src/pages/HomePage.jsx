@@ -37,10 +37,11 @@ const HomePage = () => {
     });
   }, []);
 
-  // Show call overlay if in a call
+  // Show call overlay if in a call (including FAILED so user sees the error state)
   const isInCall = callStatus === CALL_STATUS.CONNECTED ||
                    callStatus === CALL_STATUS.CALLING ||
-                   callStatus === CALL_STATUS.RECONNECTING;
+                   callStatus === CALL_STATUS.RECONNECTING ||
+                   callStatus === CALL_STATUS.FAILED;
 
   return (
     <>
