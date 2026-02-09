@@ -324,29 +324,34 @@ class WebRTCService {
     pc.ontrack = (event) => {
       console.log(`📥 Remote track from ${peerId}:`, event.track.kind);
 
-      const [remoteStream] = event.streams;
-      if (remoteStream) {
-        this.remoteStreams.set(peerId, remoteStream);
-
-        if (this.onRemoteStream) {
-          this.onRemoteStream(peerId, remoteStream);
-        }
-
-        // Track mute/unmute events
-        event.track.onmute = () => {
-          console.log(`🔇 Remote ${event.track.kind} muted from ${peerId}`);
-          if (this.onTrackMuted) {
-            this.onTrackMuted(peerId, event.track.kind, true);
-          }
-        };
-
-        event.track.onunmute = () => {
-          console.log(`🔊 Remote ${event.track.kind} unmuted from ${peerId}`);
-          if (this.onTrackMuted) {
-            this.onTrackMuted(peerId, event.track.kind, false);
-          }
-        };
+      // Get stream from event, or use/create a shared remote stream
+      // (video transceiver with null track may not have stream association)
+      let remoteStream = event.streams[0];
+      if (!remoteStream) {
+        remoteStream = this.remoteStreams.get(peerId) || new MediaStream();
+        remoteStream.addTrack(event.track);
       }
+
+      this.remoteStreams.set(peerId, remoteStream);
+
+      if (this.onRemoteStream) {
+        this.onRemoteStream(peerId, remoteStream);
+      }
+
+      // Track mute/unmute events
+      event.track.onmute = () => {
+        console.log(`🔇 Remote ${event.track.kind} muted from ${peerId}`);
+        if (this.onTrackMuted) {
+          this.onTrackMuted(peerId, event.track.kind, true);
+        }
+      };
+
+      event.track.onunmute = () => {
+        console.log(`🔊 Remote ${event.track.kind} unmuted from ${peerId}`);
+        if (this.onTrackMuted) {
+          this.onTrackMuted(peerId, event.track.kind, false);
+        }
+      };
     };
 
     /**
@@ -354,6 +359,11 @@ class WebRTCService {
      * WHY: Fires when tracks are added/removed, requiring new offer/answer
      */
     pc.onnegotiationneeded = () => {
+      // Skip during initial setup — only renegotiate after first offer/answer
+      if (!pc.currentLocalDescription) {
+        console.log(`⏭️ Skipping negotiation — initial setup for ${peerId}`);
+        return;
+      }
       console.log(`🔄 Negotiation needed for ${peerId}`);
       if (this.onNegotiationNeeded) {
         this.onNegotiationNeeded(peerId);
@@ -368,18 +378,16 @@ class WebRTCService {
       this.addLocalTracks(peerId);
     }
 
-    // CRITICAL: Always ensure a video transceiver exists.
-    // Without this, audio-only calls have SDP with only m=audio.
-    // When screen share later adds video, the m-line order changes
-    // → "order of m-lines in subsequent offer doesn't match" error.
-    // By adding a recvonly video transceiver upfront, SDP always has
-    // both m=audio and m=video from the very first offer.
+    // CRITICAL: Always ensure a video transceiver exists with sendrecv.
+    // This guarantees SDP always has both m=audio and m=video from the start.
+    // Using sendrecv (not recvonly) means screen share only needs replaceTrack
+    // — NO direction change → NO onnegotiationneeded → NO m-line reorder.
     const hasVideoTransceiver = pc.getTransceivers().some(
       t => t.receiver?.track?.kind === 'video'
     );
     if (!hasVideoTransceiver) {
-      pc.addTransceiver('video', { direction: 'recvonly' });
-      console.log(`📺 Added recvonly video transceiver for ${peerId} (SDP m-line stability)`);
+      pc.addTransceiver('video', { direction: 'sendrecv' });
+      console.log(`📺 Added sendrecv video transceiver for ${peerId}`);
     }
 
     return pc;
@@ -424,10 +432,10 @@ class WebRTCService {
     if (!pc) throw new Error(`No peer connection for ${peerId}`);
 
     try {
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      });
+      // Don't use offerToReceiveAudio/Video (deprecated) —
+      // they conflict with explicit addTransceiver and can cause
+      // duplicate m-lines → SDP order mismatch errors.
+      const offer = await pc.createOffer();
 
       await pc.setLocalDescription(offer);
       console.log(`📤 Offer created for ${peerId}`);
@@ -458,6 +466,13 @@ class WebRTCService {
     }
 
     try {
+      // Handle glare: if we also sent an offer (both sides negotiating),
+      // rollback our offer and accept theirs
+      if (pc.signalingState === 'have-local-offer') {
+        console.log(`⚠️ Glare detected for ${peerId}, rolling back local offer`);
+        await pc.setLocalDescription({ type: 'rollback' });
+      }
+
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       console.log(`📥 Remote description (offer) set for ${peerId}`);
 
@@ -622,35 +637,19 @@ class WebRTCService {
   async replaceVideoTrack(newTrack) {
     for (const [peerId, pc] of this.peerConnections) {
       try {
-        // Find video sender — first by active track
-        let sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+        // Find video transceiver — it always exists because we add one in createPeerConnection
+        const videoTransceiver = pc.getTransceivers().find(
+          t => t.receiver?.track?.kind === 'video'
+        );
 
-        // Fallback: find video transceiver (handles recvonly/inactive/null track)
-        // This is the key to avoiding m-line reorder errors!
-        if (!sender) {
-          const transceiver = pc.getTransceivers().find(
-            t => t.receiver?.track?.kind === 'video'
-          );
-          if (transceiver) {
-            sender = transceiver.sender;
-            // Upgrade transceiver direction so we can send video
-            if (transceiver.direction === 'recvonly') {
-              transceiver.direction = 'sendrecv';
-            } else if (transceiver.direction === 'inactive') {
-              transceiver.direction = 'sendonly';
-            }
-            console.log(`📺 Upgraded video transceiver to ${transceiver.direction} for ${peerId}`);
-          }
-        }
-
-        if (sender) {
-          await sender.replaceTrack(newTrack);
+        if (videoTransceiver && videoTransceiver.sender) {
+          // Direction is already sendrecv — just replace the track.
+          // replaceTrack does NOT trigger onnegotiationneeded (per spec)
+          // → NO new offer needed → NO m-line reorder possible.
+          await videoTransceiver.sender.replaceTrack(newTrack);
           console.log(`🔄 Replaced video track for ${peerId}`);
         } else {
-          // Last resort: should not happen since we always add video transceiver
-          console.warn(`No video transceiver found for ${peerId}, adding track directly`);
-          const stream = this.localStream || new MediaStream();
-          pc.addTrack(newTrack, stream);
+          console.warn(`No video transceiver found for ${peerId}`);
         }
       } catch (err) {
         console.error(`Failed to replace video track for ${peerId}:`, err);
