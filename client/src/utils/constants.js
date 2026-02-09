@@ -63,12 +63,12 @@ export const MEDIA_CONSTRAINTS = {
   },
 };
 
-// Screen share constraints
+// Screen share constraints (optimized for low latency)
 export const SCREEN_CONSTRAINTS = {
   video: {
-    width: { ideal: 1920 },
-    height: { ideal: 1080 },
-    frameRate: { ideal: 15, max: 30 },
+    width: { ideal: 1280, max: 1920 },
+    height: { ideal: 720, max: 1080 },
+    frameRate: { ideal: 5, max: 15 },
   },
   audio: false,
 };

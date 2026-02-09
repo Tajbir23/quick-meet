@@ -643,11 +643,31 @@ class WebRTCService {
         );
 
         if (videoTransceiver && videoTransceiver.sender) {
-          // Direction is already sendrecv — just replace the track.
-          // replaceTrack does NOT trigger onnegotiationneeded (per spec)
-          // → NO new offer needed → NO m-line reorder possible.
           await videoTransceiver.sender.replaceTrack(newTrack);
           console.log(`🔄 Replaced video track for ${peerId}`);
+
+          // Optimize encoding for screen share (low latency)
+          if (newTrack) {
+            // Tell browser this is screen content (text/detail priority over motion)
+            if (newTrack.contentHint !== undefined) {
+              newTrack.contentHint = 'detail';
+            }
+
+            // Set bitrate limits for lower latency
+            try {
+              const params = videoTransceiver.sender.getParameters();
+              if (!params.encodings || params.encodings.length === 0) {
+                params.encodings = [{}];
+              }
+              params.encodings[0].maxBitrate = 1500000; // 1.5 Mbps max
+              params.degradationPreference = 'maintain-resolution'; // keep text sharp
+              await videoTransceiver.sender.setParameters(params);
+              console.log(`⚡ Screen share encoding optimized for ${peerId}`);
+            } catch (encErr) {
+              // setParameters not supported in all browsers, safe to ignore
+              console.warn('Could not set encoding params:', encErr.message);
+            }
+          }
         } else {
           console.warn(`No video transceiver found for ${peerId}`);
         }
