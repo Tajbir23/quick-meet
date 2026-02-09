@@ -1,0 +1,18 @@
+{
+  "name": "quick-meet",
+  "version": "1.0.0",
+  "description": "Self-hosted real-time communication ecosystem — MERN + Pure WebRTC",
+  "private": true,
+  "scripts": {
+    "server": "cd server && npm start",
+    "server:dev": "cd server && npm run dev",
+    "client": "cd client && npm run dev",
+    "client:build": "cd client && npm run build",
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "dev": "concurrently \"npm run server:dev\" \"npm run client\"",
+    "generate-ssl": "node generate-ssl.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

@@ -1,0 +1,252 @@
+/**
+ * ============================================
+ * Group Call Socket Handlers (Mesh Topology)
+ * ============================================
+ * 
+ * MESH ARCHITECTURE:
+ * Every peer connects directly to every other peer.
+ * 
+ *     A ──── B
+ *     │ \  / │
+ *     │  \/  │
+ *     │  /\  │
+ *     │ /  \ │
+ *     C ──── D
+ * 
+ * For N users: N*(N-1)/2 connections
+ * - 3 users = 3 connections
+ * - 4 users = 6 connections
+ * - 5 users = 10 connections
+ * - 6 users = 15 connections
+ * - 8 users = 28 connections ← performance starts degrading
+ * 
+ * WHY MESH (not SFU/MCU):
+ * - No third-party media server required
+ * - True P2P — lowest latency
+ * - End-to-end encrypted by default (DTLS-SRTP)
+ * - Simple to implement
+ * 
+ * LIMITATION:
+ * - Bandwidth scales with N (each peer uploads N-1 streams)
+ * - Recommended max: 6 participants
+ * - Beyond that: reduce video quality or switch to audio-only
+ * 
+ * FLOW FOR NEW PEER JOINING:
+ * 1. New peer emits 'group-call:join'
+ * 2. Server tells new peer about existing peers ('group-call:existing-peers')
+ * 3. Server tells existing peers about new peer ('group-call:peer-joined')
+ * 4. New peer creates offer for each existing peer
+ * 5. Each existing peer creates answer
+ * 6. ICE candidates exchanged
+ * 7. All connections established
+ */
+
+const Group = require('../models/Group');
+
+// Track active group calls: groupId → Set of userIds
+const activeGroupCalls = new Map();
+
+const setupGroupCallHandlers = (io, socket, onlineUsers) => {
+  /**
+   * Join a group call
+   */
+  socket.on('group-call:join', async ({ groupId }) => {
+    try {
+      // Verify membership
+      const group = await Group.findById(groupId);
+      if (!group || !group.isMember(socket.userId)) {
+        socket.emit('group-call:error', {
+          message: 'Not authorized to join this group call',
+        });
+        return;
+      }
+
+      // Check call member limit (mesh topology constraint)
+      if (!activeGroupCalls.has(groupId)) {
+        activeGroupCalls.set(groupId, new Set());
+      }
+
+      const callParticipants = activeGroupCalls.get(groupId);
+
+      if (callParticipants.size >= (group.maxCallMembers || 6)) {
+        socket.emit('group-call:error', {
+          message: `Group call is full (max ${group.maxCallMembers || 6} participants for mesh calls)`,
+        });
+        return;
+      }
+
+      // Get existing participants before adding new one
+      const existingPeers = [];
+      for (const peerId of callParticipants) {
+        const peerSocketId = onlineUsers.get(peerId);
+        if (peerSocketId) {
+          existingPeers.push({
+            userId: peerId,
+            socketId: peerSocketId,
+          });
+        }
+      }
+
+      // Add new participant
+      callParticipants.add(socket.userId);
+
+      // Join socket room for the group call
+      socket.join(`group-call:${groupId}`);
+
+      console.log(`📞 Group call: ${socket.username} joined call in group ${groupId} (${callParticipants.size} participants)`);
+
+      // Tell the new peer about existing peers
+      // New peer will create offers for each existing peer
+      socket.emit('group-call:existing-peers', {
+        groupId,
+        peers: existingPeers,
+      });
+
+      // Tell existing peers about the new peer
+      // They will wait for the offer from the new peer
+      socket.to(`group-call:${groupId}`).emit('group-call:peer-joined', {
+        groupId,
+        userId: socket.userId,
+        username: socket.username,
+        socketId: socket.id,
+      });
+
+      // Broadcast participant count update
+      io.to(`group-call:${groupId}`).emit('group-call:participants-update', {
+        groupId,
+        count: callParticipants.size,
+        participants: Array.from(callParticipants),
+      });
+
+    } catch (error) {
+      console.error('Group call join error:', error);
+      socket.emit('group-call:error', {
+        message: 'Failed to join group call',
+      });
+    }
+  });
+
+  /**
+   * Leave a group call
+   */
+  socket.on('group-call:leave', ({ groupId }) => {
+    handleGroupCallLeave(io, socket, onlineUsers, groupId);
+  });
+
+  /**
+   * Send offer to a specific peer in group call
+   */
+  socket.on('group-call:offer', ({ groupId, targetUserId, offer }) => {
+    const targetSocketId = onlineUsers.get(targetUserId);
+
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('group-call:offer', {
+        groupId,
+        callerId: socket.userId,
+        callerName: socket.username,
+        offer,
+      });
+    }
+  });
+
+  /**
+   * Send answer to a specific peer in group call
+   */
+  socket.on('group-call:answer', ({ groupId, targetUserId, answer }) => {
+    const targetSocketId = onlineUsers.get(targetUserId);
+
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('group-call:answer', {
+        groupId,
+        answererId: socket.userId,
+        answererName: socket.username,
+        answer,
+      });
+    }
+  });
+
+  /**
+   * ICE candidate for group call peer
+   */
+  socket.on('group-call:ice-candidate', ({ groupId, targetUserId, candidate }) => {
+    const targetSocketId = onlineUsers.get(targetUserId);
+
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('group-call:ice-candidate', {
+        groupId,
+        senderId: socket.userId,
+        candidate,
+      });
+    }
+  });
+
+  /**
+   * Toggle media in group call
+   */
+  socket.on('group-call:toggle-media', ({ groupId, kind, enabled }) => {
+    socket.to(`group-call:${groupId}`).emit('group-call:media-toggled', {
+      userId: socket.userId,
+      kind,
+      enabled,
+    });
+  });
+
+  /**
+   * Screen share in group call
+   */
+  socket.on('group-call:screen-share', ({ groupId, sharing }) => {
+    socket.to(`group-call:${groupId}`).emit('group-call:screen-share', {
+      userId: socket.userId,
+      username: socket.username,
+      sharing,
+    });
+  });
+
+  /**
+   * Handle disconnect — clean up group call participation
+   */
+  socket.on('disconnect', () => {
+    // Clean up from all active group calls
+    for (const [groupId, participants] of activeGroupCalls.entries()) {
+      if (participants.has(socket.userId)) {
+        handleGroupCallLeave(io, socket, onlineUsers, groupId);
+      }
+    }
+  });
+};
+
+/**
+ * Helper: Handle a user leaving a group call
+ */
+function handleGroupCallLeave(io, socket, onlineUsers, groupId) {
+  const callParticipants = activeGroupCalls.get(groupId);
+
+  if (!callParticipants) return;
+
+  callParticipants.delete(socket.userId);
+  socket.leave(`group-call:${groupId}`);
+
+  console.log(`📞 Group call: ${socket.username} left call in group ${groupId} (${callParticipants.size} remaining)`);
+
+  // Notify remaining peers
+  io.to(`group-call:${groupId}`).emit('group-call:peer-left', {
+    groupId,
+    userId: socket.userId,
+    username: socket.username,
+  });
+
+  // Update participant count
+  io.to(`group-call:${groupId}`).emit('group-call:participants-update', {
+    groupId,
+    count: callParticipants.size,
+    participants: Array.from(callParticipants),
+  });
+
+  // Clean up empty calls
+  if (callParticipants.size === 0) {
+    activeGroupCalls.delete(groupId);
+    console.log(`📞 Group call ended for group ${groupId}`);
+  }
+}
+
+module.exports = setupGroupCallHandlers;
