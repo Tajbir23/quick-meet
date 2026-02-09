@@ -368,6 +368,20 @@ class WebRTCService {
       this.addLocalTracks(peerId);
     }
 
+    // CRITICAL: Always ensure a video transceiver exists.
+    // Without this, audio-only calls have SDP with only m=audio.
+    // When screen share later adds video, the m-line order changes
+    // → "order of m-lines in subsequent offer doesn't match" error.
+    // By adding a recvonly video transceiver upfront, SDP always has
+    // both m=audio and m=video from the very first offer.
+    const hasVideoTransceiver = pc.getTransceivers().some(
+      t => t.receiver?.track?.kind === 'video'
+    );
+    if (!hasVideoTransceiver) {
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      console.log(`📺 Added recvonly video transceiver for ${peerId} (SDP m-line stability)`);
+    }
+
     return pc;
   }
 
@@ -608,16 +622,24 @@ class WebRTCService {
   async replaceVideoTrack(newTrack) {
     for (const [peerId, pc] of this.peerConnections) {
       try {
-        // Find video sender — first by track, then by transceiver
+        // Find video sender — first by active track
         let sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
 
-        // Fallback: find via transceiver (handles null/ended track cases)
+        // Fallback: find video transceiver (handles recvonly/inactive/null track)
+        // This is the key to avoiding m-line reorder errors!
         if (!sender) {
           const transceiver = pc.getTransceivers().find(
-            t => t.sender && (t.receiver?.track?.kind === 'video' || t.mid?.includes('video'))
+            t => t.receiver?.track?.kind === 'video'
           );
           if (transceiver) {
             sender = transceiver.sender;
+            // Upgrade transceiver direction so we can send video
+            if (transceiver.direction === 'recvonly') {
+              transceiver.direction = 'sendrecv';
+            } else if (transceiver.direction === 'inactive') {
+              transceiver.direction = 'sendonly';
+            }
+            console.log(`📺 Upgraded video transceiver to ${transceiver.direction} for ${peerId}`);
           }
         }
 
@@ -625,11 +647,10 @@ class WebRTCService {
           await sender.replaceTrack(newTrack);
           console.log(`🔄 Replaced video track for ${peerId}`);
         } else {
-          // No video sender exists (audio-only call) — add the track
-          // This triggers renegotiation via onnegotiationneeded
+          // Last resort: should not happen since we always add video transceiver
+          console.warn(`No video transceiver found for ${peerId}, adding track directly`);
           const stream = this.localStream || new MediaStream();
           pc.addTrack(newTrack, stream);
-          console.log(`➕ Added video track to audio-only connection with ${peerId}`);
         }
       } catch (err) {
         console.error(`Failed to replace video track for ${peerId}:`, err);
