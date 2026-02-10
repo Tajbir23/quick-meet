@@ -10,7 +10,6 @@ import { ChevronDown } from 'lucide-react';
 const ChatWindow = () => {
   const { activeChat, messages, fetchMessages, isLoadingMessages, typingUsers, markAsRead } = useChatStore();
   const { user } = useAuthStore();
-  const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
   const [pagination, setPagination] = useState(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -30,7 +29,10 @@ const ChatWindow = () => {
 
   // Auto scroll to bottom on new messages
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = containerRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [messages[activeChat?.id]?.length]);
 
   if (!activeChat) return null;
@@ -56,11 +58,14 @@ const ChatWindow = () => {
   };
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = containerRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* Chat header with back button & call buttons */}
       <Header />
 
@@ -135,7 +140,6 @@ const ChatWindow = () => {
           </div>
         )}
 
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Scroll to bottom button */}
