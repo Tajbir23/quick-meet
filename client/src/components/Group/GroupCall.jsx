@@ -24,6 +24,7 @@ import { getInitials, stringToColor, formatDuration } from '../../utils/helpers'
  */
 const VideoTile = ({ stream, name, isMuted = false, isLocal = false }) => {
   const videoRef = useRef(null);
+  const audioRef = useRef(null);
 
   useEffect(() => {
     if (videoRef.current && stream) {
@@ -31,10 +32,22 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false }) => {
     }
   }, [stream]);
 
+  // Always attach stream to hidden audio element for audio-only scenarios
+  useEffect(() => {
+    if (audioRef.current && stream && !isLocal) {
+      audioRef.current.srcObject = stream;
+    }
+  }, [stream, isLocal]);
+
   const hasVideo = stream?.getVideoTracks().some(t => t.enabled);
 
   return (
     <div className="relative bg-dark-800 rounded-2xl overflow-hidden h-full w-full">
+      {/* Hidden audio element — plays audio even when video is off / avatar shown */}
+      {!isLocal && stream && (
+        <audio ref={audioRef} autoPlay playsInline />
+      )}
+
       {stream && hasVideo ? (
         <video
           ref={videoRef}
