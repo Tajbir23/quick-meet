@@ -90,9 +90,6 @@ const GroupCall = () => {
     endCall,
     isMinimized,
   } = useCallStore();
-
-  // Don't render full overlay when minimized
-  if (isMinimized) return null;
   const { user } = useAuthStore();
 
   // Calculate grid layout class based on participant count
@@ -104,6 +101,9 @@ const GroupCall = () => {
     if (totalParticipants <= 4) return 'grid-cols-2 grid-rows-2';
     return 'grid-cols-2 md:grid-cols-3 grid-rows-2'; // 5-6 participants
   }, [totalParticipants]);
+
+  // Don't render full overlay when minimized (must be after all hooks)
+  if (isMinimized) return null;
 
   return (
     <div className="fixed inset-0 bg-dark-900 z-40 flex flex-col">

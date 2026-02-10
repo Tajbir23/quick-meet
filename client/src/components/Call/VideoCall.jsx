@@ -28,9 +28,6 @@ const VideoCall = () => {
   const remoteVideoRef = useRef(null);
   const [isLocalLarge, setIsLocalLarge] = useState(false);
 
-  // Don't render full overlay when minimized
-  if (isMinimized) return null;
-
   // Attach local stream
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -55,6 +52,9 @@ const VideoCall = () => {
 
   const isConnecting = callStatus === CALL_STATUS.CALLING || callStatus === CALL_STATUS.RECONNECTING;
   const isConnected = callStatus === CALL_STATUS.CONNECTED;
+
+  // Don't render full overlay when minimized (must be after all hooks)
+  if (isMinimized) return null;
 
   return (
     <div className="fixed inset-0 bg-dark-900 z-40 flex flex-col safe-top">
