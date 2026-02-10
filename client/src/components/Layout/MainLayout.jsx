@@ -7,7 +7,7 @@ const MainLayout = () => {
   const { activeChat } = useChatStore();
 
   return (
-    <div className="h-screen h-[100dvh] flex overflow-hidden">
+    <div className="w-full h-full flex overflow-hidden">
       {/* Sidebar — full screen on mobile when no chat, hidden when chat active */}
       <div className={`
         ${activeChat ? 'hidden md:flex' : 'flex'}
