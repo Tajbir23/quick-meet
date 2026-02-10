@@ -164,17 +164,31 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
     ? message.sender.username
     : 'Unknown';
 
+  const senderAvatar = typeof message.sender === 'object'
+    ? message.sender.avatar
+    : null;
+
   return (
     <div className={`flex ${isMine ? 'justify-end' : 'justify-start'} mb-1 animate-fade-in`}>
       <div className={`flex gap-2 max-w-[85%] md:max-w-[70%] ${isMine ? 'flex-row-reverse' : ''}`}>
         {/* Avatar (only for received messages) */}
         {!isMine && showAvatar ? (
-          <div
-            className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-[10px] md:text-xs font-bold text-white flex-shrink-0 mt-auto"
-            style={{ backgroundColor: stringToColor(senderName) }}
-          >
-            {getInitials(senderName)}
-          </div>
+          senderAvatar ? (
+            <img
+              src={`${SERVER_URL}${senderAvatar}`}
+              alt={senderName}
+              className="w-7 h-7 md:w-8 md:h-8 rounded-full object-cover flex-shrink-0 mt-auto cursor-pointer"
+              onClick={() => onViewProfile && onViewProfile(message.sender)}
+            />
+          ) : (
+            <div
+              className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-[10px] md:text-xs font-bold text-white flex-shrink-0 mt-auto cursor-pointer"
+              style={{ backgroundColor: stringToColor(senderName) }}
+              onClick={() => onViewProfile && onViewProfile(message.sender)}
+            >
+              {getInitials(senderName)}
+            </div>
+          )
         ) : (
           !isMine && <div className="w-7 md:w-8 flex-shrink-0" />
         )}

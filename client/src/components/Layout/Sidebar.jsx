@@ -8,6 +8,7 @@ import useAuthStore from '../../store/useAuthStore';
 import useChatStore from '../../store/useChatStore';
 import useGroupStore from '../../store/useGroupStore';
 import useOwnerStore from '../../store/useOwnerStore';
+import { SERVER_URL } from '../../utils/constants';
 import ActiveUsers from '../Users/ActiveUsers';
 import ChatList from '../Chat/ChatList';
 import GroupList from '../Group/GroupList';
@@ -62,12 +63,20 @@ const Sidebar = () => {
       <div className="p-4 border-b border-dark-700">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div
-              className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold text-white shadow-lg"
-              style={{ backgroundColor: stringToColor(user?.username) }}
-            >
-              {getInitials(user?.username)}
-            </div>
+            {user?.avatar ? (
+              <img
+                src={`${SERVER_URL}${user.avatar}`}
+                alt={user?.username}
+                className="w-11 h-11 rounded-full object-cover shadow-lg"
+              />
+            ) : (
+              <div
+                className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold text-white shadow-lg"
+                style={{ backgroundColor: stringToColor(user?.username) }}
+              >
+                {getInitials(user?.username)}
+              </div>
+            )}
             <div>
               <p className="text-sm font-semibold text-white">{user?.username}</p>
               <p className="text-xs text-emerald-400 flex items-center gap-1.5">

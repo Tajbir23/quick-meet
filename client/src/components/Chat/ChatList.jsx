@@ -2,6 +2,7 @@ import useChatStore from '../../store/useChatStore';
 import useGroupStore from '../../store/useGroupStore';
 import useAuthStore from '../../store/useAuthStore';
 import { getInitials, stringToColor, formatTime, truncate } from '../../utils/helpers';
+import { SERVER_URL } from '../../utils/constants';
 import { MessageCircle, Shield } from 'lucide-react';
 
 const ChatList = ({ searchQuery }) => {
@@ -53,12 +54,20 @@ const ChatList = ({ searchQuery }) => {
           >
             {/* Avatar */}
             <div className="relative flex-shrink-0">
-              <div
-                className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold text-white"
-                style={{ backgroundColor: stringToColor(user.username) }}
-              >
-                {getInitials(user.username)}
-              </div>
+              {user.avatar ? (
+                <img
+                  src={`${SERVER_URL}${user.avatar}`}
+                  alt={user.username}
+                  className="w-11 h-11 rounded-full object-cover"
+                />
+              ) : (
+                <div
+                  className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold text-white"
+                  style={{ backgroundColor: stringToColor(user.username) }}
+                >
+                  {getInitials(user.username)}
+                </div>
+              )}
               <span className={`absolute -bottom-0.5 -right-0.5 ${online ? 'online-dot' : 'offline-dot'}`} />
             </div>
 

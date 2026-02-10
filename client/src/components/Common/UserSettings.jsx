@@ -81,7 +81,7 @@ const UserSettings = ({ onClose }) => {
         const uploadRes = await api.post('/files/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
-        avatarUrl = uploadRes.data.data.url;
+        avatarUrl = uploadRes.data.data.file.url;
       }
 
       const res = await api.put('/users/profile', {

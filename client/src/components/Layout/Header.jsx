@@ -6,6 +6,7 @@ import useCallStore from '../../store/useCallStore';
 import useGroupStore from '../../store/useGroupStore';
 import useAuthStore from '../../store/useAuthStore';
 import { getInitials, stringToColor } from '../../utils/helpers';
+import { SERVER_URL } from '../../utils/constants';
 import toast from 'react-hot-toast';
 
 const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
@@ -81,12 +82,20 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
 
         {/* Avatar */}
         <div className="relative flex-shrink-0">
-          <div
-            className="w-9 h-9 md:w-10 md:h-10 rounded-full flex items-center justify-center text-sm font-bold text-white"
-            style={{ backgroundColor: stringToColor(activeChat.name) }}
-          >
-            {isGroup ? <Users size={16} className="text-white" /> : getInitials(activeChat.name)}
-          </div>
+          {!isGroup && activeChat.avatar ? (
+            <img
+              src={`${SERVER_URL}${activeChat.avatar}`}
+              alt={activeChat.name}
+              className="w-9 h-9 md:w-10 md:h-10 rounded-full object-cover"
+            />
+          ) : (
+            <div
+              className="w-9 h-9 md:w-10 md:h-10 rounded-full flex items-center justify-center text-sm font-bold text-white"
+              style={{ backgroundColor: stringToColor(activeChat.name) }}
+            >
+              {isGroup ? <Users size={16} className="text-white" /> : getInitials(activeChat.name)}
+            </div>
+          )}
           {!isGroup && (
             <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-dark-800 ${isOnline ? 'bg-emerald-400' : 'bg-dark-500'}`} />
           )}
