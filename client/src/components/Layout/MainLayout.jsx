@@ -19,13 +19,19 @@ const MainLayout = () => {
 
       {/* Main content — hidden on mobile when no chat, full screen when chat active */}
       <div className={`
-        ${activeChat ? 'grid grid-rows-[3.5rem_1fr]' : 'hidden md:grid md:grid-rows-[4rem_1fr]'}
-        flex-1 min-w-0 h-full overflow-hidden
+        ${activeChat ? 'flex' : 'hidden md:flex'}
+        flex-1 flex-col min-w-0 h-full overflow-hidden
       `}>
-        <Header />
-        {activeChat ? (
-          <ChatWindow />
-        ) : (
+        {/* Header wrapper — inline style guarantees it never collapses */}
+        <div style={{ minHeight: 56, flexShrink: 0 }}>
+          <Header />
+        </div>
+
+        {/* Content area */}
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          {activeChat ? (
+            <ChatWindow />
+          ) : (
           /* Welcome screen — only visible on desktop when no chat selected */
           <div className="flex-1 flex items-center justify-center bg-dark-900 p-6">
             <div className="text-center max-w-md">
@@ -56,6 +62,7 @@ const MainLayout = () => {
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
