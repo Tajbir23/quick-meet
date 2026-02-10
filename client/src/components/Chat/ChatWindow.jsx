@@ -3,6 +3,7 @@ import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
+import Header from '../Layout/Header';
 import { formatDateSeparator, shouldShowDateSeparator } from '../../utils/helpers';
 import { ChevronDown } from 'lucide-react';
 
@@ -59,8 +60,12 @@ const ChatWindow = () => {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-dark-900 min-h-0 relative">
+    <div className="flex-1 flex flex-col min-h-0">
+      {/* Chat header with back button & call buttons */}
+      <Header />
+
       {/* Messages area */}
+      <div className="flex-1 flex flex-col bg-dark-900 min-h-0 relative">
       <div
         ref={containerRef}
         className="flex-1 overflow-y-auto px-3 md:px-4 py-3 md:py-4 space-y-1 overscroll-contain"
@@ -145,6 +150,7 @@ const ChatWindow = () => {
 
       {/* Message input */}
       <MessageInput />
+      </div>
     </div>
   );
 };
