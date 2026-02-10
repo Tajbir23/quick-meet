@@ -32,7 +32,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-dark-900">
+    <div className="h-full bg-dark-900 overflow-hidden">
       <NetworkStatus />
       <Notification />
       {isAuthenticated && <IncomingCall />}

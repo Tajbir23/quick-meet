@@ -16,30 +16,25 @@
 html {
   /* Prevent iOS zoom on input focus */
   touch-action: manipulation;
-  height: 100%;
-  height: 100dvh; /* Use dynamic viewport height */
-  overflow: hidden; 
+  overflow: hidden;
 }
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background-color: #0f172a;
   color: #f8fafc;
-  height: 100%;
+  /* Use JS-calculated viewport height (--vh) which accounts for browser chrome */
+  height: calc(var(--vh, 1vh) * 100);
   width: 100%;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  position: fixed; /* Fix body to prevent any scroll behavior */
-  inset: 0;
 }
 
 #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  display: flex; /* Ensure root behaves as a flex container */
-  flex-direction: column;
 }
 
 /* Custom scrollbar - desktop only */

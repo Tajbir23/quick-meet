@@ -5,6 +5,18 @@ import { Toaster } from 'react-hot-toast';
 import App from './App';
 import './index.css';
 
+// ─── Fix mobile viewport height ─────────────────────────────────
+// On mobile browsers, 100vh includes the browser address bar area,
+// causing content to overflow. This sets a CSS variable --vh to the
+// ACTUAL visible viewport height (window.innerHeight).
+// Usage in CSS: height: calc(var(--vh, 1vh) * 100);
+function setVH() {
+  document.documentElement.style.setProperty('--vh', `${window.innerHeight * 0.01}px`);
+}
+setVH();
+window.addEventListener('resize', setVH);
+window.addEventListener('orientationchange', () => setTimeout(setVH, 150));
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
