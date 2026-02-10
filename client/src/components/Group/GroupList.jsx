@@ -4,13 +4,13 @@
  * ============================================
  */
 
-import { Hash, Users } from 'lucide-react';
+import { Hash, Users, Phone } from 'lucide-react';
 import useGroupStore from '../../store/useGroupStore';
 import useChatStore from '../../store/useChatStore';
 import { truncate } from '../../utils/helpers';
 
 const GroupList = ({ searchQuery = '' }) => {
-  const { myGroups } = useGroupStore();
+  const { myGroups, activeGroupCalls } = useGroupStore();
   const { setActiveChat, activeChat, unread } = useChatStore();
 
   const filteredGroups = myGroups.filter(group =>
@@ -54,8 +54,13 @@ const GroupList = ({ searchQuery = '' }) => {
           >
             <div className="flex items-center gap-3 w-full">
               {/* Group avatar */}
-              <div className="w-11 h-11 rounded-full bg-primary-500/20 flex items-center justify-center flex-shrink-0">
+              <div className="relative w-11 h-11 rounded-full bg-primary-500/20 flex items-center justify-center flex-shrink-0">
                 <Hash size={20} className="text-primary-400" />
+                {activeGroupCalls[group._id] && (
+                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center border-2 border-dark-800">
+                    <Phone size={8} className="text-white" />
+                  </span>
+                )}
               </div>
 
               {/* Group info */}

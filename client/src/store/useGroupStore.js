@@ -17,6 +17,9 @@ const useGroupStore = create((set, get) => ({
   activeGroup: null,     // Currently selected group
   isLoading: false,
 
+  // Active group calls: { groupId: { participants: [{userId, username}] } }
+  activeGroupCalls: {},
+
   // ============================================
   // ACTIONS
   // ============================================
@@ -156,6 +159,40 @@ const useGroupStore = create((set, get) => ({
    * Set active group
    */
   setActiveGroup: (group) => set({ activeGroup: group }),
+
+  /**
+   * Update active group call status (from socket events)
+   */
+  setActiveGroupCall: (groupId, participants) => {
+    set((state) => ({
+      activeGroupCalls: {
+        ...state.activeGroupCalls,
+        [groupId]: { participants },
+      },
+    }));
+  },
+
+  /**
+   * Remove active group call (call ended)
+   */
+  removeActiveGroupCall: (groupId) => {
+    set((state) => {
+      const calls = { ...state.activeGroupCalls };
+      delete calls[groupId];
+      return { activeGroupCalls: calls };
+    });
+  },
+
+  /**
+   * Bulk set active calls (on connect)
+   */
+  setActiveGroupCalls: (callsArray) => {
+    const calls = {};
+    callsArray.forEach(({ groupId, participants }) => {
+      calls[groupId] = { participants };
+    });
+    set({ activeGroupCalls: calls });
+  },
 
   /**
    * Join socket rooms for all groups

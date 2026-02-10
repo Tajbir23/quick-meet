@@ -12,6 +12,7 @@ import { useEffect, useRef } from 'react';
 import { getSocket } from '../services/socket';
 import useChatStore from '../store/useChatStore';
 import useCallStore from '../store/useCallStore';
+import useGroupStore from '../store/useGroupStore';
 import useAuthStore from '../store/useAuthStore';
 import webrtcService from '../services/webrtc';
 import { playNotificationSound } from '../utils/helpers';
@@ -184,32 +185,24 @@ const useSocket = () => {
       }
     });
 
-    // *** Incoming group call notification ***
-    // This fires for ALL group members when someone starts/joins a group call
-    socket.on('group-call:incoming', ({ groupId, groupName, callerId, callerName, participantCount, isNewCall }) => {
-      // Don't show if WE are the one who started/joined
-      if (callerId === user?._id) return;
-
-      // Don't show if we're already in a call
-      const { callStatus, isGroupCall, groupId: currentGroupId } = useCallStore.getState();
-      if (callStatus !== 'idle' && !(isGroupCall && currentGroupId === groupId)) return;
-      // If already in this group call, ignore
-      if (isGroupCall && currentGroupId === groupId) return;
-
-      console.log(`📞 Incoming group call in "${groupName}" from ${callerName} (${participantCount} participants)`);
-
-      useCallStore.getState().setIncomingGroupCall({
-        groupId,
-        groupName,
-        callerName,
-        participantCount,
-      });
-
-      playNotificationSound('call');
+    // *** Active group call status (Telegram-style banner) ***
+    // Emitted whenever someone joins/leaves a group call
+    socket.on('group-call:active', ({ groupId, participants }) => {
+      useGroupStore.getState().setActiveGroupCall(groupId, participants);
     });
 
-    // Group call ended — dismiss notification if showing
+    // Bulk response: all active calls on connect
+    socket.on('group-call:active-calls', (calls) => {
+      useGroupStore.getState().setActiveGroupCalls(calls);
+    });
+
+    // Query active calls now that we're connected
+    socket.emit('group-call:get-active-calls');
+
+    // Group call ended — remove banner
     socket.on('group-call:ended', ({ groupId }) => {
+      useGroupStore.getState().removeActiveGroupCall(groupId);
+      // Also dismiss any legacy incoming notification
       const { incomingGroupCall } = useCallStore.getState();
       if (incomingGroupCall && incomingGroupCall.groupId === groupId) {
         useCallStore.getState().dismissGroupCall();
@@ -295,7 +288,8 @@ const useSocket = () => {
       socket.off('call:renegotiate');
       socket.off('call:renegotiate-answer');
       socket.off('group-call:existing-peers');
-      socket.off('group-call:incoming');
+      socket.off('group-call:active');
+      socket.off('group-call:active-calls');
       socket.off('group-call:ended');
       socket.off('group-call:peer-joined');
       socket.off('group-call:peer-left');

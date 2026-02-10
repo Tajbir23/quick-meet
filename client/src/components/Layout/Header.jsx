@@ -3,6 +3,7 @@ import {
 } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useCallStore from '../../store/useCallStore';
+import useGroupStore from '../../store/useGroupStore';
 import useAuthStore from '../../store/useAuthStore';
 import { getInitials, stringToColor } from '../../utils/helpers';
 import toast from 'react-hot-toast';
@@ -10,6 +11,7 @@ import toast from 'react-hot-toast';
 const Header = () => {
   const { activeChat, clearActiveChat, isUserOnline } = useChatStore();
   const { startCall, startGroupCall, callStatus } = useCallStore();
+  const { activeGroupCalls } = useGroupStore();
   const { user } = useAuthStore();
 
   if (!activeChat) {
@@ -23,6 +25,12 @@ const Header = () => {
   const isOnline = activeChat.type === 'user' && isUserOnline(activeChat.id);
   const isGroup = activeChat.type === 'group';
   const inCall = callStatus !== 'idle';
+
+  // Telegram-style: check if this group has an active call
+  const activeCall = isGroup ? activeGroupCalls[activeChat.id] : null;
+  const activeCallCount = activeCall?.participants?.length || 0;
+  // Am I already in this group call?
+  const amInThisCall = activeCall?.participants?.some(p => p.userId === user?._id);
 
   const handleAudioCall = async () => {
     if (inCall) {
@@ -57,6 +65,7 @@ const Header = () => {
   };
 
   return (
+    <>
     <div className="h-14 md:h-16 bg-dark-800 border-b border-dark-700 flex items-center justify-between px-2 md:px-4 flex-shrink-0 z-10" style={{ minHeight: '3.5rem' }}>
       <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
         {/* Back button — mobile only */}
@@ -114,6 +123,42 @@ const Header = () => {
         </button>
       </div>
     </div>
+
+    {/* Telegram-style group call join banner */}
+    {isGroup && activeCall && activeCallCount > 0 && !amInThisCall && (
+      <div className="flex items-center justify-between gap-2 px-3 py-2 bg-emerald-500/10 border-b border-emerald-500/20 flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+            <Phone size={14} className="text-emerald-400" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-emerald-400">Voice Chat</p>
+            <p className="text-[10px] text-dark-400 truncate">
+              {activeCall.participants.map(p => p.username).join(', ')} · {activeCallCount} participant{activeCallCount !== 1 ? 's' : ''}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={handleAudioCall}
+            disabled={inCall}
+            className="px-3 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50"
+          >
+            <Phone size={12} />
+            Join
+          </button>
+          <button
+            onClick={handleVideoCall}
+            disabled={inCall}
+            className="px-3 py-1.5 rounded-full bg-primary-500 hover:bg-primary-600 active:bg-primary-700 text-white text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50"
+          >
+            <Video size={12} />
+            Video
+          </button>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 

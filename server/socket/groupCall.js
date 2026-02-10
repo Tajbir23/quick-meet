@@ -48,6 +48,22 @@ const activeGroupCalls = new Map();
 
 const setupGroupCallHandlers = (io, socket, onlineUsers) => {
   /**
+   * Query active group calls — client asks on connect to populate banners
+   */
+  socket.on('group-call:get-active-calls', () => {
+    const result = [];
+    for (const [groupId, participants] of activeGroupCalls.entries()) {
+      if (participants.size > 0) {
+        result.push({
+          groupId,
+          participants: Array.from(participants.entries()).map(([uid, uname]) => ({ userId: uid, username: uname })),
+        });
+      }
+    }
+    socket.emit('group-call:active-calls', result);
+  });
+
+  /**
    * Join a group call
    */
   socket.on('group-call:join', async ({ groupId }) => {
@@ -99,16 +115,11 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
 
       console.log(`📞 Group call: ${socket.username} joined call in group ${groupId} (${callParticipants.size} participants)`);
 
-      // *** CRITICAL: Notify ALL group members about the call ***
-      // This goes to the group chat room (group:${groupId}), NOT the call room.
-      // This way every group member (online) sees "incoming group call".
-      io.to(`group:${groupId}`).emit('group-call:incoming', {
+      // *** Notify ALL group members about the active call (Telegram-style) ***
+      // This goes to the group chat room so the join banner appears in the group header.
+      io.to(`group:${groupId}`).emit('group-call:active', {
         groupId,
-        groupName: group.name,
-        callerId: socket.userId,
-        callerName: socket.username,
-        participantCount: callParticipants.size,
-        isNewCall,
+        participants: Array.from(callParticipants.entries()).map(([uid, uname]) => ({ userId: uid, username: uname })),
       });
 
       // Tell the new peer about existing peers
@@ -251,19 +262,17 @@ function handleGroupCallLeave(io, socket, onlineUsers, groupId) {
     username: socket.username,
   });
 
-  // Update participant count
-  io.to(`group-call:${groupId}`).emit('group-call:participants-update', {
-    groupId,
-    count: callParticipants.size,
-    participants: Array.from(callParticipants.keys()),
-  });
-
-  // Clean up empty calls
-  if (callParticipants.size === 0) {
+  // Broadcast updated active call status to ALL group members
+  if (callParticipants.size > 0) {
+    io.to(`group:${groupId}`).emit('group-call:active', {
+      groupId,
+      participants: Array.from(callParticipants.entries()).map(([uid, uname]) => ({ userId: uid, username: uname })),
+    });
+  } else {
+    // Call empty → ended
     activeGroupCalls.delete(groupId);
     console.log(`📞 Group call ended for group ${groupId}`);
 
-    // Notify ALL group members that the call has ended
     io.to(`group:${groupId}`).emit('group-call:ended', {
       groupId,
     });
