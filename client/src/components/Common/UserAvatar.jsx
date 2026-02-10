@@ -5,12 +5,14 @@
  */
 
 import { getInitials, stringToColor } from '../../utils/helpers';
+import { Shield } from 'lucide-react';
 
 const UserAvatar = ({
   name,
   size = 'md',
   showStatus = false,
   isOnline = false,
+  isOwner = false,
   className = '',
 }) => {
   const sizeClasses = {
@@ -43,6 +45,11 @@ const UserAvatar = ({
             isOnline ? 'bg-emerald-400' : 'bg-dark-500'
           }`}
         />
+      )}
+      {isOwner && (
+        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-amber-500 flex items-center justify-center border border-dark-800">
+          <Shield size={8} className="text-dark-900" />
+        </span>
       )}
     </div>
   );

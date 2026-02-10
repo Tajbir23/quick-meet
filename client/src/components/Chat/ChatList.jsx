@@ -2,7 +2,7 @@ import useChatStore from '../../store/useChatStore';
 import useGroupStore from '../../store/useGroupStore';
 import useAuthStore from '../../store/useAuthStore';
 import { getInitials, stringToColor, formatTime, truncate } from '../../utils/helpers';
-import { MessageCircle } from 'lucide-react';
+import { MessageCircle, Shield } from 'lucide-react';
 
 const ChatList = ({ searchQuery }) => {
   const { users, setActiveChat, unread, isUserOnline } = useChatStore();
@@ -44,6 +44,7 @@ const ChatList = ({ searchQuery }) => {
               type: 'user',
               name: user.username,
               avatar: user.avatar,
+              role: user.role,
             })}
             className="sidebar-item w-full text-left"
           >
@@ -61,7 +62,15 @@ const ChatList = ({ searchQuery }) => {
             {/* Info */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-white truncate">{user.username}</p>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <p className="text-sm font-semibold text-white truncate">{user.username}</p>
+                  {user.role === 'owner' && (
+                    <span className="flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-[9px] rounded-full font-medium flex-shrink-0">
+                      <Shield size={8} />
+                      OWNER
+                    </span>
+                  )}
+                </div>
                 {user.lastSeen && (
                   <span className="text-[11px] text-dark-500 flex-shrink-0">{formatTime(user.lastSeen)}</span>
                 )}

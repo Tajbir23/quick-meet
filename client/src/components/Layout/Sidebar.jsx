@@ -1,27 +1,48 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  MessageCircle, Users, Search, LogOut, Plus, Hash, X
+  MessageCircle, Users, Search, LogOut, Plus, Hash, X,
+  Shield, Eye, EyeOff
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../../store/useAuthStore';
 import useChatStore from '../../store/useChatStore';
 import useGroupStore from '../../store/useGroupStore';
+import useOwnerStore from '../../store/useOwnerStore';
 import ActiveUsers from '../Users/ActiveUsers';
 import ChatList from '../Chat/ChatList';
 import GroupList from '../Group/GroupList';
 import CreateGroup from '../Group/CreateGroup';
 import { getInitials, stringToColor } from '../../utils/helpers';
+import toast from 'react-hot-toast';
 
 const Sidebar = () => {
   const [activeTab, setActiveTab] = useState('chats'); // 'chats' | 'groups' | 'users'
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateGroup, setShowCreateGroup] = useState(false);
-  const { user, logout } = useAuthStore();
+  const { user, logout, isOwner } = useAuthStore();
   const { users } = useChatStore();
   const { myGroups } = useGroupStore();
+  const { ownerModeVisible, toggleOwnerVisibility } = useOwnerStore();
+  const navigate = useNavigate();
+
+  // Sync ownerModeVisible from user data on mount
+  useEffect(() => {
+    if (isOwner && user?.ownerModeVisible !== undefined) {
+      useOwnerStore.getState().setOwnerModeVisible(user.ownerModeVisible);
+    }
+  }, [isOwner, user?.ownerModeVisible]);
 
   const handleLogout = () => {
     if (window.confirm('Are you sure you want to logout?')) {
       logout();
+    }
+  };
+
+  const handleToggleOwnerMode = async () => {
+    const result = await toggleOwnerVisibility();
+    if (result.success) {
+      useAuthStore.getState().updateUser({ ownerModeVisible: result.visible });
+      toast.success(`Owner mode ${result.visible ? 'ON' : 'OFF'}`);
     }
   };
 
@@ -51,12 +72,36 @@ const Sidebar = () => {
               </p>
             </div>
           </div>
-          <button
-            onClick={handleLogout}
-            className="btn-icon text-dark-400 hover:text-red-400 hover:bg-red-500/10"
-          >
-            <LogOut size={18} />
-          </button>
+          <div className="flex items-center gap-1.5">
+            {isOwner && (
+              <>
+                <button
+                  onClick={() => navigate('/owner')}
+                  className="btn-icon text-amber-400 hover:bg-amber-500/10"
+                  title="Owner Dashboard"
+                >
+                  <Shield size={18} />
+                </button>
+                <button
+                  onClick={handleToggleOwnerMode}
+                  className={`btn-icon transition-colors ${
+                    ownerModeVisible
+                      ? 'text-amber-400 bg-amber-500/10'
+                      : 'text-dark-400 hover:text-dark-200'
+                  }`}
+                  title={ownerModeVisible ? 'Owner Mode ON — click to hide' : 'Owner Mode OFF — click to show'}
+                >
+                  {ownerModeVisible ? <Eye size={18} /> : <EyeOff size={18} />}
+                </button>
+              </>
+            )}
+            <button
+              onClick={handleLogout}
+              className="btn-icon text-dark-400 hover:text-red-400 hover:bg-red-500/10"
+            >
+              <LogOut size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Search */}

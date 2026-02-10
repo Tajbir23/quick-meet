@@ -334,6 +334,18 @@ const useSocket = () => {
       console.error('Group call error:', message);
     });
 
+    // ============================================
+    // OWNER MODE EVENT
+    // ============================================
+    socket.on('owner:mode-changed', ({ userId, ownerModeVisible }) => {
+      // Update the user in the users list when owner toggles visibility
+      const chatStore = useChatStore.getState();
+      const updatedUsers = chatStore.users.map(u =>
+        u._id === userId ? { ...u, role: ownerModeVisible ? 'owner' : 'user' } : u
+      );
+      useChatStore.setState({ users: updatedUsers });
+    });
+
     // Heartbeat
     const heartbeatInterval = setInterval(() => {
       if (socket.connected) {
@@ -376,6 +388,7 @@ const useSocket = () => {
       socket.off('group-call:screen-share');
       socket.off('group-call:media-toggled');
       socket.off('group-call:error');
+      socket.off('owner:mode-changed');
       socket.off('connect');
       initialized.current = false;
     };

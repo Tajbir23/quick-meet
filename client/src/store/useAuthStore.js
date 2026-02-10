@@ -25,6 +25,7 @@ const useAuthStore = create((set, get) => ({
   isLoading: true,
   error: null,
   tokenExpiresAt: null,
+  isOwner: false,
 
   // ============================================
   // ACTIONS
@@ -51,6 +52,7 @@ const useAuthStore = create((set, get) => ({
         accessToken,
         isAuthenticated: true,
         isLoading: false,
+        isOwner: user.role === 'owner',
       });
 
       // Connect socket with access token
@@ -108,6 +110,7 @@ const useAuthStore = create((set, get) => ({
         isAuthenticated: true,
         isLoading: false,
         error: null,
+        isOwner: user.role === 'owner',
       });
 
       connectSocket(accessToken);
@@ -146,6 +149,7 @@ const useAuthStore = create((set, get) => ({
         isAuthenticated: true,
         isLoading: false,
         error: null,
+        isOwner: user.role === 'owner',
       });
 
       connectSocket(accessToken);
@@ -185,6 +189,7 @@ const useAuthStore = create((set, get) => ({
       isAuthenticated: false,
       isLoading: false,
       error: null,
+      isOwner: false,
     });
   },
 
@@ -221,6 +226,7 @@ const useAuthStore = create((set, get) => ({
       isAuthenticated: false,
       isLoading: false,
       error: reason || 'You have been logged out by the server.',
+      isOwner: false,
     });
 
     if (!window.location.pathname.includes('/login')) {

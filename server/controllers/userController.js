@@ -14,13 +14,19 @@ const User = require('../models/User');
  */
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find({ _id: { $ne: req.user._id } })
+    const users = await User.find({
+      _id: { $ne: req.user._id },
+      isBlocked: { $ne: true },
+    })
       .select('-password')
       .sort({ isOnline: -1, username: 1 }); // Online users first
 
+    // Map users to public objects (hides owner role if ownerModeVisible is off)
+    const publicUsers = users.map(u => u.toPublicObject());
+
     res.json({
       success: true,
-      data: { users },
+      data: { users: publicUsers },
     });
   } catch (error) {
     console.error('Get users error:', error);
@@ -40,11 +46,14 @@ const getActiveUsers = async (req, res) => {
     const users = await User.find({
       _id: { $ne: req.user._id },
       isOnline: true,
-    }).select('username avatar isOnline lastSeen');
+      isBlocked: { $ne: true },
+    }).select('username avatar isOnline lastSeen role ownerModeVisible');
+
+    const publicUsers = users.map(u => u.toPublicObject());
 
     res.json({
       success: true,
-      data: { users },
+      data: { users: publicUsers },
     });
   } catch (error) {
     console.error('Get active users error:', error);

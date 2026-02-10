@@ -56,6 +56,39 @@ const userSchema = new mongoose.Schema({
     default: null,
   },
 
+  // ─── ROLE & BLOCKING ─────────────────────────────────
+  // Only ONE user can have 'owner' role (set directly in DB)
+  role: {
+    type: String,
+    enum: ['user', 'owner'],
+    default: 'user',
+  },
+
+  // Owner mode visibility: when ON, other users can see this user is the owner
+  ownerModeVisible: {
+    type: Boolean,
+    default: false,
+  },
+
+  // Block status: only the owner can block users
+  isBlocked: {
+    type: Boolean,
+    default: false,
+  },
+  blockedAt: {
+    type: Date,
+    default: null,
+  },
+  blockedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+  blockedReason: {
+    type: String,
+    default: null,
+  },
+
   // ─── SECURITY FIELDS ─────────────────────────────
 
   // Refresh token (hashed) for token rotation
@@ -156,7 +189,25 @@ userSchema.methods.toSafeObject = function () {
   delete obj.lastFailedLogin;
   delete obj.accountLockedUntil;
   delete obj.passwordChangedAt;
+  delete obj.blockedBy;
+  delete obj.blockedReason;
+  delete obj.blockedAt;
   delete obj.__v;
+  return obj;
+};
+
+/**
+ * Return user as seen by other users
+ * Hides role unless ownerModeVisible is true
+ */
+userSchema.methods.toPublicObject = function () {
+  const obj = this.toSafeObject();
+  // Hide owner role if ownerModeVisible is off
+  if (obj.role === 'owner' && !obj.ownerModeVisible) {
+    obj.role = 'user';
+  }
+  delete obj.ownerModeVisible;
+  delete obj.isBlocked;
   return obj;
 };
 

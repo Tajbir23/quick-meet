@@ -128,12 +128,10 @@ server {
         proxy_cache_bypass $http_upgrade;
     }
 
-    # File uploads
-    location /uploads/ {
-        alias /var/www/quick-meet/server/uploads/;
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-    }
+    # ⛔ File uploads — DISABLED (security hardening)
+    # Files এখন authenticated endpoint দিয়ে serve হয়: /api/files/download/:filename
+    # Direct static access বন্ধ — unauthorized access প্রতিরোধ
+    # location /uploads/ { ... }  ← মুছে দেওয়া হয়েছে
 
     # Webhook (auto-deploy, optional)
     location /webhook {
@@ -141,10 +139,12 @@ server {
         proxy_http_version 1.1;
     }
 
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
+    # Security headers (HARDENED)
+    add_header X-Frame-Options "DENY" always;
     add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(self), microphone=(self), geolocation=(), payment=()" always;
+    add_header X-XSS-Protection "1; mode=block" always;
 
     # Max upload size
     client_max_body_size 50M;
@@ -200,24 +200,73 @@ cd quick-meet
 nano /var/www/quick-meet/server/.env
 ```
 
+### ⚡ প্রথমে Secret keys generate করো (VPS terminal এ run করো):
+```bash
+# JWT_SECRET (128 char hex string)
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+
+# ENCRYPTION_MASTER_KEY (64 hex chars = 256-bit key)
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+# LOG_HMAC_SECRET (64 hex chars)
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+> ⚠️ **তিনটা command এর output আলাদা আলাদা কোথাও save করো — নিচে paste করতে হবে!**
+
 ### Paste করো:
 ```env
 PORT=5000
 NODE_ENV=production
+
+# ─── DATABASE ────────────────────────────────
 MONGODB_URI=mongodb+srv://test:test@cluster0.sdyx3bs.mongodb.net/quickmeet?appName=Cluster0
-JWT_SECRET=qm_s3cR3t_K3y_2026_xJ9pLmNvQw8rTzYa5bCdEfGh
-JWT_EXPIRES_IN=7d
+
+# ─── JWT / AUTH (HARDENED) ───────────────────
+# Access token: short-lived (15 minutes)
+# Refresh token: long-lived (7 days), auto-rotated on each use
+JWT_SECRET=উপরে_generate_করা_128_CHAR_HEX_STRING
+ACCESS_TOKEN_EXPIRY=15m
+REFRESH_TOKEN_EXPIRY_DAYS=7
+
+# ─── SSL ─────────────────────────────────────
 SSL_KEY_PATH=../ssl/server.key
 SSL_CERT_PATH=../ssl/server.cert
+
+# ─── FILE STORAGE ────────────────────────────
 MAX_FILE_SIZE=52428800
 UPLOAD_DIR=./uploads
+FILE_MAX_AGE_DAYS=30
+
+# ─── ENCRYPTION (MILITARY-GRADE) ─────────────
+# ⭐ এটা হারালে সব encrypted messages আর পড়া যাবে না!
+# অবশ্যই safely backup রাখো!
+ENCRYPTION_MASTER_KEY=উপরে_generate_করা_64_HEX_CHARS
+
+# HMAC key for security log integrity verification
+LOG_HMAC_SECRET=উপরে_generate_করা_64_HEX_CHARS
+
+# ─── CORS / ORIGINS ──────────────────────────
+# শুধুমাত্র তোমার domain allow — বাকি সব block
+ALLOWED_ORIGINS=https://quickmeet.genuinesoftmart.store
+
+# ─── STUN / TURN ─────────────────────────────
 STUN_SERVERS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
+
+# ─── RATE LIMITING ───────────────────────────
 RATE_LIMIT_WINDOW_MS=900000
 RATE_LIMIT_MAX=100
+
+# ─── SERVER ──────────────────────────────────
 SERVER_IP=0.0.0.0
 ```
 
 Save: `Ctrl+X` → `Y` → `Enter`
+
+### Security logs directory তৈরি করো:
+```bash
+mkdir -p /var/www/quick-meet/server/logs/security
+chmod 750 /var/www/quick-meet/server/logs/security
+```
 
 ### প্রতিটা value এর ব্যাখ্যা:
 
@@ -226,16 +275,23 @@ Save: `Ctrl+X` → `Y` → `Enter`
 | `PORT` | `5000` | Backend server port |
 | `NODE_ENV` | `production` | ⚠️ VPS তে অবশ্যই production |
 | `MONGODB_URI` | Atlas connection string | MongoDB Atlas database URL |
-| `JWT_SECRET` | Long random string | JWT token sign করার key (unique + strong হতে হবে) |
-| `JWT_EXPIRES_IN` | `7d` | Login session কতদিন valid (7 দিন) |
+| `JWT_SECRET` | 128 char hex string | JWT token sign করার key (generate করো!) |
+| `ACCESS_TOKEN_EXPIRY` | `15m` | 🔒 Access token মাত্র ১৫ মিনিট valid |
+| `REFRESH_TOKEN_EXPIRY_DAYS` | `7` | 🔒 Refresh token ৭ দিন, auto-rotated |
 | `SSL_KEY_PATH` | `../ssl/server.key` | Self-signed SSL key (auto-generated) |
 | `SSL_CERT_PATH` | `../ssl/server.cert` | Self-signed SSL cert (auto-generated) |
 | `MAX_FILE_SIZE` | `52428800` | সর্বোচ্চ file upload size (50MB) |
 | `UPLOAD_DIR` | `./uploads` | Uploaded files save হবে এখানে |
+| `FILE_MAX_AGE_DAYS` | `30` | 🔒 ৩০ দিনের পুরনো file auto-cleanup |
+| `ENCRYPTION_MASTER_KEY` | 64 hex chars | 🔒⭐ AES-256-GCM encryption key — হারালে data lost! |
+| `LOG_HMAC_SECRET` | 64 hex chars | 🔒 Security audit log tamper-proof করতে |
+| `ALLOWED_ORIGINS` | তোমার domain | 🔒 CORS — শুধু এই domain থেকে request allow |
 | `STUN_SERVERS` | Google STUN | NAT traversal এ public IP discover করতে |
 | `RATE_LIMIT_WINDOW_MS` | `900000` | Rate limit window (15 minutes) |
 | `RATE_LIMIT_MAX` | `100` | 15 মিনিটে সর্বোচ্চ 100 requests |
 | `SERVER_IP` | `0.0.0.0` | সব interface এ listen করো |
+
+> 🚨 **পুরনো `JWT_EXPIRES_IN=7d` আর নেই!** এখন `ACCESS_TOKEN_EXPIRY` + `REFRESH_TOKEN_EXPIRY_DAYS` দিয়ে handle হয়।
 
 ---
 
@@ -426,6 +482,10 @@ nano /var/www/quick-meet/deploy.sh
 cd /var/www/quick-meet
 git stash
 git pull origin main
+
+# Ensure security logs directory exists
+mkdir -p /var/www/quick-meet/server/logs/security
+
 cd server && npm install
 cd ../client && npm install && npm run build
 pm2 restart quick-meet
@@ -500,6 +560,7 @@ systemctl start webhook
 ```bash
 ssh root@167.71.235.56
 cd /var/www/quick-meet && git stash && git pull
+mkdir -p server/logs/security
 cd client && npm install && npm run build
 cd ../server && npm install
 pm2 restart quick-meet
@@ -531,6 +592,10 @@ VPS আপনা আপনি update হবে!
 | SSL renew | `certbot renew` |
 | SSL expiry check | `certbot certificates` |
 | Firewall status | `ufw status` |
+| 🔒 Security logs দেখা | `tail -100 /var/www/quick-meet/server/logs/security/security-$(date +%Y-%m-%d).jsonl` |
+| 🔒 Security alerts খোঁজা | `grep -E 'CRITICAL\|ALERT' /var/www/quick-meet/server/logs/security/*.jsonl` |
+| 🔒 Banned IPs দেখা | `grep 'ip_banned' /var/www/quick-meet/server/logs/security/*.jsonl` |
+| 🔒 Failed logins | `grep 'login_failed' /var/www/quick-meet/server/logs/security/*.jsonl` |
 
 ---
 
@@ -541,6 +606,18 @@ VPS আপনা আপনি update হবে!
 ├── server/
 │   ├── .env                    ← ⭐ manually created (Step 7)
 │   ├── server.js               ← entry point
+│   ├── security/               ← 🔒 security modules (8 files)
+│   │   ├── index.js            ← module aggregation + init/shutdown
+│   │   ├── CryptoService.js    ← AES-256-GCM, HMAC, ECDH, HKDF
+│   │   ├── SecurityEventLogger.js ← tamper-proof audit logs
+│   │   ├── IntrusionDetector.js   ← brute-force + IP ban + threat scoring
+│   │   ├── SocketGuard.js      ← per-event auth + rate limiting
+│   │   ├── CallTokenService.js ← one-time call tokens
+│   │   ├── SDPSanitizer.js     ← SDP/ICE validation
+│   │   └── FileScanner.js      ← magic-byte + content scanning
+│   ├── logs/
+│   │   └── security/           ← 🔒 security audit logs (auto-created)
+│   │       └── security-YYYY-MM-DD.jsonl
 │   ├── uploads/                ← user uploaded files
 │   ├── node_modules/
 │   └── package.json
@@ -553,6 +630,7 @@ VPS আপনা আপনি update হবে!
 │   ├── server.key              ← auto-generated (selfsigned)
 │   └── server.cert             ← auto-generated (selfsigned)
 ├── deploy.sh                   ← auto-deploy script (optional)
+├── SECURITY_HARDENING.md       ← 🔒 security documentation
 └── .git/
 
 /etc/nginx/sites-available/quickmeet  ← Nginx config
@@ -574,6 +652,27 @@ VPS আপনা আপনি update হবে!
 6. **MongoDB Atlas** — Network Access এ 0.0.0.0/0 allow করো (সব IP থেকে access)
 7. **VPS reboot হলে** — PM2 auto-start করবে (`pm2 startup` + `pm2 save` করা থাকলে)
 
+### 🔒 Security-Specific নোট
+
+8. **`ENCRYPTION_MASTER_KEY` হারালে সব encrypted messages আর পড়া যাবে না!** — অবশ্যই কোথাও safely backup রাখো (password manager, offline note)
+9. **`/uploads/` directory আর Nginx দিয়ে public serve হয় না** — Files এখন authenticated endpoint `/api/files/download/:filename` দিয়ে serve হয়
+10. **Security logs daily check করো** — `server/logs/security/` directory তে tamper-proof audit logs save হয়
+11. **Access token মাত্র 15 মিনিট valid** — পুরনো `JWT_EXPIRES_IN=7d` আর কাজ করবে না
+12. **JWT_SECRET প্রতি 90 দিনে rotate করো** — সব user কে re-login করতে হবে
+13. **ENCRYPTION_MASTER_KEY শুধু তখনই change করো যখন compromised হয়** — change করলে সব পুরনো messages re-encrypt করতে হবে
+14. **Brute force protection active** — 5 failed login = 15min lock, 10 = 1hr, 15+ = 24hr auto-lock
+15. **CRITICAL security event দেখলে** — `SECURITY_HARDENING.md` এর Emergency Playbook দেখো
+
+### 🔑 Key Rotation Schedule
+
+| Secret | কত দিন পর পর | Rotation এর প্রভাব |
+|---|---|---|
+| `JWT_SECRET` | প্রতি 90 দিন | সব user force re-login |
+| `ENCRYPTION_MASTER_KEY` | শুধু compromised হলে | ⚠️ সব messages re-encrypt লাগবে |
+| `LOG_HMAC_SECRET` | প্রতি 90 দিন | পুরনো logs পুরনো key দিয়ে verify হবে |
+| Refresh Tokens | Auto-rotated | User দের কিছু করতে হয় না |
+
 ---
 
 *Last updated: February 10, 2026*
+*Security hardening: Zero-Trust / Military-Grade — see SECURITY_HARDENING.md*

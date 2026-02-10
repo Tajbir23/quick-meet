@@ -127,6 +127,20 @@ const protect = async (req, res, next) => {
       });
     }
 
+    // Check if user is blocked
+    if (user.isBlocked) {
+      securityLogger.authEvent('blocked_user_request', SEVERITY.WARN, {
+        userId: user._id.toString(),
+        ip: req.ip,
+        path: req.originalUrl,
+      });
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been blocked. Contact the administrator.',
+        code: 'ACCOUNT_BLOCKED',
+      });
+    }
+
     // Verify device fingerprint if present in token
     if (decoded.fp && req.headers['x-device-fingerprint']) {
       const currentFP = req.headers['x-device-fingerprint'];

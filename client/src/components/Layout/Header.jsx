@@ -1,5 +1,5 @@
 import {
-  Phone, Video, ArrowLeft, Users, Info
+  Phone, Video, ArrowLeft, Users, Info, Shield
 } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useCallStore from '../../store/useCallStore';
@@ -91,7 +91,15 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
 
         {/* Name & status */}
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-white truncate">{activeChat.name}</h3>
+          <div className="flex items-center gap-1.5">
+            <h3 className="text-sm font-semibold text-white truncate">{activeChat.name}</h3>
+            {activeChat.role === 'owner' && (
+              <span className="flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-[9px] rounded-full font-medium flex-shrink-0">
+                <Shield size={8} />
+                OWNER
+              </span>
+            )}
+          </div>
           <p className="text-xs text-dark-400 truncate">
             {isGroup
               ? `${activeChat.memberCount || 0} members`

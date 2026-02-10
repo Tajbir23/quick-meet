@@ -104,6 +104,16 @@ const initializeSocket = (httpsServer) => {
         return next(new Error('Authentication error: Session terminated'));
       }
 
+      // Check if user is blocked
+      if (user.isBlocked) {
+        securityLogger.socketEvent('blocked_user_connection', SEVERITY.WARN, {
+          userId: user._id.toString(),
+          username: user.username,
+          ip,
+        });
+        return next(new Error('Authentication error: Account is blocked'));
+      }
+
       // Bind user data to socket instance
       socket.userId = user._id.toString();
       socket.username = user.username;

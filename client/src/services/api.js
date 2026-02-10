@@ -156,6 +156,12 @@ api.interceptors.response.use(
       }
     }
 
+    // Handle blocked account (403)
+    if (error.response?.status === 403 &&
+        error.response?.data?.code === 'ACCOUNT_BLOCKED') {
+      forceLogout();
+    }
+
     return Promise.reject(error);
   }
 );

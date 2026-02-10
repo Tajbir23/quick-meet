@@ -5,6 +5,7 @@ import { onForceLogout } from './services/socket';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import HomePage from './pages/HomePage';
+import OwnerDashboard from './pages/OwnerDashboard';
 import ProtectedRoute from './components/Auth/ProtectedRoute';
 import IncomingCall from './components/Call/IncomingCall';
 import IncomingGroupCall from './components/Call/IncomingGroupCall';
@@ -12,7 +13,7 @@ import NetworkStatus from './components/Common/NetworkStatus';
 import Notification from './components/Common/Notification';
 
 function App() {
-  const { checkAuth, isAuthenticated, isLoading, handleForceLogout } = useAuthStore();
+  const { checkAuth, isAuthenticated, isLoading, isOwner, handleForceLogout } = useAuthStore();
 
   useEffect(() => {
     checkAuth();
@@ -49,6 +50,14 @@ function App() {
         <Route
           path="/signup"
           element={isAuthenticated ? <Navigate to="/" replace /> : <SignupPage />}
+        />
+        <Route
+          path="/owner/*"
+          element={
+            <ProtectedRoute>
+              {isOwner ? <OwnerDashboard /> : <Navigate to="/" replace />}
+            </ProtectedRoute>
+          }
         />
         <Route
           path="/*"

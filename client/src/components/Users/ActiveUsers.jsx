@@ -4,7 +4,7 @@
  * ============================================
  */
 
-import { Users, MessageCircle } from 'lucide-react';
+import { Users, MessageCircle, Shield } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
 import { getInitials, stringToColor } from '../../utils/helpers';
@@ -34,6 +34,7 @@ const ActiveUsers = ({ searchQuery = '' }) => {
       id: user._id,
       type: 'user',
       name: user.username,
+      role: user.role,
     });
   };
 
@@ -89,7 +90,15 @@ const ActiveUsers = ({ searchQuery = '' }) => {
 
                 {/* Info */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">{user.username}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-semibold text-white truncate">{user.username}</p>
+                    {user.role === 'owner' && (
+                      <span className="flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-[9px] rounded-full font-medium flex-shrink-0">
+                        <Shield size={8} />
+                        OWNER
+                      </span>
+                    )}
+                  </div>
                   <p className={`text-xs mt-0.5 ${online ? 'text-emerald-400' : 'text-dark-500'}`}>
                     {online ? 'Online' : 'Offline'}
                   </p>

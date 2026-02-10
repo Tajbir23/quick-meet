@@ -241,6 +241,19 @@ const login = async (req, res) => {
       });
     }
 
+    // Check if user is blocked
+    if (user.isBlocked) {
+      securityLogger.authEvent('login_blocked_user', SEVERITY.WARN, {
+        userId: user._id.toString(),
+        email, ip,
+      });
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been blocked. Contact the administrator.',
+        code: 'ACCOUNT_BLOCKED',
+      });
+    }
+
     // === SUCCESSFUL LOGIN ===
 
     // Clear failed login counters
