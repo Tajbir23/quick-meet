@@ -15,6 +15,7 @@ const { apiLimiter } = require('../middleware/rateLimiter');
 const {
   getLogFiles,
   getLogsByDate,
+  getRecentLogs,
   getSecurityAlerts,
   getSystemStatus,
   getAllUsers,
@@ -34,6 +35,7 @@ router.use(apiLimiter);
 
 // ─── Security Logs ──────────────────────────────────────
 router.get('/logs', getLogFiles);
+router.get('/logs/recent', getRecentLogs);
 router.get('/logs/download/:filename', downloadLogFile);
 router.get('/logs/:date', getLogsByDate);
 

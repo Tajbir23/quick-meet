@@ -11,13 +11,13 @@
  * 5. Logs — Full security log viewer
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Shield, Users, FileText, AlertTriangle, Activity,
   ArrowLeft, Download, Trash2, Ban, CheckCircle,
   Search, RefreshCw, Eye, EyeOff, Clock, Server,
   HardDrive, Cpu, ChevronDown, ChevronUp, X,
-  Lock, Unlock, Calendar, Filter
+  Lock, Unlock, Calendar, Filter, Terminal, Pause, Play
 } from 'lucide-react';
 import useOwnerStore from '../store/useOwnerStore';
 import useAuthStore from '../store/useAuthStore';
@@ -548,158 +548,360 @@ const FilesTab = () => {
   );
 };
 
-// ─── Logs Tab ───────────────────────────────────────────
+// ─── Logs Tab — Terminal-Style Viewer ───────────────────
 const LogsTab = () => {
-  const { logFiles, logEntries, logTotal, logsLoading, fetchLogFiles, fetchLogsByDate, downloadLogFile } = useOwnerStore();
-  const [selectedDate, setSelectedDate] = useState(null);
+  const { logEntries, logTotal, logsLoading, fetchRecentLogs } = useOwnerStore();
+  const [search, setSearch] = useState('');
   const [severity, setSeverity] = useState('');
   const [category, setCategory] = useState('');
-  const [search, setSearch] = useState('');
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [limit, setLimit] = useState(300);
+  const terminalRef = useRef(null);
+  const searchInputRef = useRef(null);
+  const autoRefreshRef = useRef(null);
+
+  // Fetch logs
+  const loadLogs = useCallback(() => {
+    fetchRecentLogs({ limit, severity, category, search: search.trim() || undefined });
+  }, [limit, severity, category, search, fetchRecentLogs]);
 
   useEffect(() => {
-    fetchLogFiles();
+    loadLogs();
+  }, [severity, category, limit]);
+
+  // Auto-refresh every 5 seconds
+  useEffect(() => {
+    if (autoRefresh) {
+      autoRefreshRef.current = setInterval(loadLogs, 5000);
+    }
+    return () => {
+      if (autoRefreshRef.current) clearInterval(autoRefreshRef.current);
+    };
+  }, [autoRefresh, loadLogs]);
+
+  // Auto-scroll to top (newest) on new data
+  useEffect(() => {
+    if (terminalRef.current && autoRefresh) {
+      terminalRef.current.scrollTop = 0;
+    }
+  }, [logEntries, autoRefresh]);
+
+  // Keyboard shortcut: Ctrl+F focuses search, Enter triggers search
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const handleSelectDate = (date) => {
-    setSelectedDate(date);
-    fetchLogsByDate(date, { severity, category, search });
+  const handleSearch = () => {
+    loadLogs();
   };
 
-  const handleFilter = () => {
-    if (selectedDate) {
-      fetchLogsByDate(selectedDate, { severity, category, search });
+  // Severity color map for terminal
+  const getSeverityColor = (sev) => {
+    switch (sev) {
+      case 'CRITICAL': return 'text-red-400';
+      case 'ALERT': return 'text-amber-400';
+      case 'WARN': return 'text-yellow-300';
+      case 'INFO': return 'text-green-400';
+      default: return 'text-gray-400';
     }
   };
 
-  useEffect(() => {
-    if (selectedDate) handleFilter();
-  }, [severity, category]);
+  const getSeverityBg = (sev) => {
+    switch (sev) {
+      case 'CRITICAL': return 'bg-red-500/20 text-red-300';
+      case 'ALERT': return 'bg-amber-500/20 text-amber-300';
+      case 'WARN': return 'bg-yellow-500/15 text-yellow-300';
+      case 'INFO': return 'bg-green-500/15 text-green-300';
+      default: return 'bg-gray-500/15 text-gray-400';
+    }
+  };
+
+  const getCategoryColor = (cat) => {
+    switch (cat) {
+      case 'AUTH': return 'text-cyan-400';
+      case 'INTRUSION': return 'text-red-300';
+      case 'SOCKET': return 'text-blue-400';
+      case 'CALL': return 'text-purple-400';
+      case 'FILE': return 'text-teal-400';
+      case 'SESSION': return 'text-indigo-400';
+      case 'SYSTEM': return 'text-amber-300';
+      default: return 'text-gray-400';
+    }
+  };
+
+  // Format timestamp for terminal display
+  const formatTerminalTime = (ts) => {
+    const d = new Date(ts);
+    return d.toLocaleString([], {
+      month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    });
+  };
+
+  // Highlight search term in text
+  const highlightText = (text, query) => {
+    if (!query || !text) return text;
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const parts = String(text).split(regex);
+    return parts.map((part, i) =>
+      regex.test(part)
+        ? <mark key={i} className="bg-amber-400/30 text-amber-200 rounded px-0.5">{part}</mark>
+        : part
+    );
+  };
 
   return (
-    <div className="p-4 max-w-5xl mx-auto">
-      {!selectedDate ? (
-        // Log file list
-        <>
-          <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
-            <Shield size={16} className="text-amber-400" />
-            Security Log Files
-          </h2>
-          {logsLoading ? (
-            <LoadingSpinner text="Loading log files..." />
-          ) : logFiles.length === 0 ? (
-            <div className="text-center py-12">
-              <Shield size={40} className="mx-auto text-dark-600 mb-3" />
-              <p className="text-dark-400 text-sm">No log files found</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {logFiles.map(f => (
-                <button
-                  key={f.name}
-                  onClick={() => handleSelectDate(f.date)}
-                  className="w-full bg-dark-800 border border-dark-700 rounded-xl p-3 text-left hover:border-dark-600 transition-colors"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Calendar size={16} className="text-amber-400" />
-                      <div>
-                        <p className="text-sm font-medium text-white">{f.date}</p>
-                        <p className="text-[10px] text-dark-500">{formatBytes(f.size)}</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); downloadLogFile(f.name); }}
-                      className="p-2 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20"
-                      title="Download raw log"
-                    >
-                      <Download size={14} />
-                    </button>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </>
-      ) : (
-        // Log entries viewer
-        <>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setSelectedDate(null)}
-                className="btn-icon text-dark-400 hover:text-white"
-              >
-                <ArrowLeft size={16} />
-              </button>
-              <h2 className="text-sm font-semibold text-white">
-                Logs — {selectedDate}
-                <span className="text-xs text-dark-400 ml-2">({logTotal} entries)</span>
-              </h2>
-            </div>
+    <div className="flex flex-col h-full max-h-[calc(100vh-7.5rem)]">
+      {/* Terminal Header Bar */}
+      <div className="bg-[#1a1a2e] border-b border-[#2a2a4a] px-4 py-2.5 flex-shrink-0">
+        <div className="flex items-center justify-between mb-2.5">
+          <div className="flex items-center gap-2">
+            <Terminal size={16} className="text-green-400" />
+            <h2 className="text-sm font-bold text-green-400 font-mono tracking-wide">
+              SECURITY LOGS
+            </h2>
+            <span className="text-[10px] text-gray-500 font-mono">
+              [{logTotal} entries]
+            </span>
+            {logsLoading && (
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+            )}
           </div>
-
-          {/* Filters */}
-          <div className="flex flex-wrap gap-2 mb-4">
-            <select
-              value={severity}
-              onChange={e => setSeverity(e.target.value)}
-              className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-1.5 text-xs text-white"
-            >
-              <option value="">All Severities</option>
-              <option value="INFO">INFO</option>
-              <option value="WARN">WARN</option>
-              <option value="ALERT">ALERT</option>
-              <option value="CRITICAL">CRITICAL</option>
-            </select>
-            <select
-              value={category}
-              onChange={e => setCategory(e.target.value)}
-              className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-1.5 text-xs text-white"
-            >
-              <option value="">All Categories</option>
-              <option value="AUTH">AUTH</option>
-              <option value="SESSION">SESSION</option>
-              <option value="SOCKET">SOCKET</option>
-              <option value="CALL">CALL</option>
-              <option value="FILE">FILE</option>
-              <option value="INTRUSION">INTRUSION</option>
-              <option value="SYSTEM">SYSTEM</option>
-            </select>
-            <div className="relative flex-1 min-w-[150px]">
-              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-dark-400" />
-              <input
-                type="text"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleFilter()}
-                placeholder="Search logs..."
-                className="w-full bg-dark-800 border border-dark-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white"
-              />
-            </div>
+          <div className="flex items-center gap-2">
+            {/* Auto-refresh toggle */}
             <button
-              onClick={handleFilter}
-              className="px-3 py-1.5 bg-amber-500/20 text-amber-400 text-xs rounded-lg hover:bg-amber-500/30"
+              onClick={() => setAutoRefresh(!autoRefresh)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-mono transition-all ${
+                autoRefresh
+                  ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                  : 'bg-[#2a2a4a] text-gray-500 border border-[#3a3a5a] hover:text-gray-300'
+              }`}
+              title={autoRefresh ? 'Pause auto-refresh' : 'Start auto-refresh (5s)'}
             >
-              <Filter size={12} />
+              {autoRefresh ? <Pause size={10} /> : <Play size={10} />}
+              {autoRefresh ? 'LIVE' : 'AUTO'}
             </button>
+            {/* Manual refresh */}
+            <button
+              onClick={loadLogs}
+              disabled={logsLoading}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-mono bg-[#2a2a4a] text-gray-400 border border-[#3a3a5a] hover:text-white transition-all disabled:opacity-50"
+            >
+              <RefreshCw size={10} className={logsLoading ? 'animate-spin' : ''} />
+              REFRESH
+            </button>
+            {/* Limit selector */}
+            <select
+              value={limit}
+              onChange={(e) => setLimit(parseInt(e.target.value))}
+              className="bg-[#2a2a4a] border border-[#3a3a5a] rounded-md px-2 py-1 text-[10px] text-gray-400 font-mono"
+            >
+              <option value={100}>100</option>
+              <option value={300}>300</option>
+              <option value={500}>500</option>
+              <option value={1000}>1000</option>
+            </select>
           </div>
+        </div>
 
-          {/* Log entries */}
-          {logsLoading ? (
-            <LoadingSpinner text="Loading logs..." />
-          ) : logEntries.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-dark-400 text-sm">No matching log entries</p>
+        {/* Filters Row */}
+        <div className="flex flex-wrap gap-2 items-center">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSearch()}
+              placeholder="Search logs... (Ctrl+F)"
+              className="w-full bg-[#0d0d1a] border border-[#2a2a4a] rounded-md pl-8 pr-8 py-1.5 text-xs text-green-300 font-mono placeholder-gray-600 focus:border-green-500/50 focus:outline-none focus:ring-1 focus:ring-green-500/20 transition-all"
+            />
+            {search && (
+              <button
+                onClick={() => { setSearch(''); setTimeout(loadLogs, 0); }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          {/* Severity filter */}
+          <select
+            value={severity}
+            onChange={e => setSeverity(e.target.value)}
+            className="bg-[#0d0d1a] border border-[#2a2a4a] rounded-md px-2.5 py-1.5 text-[11px] text-gray-400 font-mono focus:border-green-500/50 focus:outline-none"
+          >
+            <option value="">ALL SEVERITY</option>
+            <option value="INFO">● INFO</option>
+            <option value="WARN">● WARN</option>
+            <option value="ALERT">● ALERT</option>
+            <option value="CRITICAL">● CRITICAL</option>
+          </select>
+          {/* Category filter */}
+          <select
+            value={category}
+            onChange={e => setCategory(e.target.value)}
+            className="bg-[#0d0d1a] border border-[#2a2a4a] rounded-md px-2.5 py-1.5 text-[11px] text-gray-400 font-mono focus:border-green-500/50 focus:outline-none"
+          >
+            <option value="">ALL CATEGORY</option>
+            <option value="AUTH">AUTH</option>
+            <option value="SESSION">SESSION</option>
+            <option value="SOCKET">SOCKET</option>
+            <option value="CALL">CALL</option>
+            <option value="FILE">FILE</option>
+            <option value="INTRUSION">INTRUSION</option>
+            <option value="SYSTEM">SYSTEM</option>
+          </select>
+          {/* Search button */}
+          <button
+            onClick={handleSearch}
+            className="px-3 py-1.5 bg-green-500/15 text-green-400 text-[11px] font-mono rounded-md border border-green-500/30 hover:bg-green-500/25 transition-all"
+          >
+            SEARCH
+          </button>
+        </div>
+      </div>
+
+      {/* Terminal Body */}
+      <div
+        ref={terminalRef}
+        className="flex-1 overflow-y-auto bg-[#0a0a14] font-mono text-[11px] leading-[1.7] selection:bg-green-500/30"
+        style={{ scrollBehavior: 'smooth' }}
+      >
+        {logsLoading && logEntries.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <div className="inline-block w-5 h-5 border-2 border-green-400 border-t-transparent rounded-full animate-spin mb-3" />
+              <p className="text-green-500/60 text-xs font-mono">Loading logs...</p>
             </div>
-          ) : (
-            <div className="space-y-1.5">
-              {logEntries.map((entry, i) => (
-                <LogEntry key={i} entry={entry} />
-              ))}
+          </div>
+        ) : logEntries.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <Terminal size={32} className="mx-auto text-gray-700 mb-3" />
+              <p className="text-gray-600 text-xs font-mono">No matching log entries</p>
+              <p className="text-gray-700 text-[10px] font-mono mt-1">Try adjusting your filters</p>
             </div>
-          )}
-        </>
-      )}
+          </div>
+        ) : (
+          <div className="py-1">
+            {/* Terminal top line */}
+            <div className="px-3 py-1 text-gray-600 border-b border-[#1a1a2e] select-none">
+              ═══ Showing {logEntries.length} of {logTotal} entries {severity && `│ severity=${severity}`} {category && `│ category=${category}`} {search && `│ search="${search}"`} ═══
+            </div>
+
+            {logEntries.map((entry, i) => (
+              <div key={entry.id || i}>
+                <div
+                  className={`px-3 py-[3px] flex items-start gap-0 cursor-pointer transition-colors hover:bg-[#12122a] border-l-2 ${
+                    entry.severity === 'CRITICAL' ? 'border-l-red-500/60 bg-red-500/[0.03]'
+                    : entry.severity === 'ALERT' ? 'border-l-amber-500/50 bg-amber-500/[0.02]'
+                    : entry.severity === 'WARN' ? 'border-l-yellow-500/30'
+                    : 'border-l-transparent'
+                  }`}
+                  onClick={() => setExpandedId(expandedId === (entry.id || i) ? null : (entry.id || i))}
+                >
+                  {/* Line number */}
+                  <span className="text-gray-700 w-8 flex-shrink-0 text-right mr-3 select-none">
+                    {i + 1}
+                  </span>
+                  {/* Timestamp */}
+                  <span className="text-gray-500 flex-shrink-0 mr-2">
+                    {formatTerminalTime(entry.timestamp)}
+                  </span>
+                  {/* Severity badge */}
+                  <span className={`${getSeverityBg(entry.severity)} px-1.5 rounded text-[10px] font-bold flex-shrink-0 mr-2 inline-block min-w-[58px] text-center`}>
+                    {entry.severity}
+                  </span>
+                  {/* Category */}
+                  <span className={`${getCategoryColor(entry.category)} flex-shrink-0 mr-2 min-w-[70px]`}>
+                    [{entry.category}]
+                  </span>
+                  {/* Event */}
+                  <span className="text-gray-300 mr-2 flex-shrink-0">
+                    {highlightText(entry.event, search)}
+                  </span>
+                  {/* Brief data preview */}
+                  <span className="text-gray-600 truncate flex-1">
+                    {entry.data?.message
+                      ? `— ${highlightText(String(entry.data.message), search)}`
+                      : entry.data?.ip
+                        ? `— ip:${entry.data.ip}`
+                        : entry.data?.userId
+                          ? `— user:${entry.data.userId}`
+                          : ''
+                    }
+                  </span>
+                  {/* Expand indicator */}
+                  {entry.data && Object.keys(entry.data).length > 0 && (
+                    <span className="text-gray-700 flex-shrink-0 ml-1">
+                      {expandedId === (entry.id || i) ? '▼' : '▶'}
+                    </span>
+                  )}
+                </div>
+
+                {/* Expanded data panel */}
+                {expandedId === (entry.id || i) && entry.data && (
+                  <div className="ml-11 mr-3 mb-1 bg-[#0d0d20] border border-[#1a1a3a] rounded-md overflow-hidden">
+                    <div className="px-3 py-1.5 bg-[#12122a] text-gray-500 text-[10px] flex items-center justify-between border-b border-[#1a1a3a]">
+                      <span>Event Data</span>
+                      <span className="text-gray-700">{entry.chainHash ? `chain:${entry.chainHash.substring(0, 12)}...` : ''}</span>
+                    </div>
+                    <pre className="px-3 py-2 text-[10px] overflow-x-auto whitespace-pre-wrap">
+                      {Object.entries(entry.data).map(([key, value]) => (
+                        <div key={key} className="flex">
+                          <span className="text-cyan-500 mr-2 flex-shrink-0">{key}:</span>
+                          <span className={
+                            key === 'ip' ? 'text-amber-300'
+                            : key === 'userId' || key === 'username' ? 'text-blue-300'
+                            : typeof value === 'boolean' ? (value ? 'text-green-400' : 'text-red-400')
+                            : typeof value === 'number' ? 'text-purple-300'
+                            : 'text-gray-400'
+                          }>
+                            {highlightText(typeof value === 'object' ? JSON.stringify(value) : String(value), search)}
+                          </span>
+                        </div>
+                      ))}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Terminal bottom line */}
+            <div className="px-3 py-1 text-gray-700 border-t border-[#1a1a2e] select-none">
+              ═══ END {autoRefresh && '│ 🟢 Auto-refreshing every 5s'} ═══
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Terminal Status Bar */}
+      <div className="bg-[#1a1a2e] border-t border-[#2a2a4a] px-3 py-1 flex items-center justify-between text-[10px] font-mono text-gray-600 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <span>{logTotal} total</span>
+          <span>│</span>
+          <span className="text-green-500">● {logEntries.filter(e => e.severity === 'INFO').length} INFO</span>
+          <span className="text-yellow-400">● {logEntries.filter(e => e.severity === 'WARN').length} WARN</span>
+          <span className="text-amber-400">● {logEntries.filter(e => e.severity === 'ALERT').length} ALERT</span>
+          <span className="text-red-400">● {logEntries.filter(e => e.severity === 'CRITICAL').length} CRIT</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {autoRefresh && <span className="text-green-400 animate-pulse">● LIVE</span>}
+          <span>Ctrl+F to search</span>
+        </div>
+      </div>
     </div>
   );
 };
@@ -758,39 +960,6 @@ const AlertEntry = ({ alert, compact = false }) => {
       {expanded && (
         <pre className="mt-2 text-[10px] text-dark-400 bg-dark-900 rounded-lg p-2 overflow-x-auto whitespace-pre-wrap">
           {JSON.stringify(alert.data, null, 2)}
-        </pre>
-      )}
-    </div>
-  );
-};
-
-const LogEntry = ({ entry }) => {
-  const [expanded, setExpanded] = useState(false);
-
-  const severityColors = {
-    INFO: 'text-blue-400',
-    WARN: 'text-yellow-400',
-    ALERT: 'text-amber-400',
-    CRITICAL: 'text-red-400',
-  };
-
-  const time = new Date(entry.timestamp).toLocaleTimeString();
-
-  return (
-    <div
-      className="bg-dark-800 border border-dark-700 rounded-lg p-2 cursor-pointer hover:border-dark-600 transition-colors"
-      onClick={() => setExpanded(!expanded)}
-    >
-      <div className="flex items-center gap-2 text-[11px]">
-        <span className="text-dark-500 font-mono w-16 flex-shrink-0">{time}</span>
-        <span className={`font-medium w-14 flex-shrink-0 ${severityColors[entry.severity]}`}>{entry.severity}</span>
-        <span className="text-dark-400 w-16 flex-shrink-0">{entry.category}</span>
-        <span className="text-white flex-1 truncate">{entry.event}</span>
-        {entry.data?.ip && <span className="text-dark-500 text-[10px] flex-shrink-0">{entry.data.ip}</span>}
-      </div>
-      {expanded && entry.data && (
-        <pre className="mt-2 text-[10px] text-dark-400 bg-dark-900 rounded-lg p-2 overflow-x-auto whitespace-pre-wrap">
-          {JSON.stringify(entry.data, null, 2)}
         </pre>
       )}
     </div>

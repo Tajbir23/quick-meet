@@ -82,6 +82,26 @@ const useOwnerStore = create((set, get) => ({
     }
   },
 
+  fetchRecentLogs: async (options = {}) => {
+    set({ logsLoading: true, error: null });
+    try {
+      const params = new URLSearchParams();
+      if (options.limit) params.set('limit', options.limit);
+      if (options.severity) params.set('severity', options.severity);
+      if (options.category) params.set('category', options.category);
+      if (options.search) params.set('search', options.search);
+
+      const res = await api.get(`/owner/logs/recent?${params.toString()}`);
+      set({
+        logEntries: res.data.data.entries,
+        logTotal: res.data.data.total,
+        logsLoading: false,
+      });
+    } catch (error) {
+      set({ error: error.response?.data?.message || 'Failed to fetch recent logs', logsLoading: false });
+    }
+  },
+
   downloadLogFile: async (filename) => {
     try {
       const token = localStorage.getItem('accessToken');

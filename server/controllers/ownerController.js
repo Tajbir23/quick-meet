@@ -529,6 +529,73 @@ const toggleOwnerVisibility = async (req, res) => {
 };
 
 /**
+ * GET /api/owner/logs/recent
+ * Get the most recent logs across all dates — powers the terminal view
+ * Query: ?limit=500&severity=&category=&search=
+ */
+const getRecentLogs = async (req, res) => {
+  try {
+    const { limit = 500, severity, category, search } = req.query;
+
+    if (!fs.existsSync(logsDir)) {
+      return res.json({ success: true, data: { entries: [], total: 0 } });
+    }
+
+    // Get all log files sorted newest first
+    const logFileNames = fs.readdirSync(logsDir)
+      .filter(f => f.endsWith('.jsonl'))
+      .sort()
+      .reverse();
+
+    let allEntries = [];
+    const maxLimit = Math.min(parseInt(limit), 2000);
+
+    // Read files starting from newest until we have enough entries
+    for (const fname of logFileNames) {
+      if (allEntries.length >= maxLimit) break;
+
+      const content = fs.readFileSync(path.join(logsDir, fname), 'utf8');
+      const lines = content.trim().split('\n').filter(l => l);
+
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line);
+          allEntries.push(entry);
+        } catch {}
+      }
+    }
+
+    // Sort newest first
+    allEntries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // Apply filters
+    if (severity) {
+      allEntries = allEntries.filter(e => e.severity === severity.toUpperCase());
+    }
+    if (category) {
+      allEntries = allEntries.filter(e => e.category === category.toUpperCase());
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      allEntries = allEntries.filter(e =>
+        e.event?.toLowerCase().includes(q) ||
+        e.category?.toLowerCase().includes(q) ||
+        e.severity?.toLowerCase().includes(q) ||
+        JSON.stringify(e.data || {}).toLowerCase().includes(q)
+      );
+    }
+
+    const total = allEntries.length;
+    allEntries = allEntries.slice(0, maxLimit);
+
+    res.json({ success: true, data: { entries: allEntries, total } });
+  } catch (error) {
+    console.error('Get recent logs error:', error);
+    res.status(500).json({ success: false, message: 'Error fetching recent logs' });
+  }
+};
+
+/**
  * GET /api/owner/logs/download/:filename
  * Download a raw log file
  */
@@ -574,6 +641,7 @@ function formatUptime(seconds) {
 module.exports = {
   getLogFiles,
   getLogsByDate,
+  getRecentLogs,
   getSecurityAlerts,
   getSystemStatus,
   getAllUsers,
