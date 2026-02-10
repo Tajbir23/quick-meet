@@ -244,12 +244,17 @@ const useAuthStore = create((set, get) => ({
   clearError: () => set({ error: null }),
 
   /**
-   * Update user profile in store
+   * Update user profile in store + localStorage
    */
   updateUser: (updates) => {
-    set((state) => ({
-      user: state.user ? { ...state.user, ...updates } : null,
-    }));
+    set((state) => {
+      const updatedUser = state.user ? { ...state.user, ...updates } : null;
+      // Persist to localStorage so page refresh keeps changes
+      if (updatedUser) {
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      }
+      return { user: updatedUser };
+    });
   },
 }));
 

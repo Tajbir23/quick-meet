@@ -72,7 +72,7 @@ const UserSettings = ({ onClose }) => {
   const handleSaveProfile = async () => {
     setSaving(true);
     try {
-      let avatarUrl = user?.avatar;
+      let avatarUrl = user?.avatar || '';
 
       // Upload avatar if changed
       if (avatarFile) {
@@ -84,12 +84,25 @@ const UserSettings = ({ onClose }) => {
         avatarUrl = uploadRes.data.data.file.url;
       }
 
-      const res = await api.put('/users/profile', {
-        username: username.trim() || undefined,
-        avatar: avatarUrl,
-      });
+      const payload = {};
+      if (username.trim()) payload.username = username.trim();
+      if (avatarUrl !== (user?.avatar || '')) payload.avatar = avatarUrl;
+      // If nothing changed, still send avatar if file was uploaded
+      if (avatarFile) payload.avatar = avatarUrl;
 
-      updateUser(res.data.data.user);
+      if (Object.keys(payload).length === 0) {
+        toast('No changes to save');
+        setSaving(false);
+        return;
+      }
+
+      const res = await api.put('/users/profile', payload);
+      const updatedUser = res.data.data.user;
+
+      updateUser(updatedUser);
+      // Also update localStorage so refresh doesn't lose changes
+      const stored = JSON.parse(localStorage.getItem('user') || '{}');
+      localStorage.setItem('user', JSON.stringify({ ...stored, ...updatedUser }));
       toast.success('Profile updated!');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to update profile');
