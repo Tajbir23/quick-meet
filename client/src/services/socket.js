@@ -59,10 +59,21 @@ export const connectSocket = (token) => {
 
   socket.on('connect_error', (error) => {
     console.error('Socket connection error:', error.message);
-    // If auth error, don't keep retrying with bad token
+    // If auth error, try using the latest access token from localStorage
+    // (the API interceptor may have silently refreshed it)
     if (error.message?.includes('Authentication') || error.message?.includes('jwt')) {
-      console.log('Auth error on socket connect — stopping reconnection');
-      socket.disconnect();
+      const freshToken = localStorage.getItem('accessToken');
+      if (freshToken && freshToken !== socket.auth?.token) {
+        console.log('🔄 Socket auth failed — retrying with refreshed token');
+        socket.auth = { token: freshToken };
+        // Don't disconnect — let the built-in reconnection retry with the new token
+      } else {
+        console.log('Auth error on socket — no fresh token available, stopping');
+        socket.disconnect();
+        if (_onForceLogout) {
+          _onForceLogout('Session expired. Please login again.');
+        }
+      }
     }
   });
 

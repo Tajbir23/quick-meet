@@ -47,16 +47,20 @@ const useAuthStore = create((set, get) => ({
       const res = await api.get('/auth/me');
       const user = res.data.data.user;
 
+      // Read the LATEST token from localStorage — the API interceptor may
+      // have silently refreshed it during the /auth/me call above
+      const latestToken = localStorage.getItem('accessToken') || accessToken;
+
       set({
         user,
-        accessToken,
+        accessToken: latestToken,
         isAuthenticated: true,
         isLoading: false,
         isOwner: user.role === 'owner',
       });
 
-      // Connect socket with access token
-      connectSocket(accessToken);
+      // Connect socket with the latest (possibly refreshed) access token
+      connectSocket(latestToken);
     } catch (error) {
       // Token is invalid/expired — the API interceptor will try to refresh
       // If refresh also fails, the interceptor calls forceLogout
