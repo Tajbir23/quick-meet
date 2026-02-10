@@ -24,12 +24,19 @@ const { cryptoService, securityLogger } = require('../security');
 function encryptContent(plaintext) {
   if (!plaintext || plaintext.trim() === '') return { content: '', encrypted: false };
   try {
-    const encrypted = cryptoService.encrypt(plaintext);
+    // cryptoService.encrypt() returns a colon-separated string: "iv:authTag:ciphertext"
+    const encryptedStr = cryptoService.encrypt(plaintext);
+    const parts = encryptedStr.split(':');
+    if (parts.length !== 3) {
+      // Unexpected format — store plaintext as fallback
+      securityLogger.log('WARN', 'SYSTEM', 'Encryption returned unexpected format', {});
+      return { content: plaintext, encrypted: false };
+    }
     return {
-      content: encrypted.ciphertext,
+      content: parts[2],          // ciphertext (hex)
       encrypted: true,
-      encryptionIV: encrypted.iv,
-      encryptionTag: encrypted.tag,
+      encryptionIV: parts[0],     // iv (hex)
+      encryptionTag: parts[1],    // authTag (hex)
     };
   } catch (err) {
     securityLogger.log('WARN', 'SYSTEM', 'Message encryption failed, storing plaintext', { error: err.message });
@@ -45,9 +52,19 @@ function decryptContent(message) {
     return message.content;
   }
   try {
-    return cryptoService.decrypt(message.content, message.encryptionIV, message.encryptionTag);
+    // Reconstruct the colon-separated format that cryptoService.decrypt() expects:
+    // "iv:authTag:ciphertext"
+    const encryptedStr = `${message.encryptionIV}:${message.encryptionTag}:${message.content}`;
+    const decrypted = cryptoService.decrypt(encryptedStr);
+    if (decrypted === null) {
+      // decrypt returns null on auth tag failure (tampered data)
+      securityLogger.log('ALERT', 'SYSTEM', 'Message decryption auth tag failed', {
+        messageId: message._id?.toString(),
+      });
+      return '[Encrypted message - decryption failed]';
+    }
+    return decrypted;
   } catch (err) {
-    // If decryption fails, return placeholder (data integrity issue)
     securityLogger.log('ALERT', 'SYSTEM', 'Message decryption failed', {
       messageId: message._id?.toString(),
       error: err.message,
