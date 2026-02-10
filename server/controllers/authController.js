@@ -247,10 +247,13 @@ const login = async (req, res) => {
         userId: user._id.toString(),
         email, ip,
       });
+
+      const reason = user.blockedReason || 'No reason provided';
       return res.status(403).json({
         success: false,
-        message: 'Your account has been blocked. Contact the administrator.',
+        message: `Your account has been blocked. Reason: ${reason}`,
         code: 'ACCOUNT_BLOCKED',
+        blockedReason: reason,
       });
     }
 
