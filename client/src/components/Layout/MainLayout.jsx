@@ -19,8 +19,8 @@ const MainLayout = () => {
 
       {/* Main content — hidden on mobile when no chat, full screen when chat active */}
       <div className={`
-        ${activeChat ? 'flex' : 'hidden md:flex'}
-        flex-1 flex-col min-w-0
+        ${activeChat ? 'grid grid-rows-[3.5rem_1fr]' : 'hidden md:grid md:grid-rows-[4rem_1fr]'}
+        flex-1 min-w-0 h-full overflow-hidden
       `}>
         <Header />
         {activeChat ? (

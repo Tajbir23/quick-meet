@@ -14,7 +14,7 @@ const Header = () => {
 
   if (!activeChat) {
     return (
-      <div className="h-14 md:h-16 bg-dark-800 border-b border-dark-700 hidden md:flex items-center justify-center shrink-0">
+      <div className="h-14 md:h-16 bg-dark-800 border-b border-dark-700 hidden md:flex items-center justify-center">
         <p className="text-dark-500 text-sm">Select a conversation to start messaging</p>
       </div>
     );
@@ -57,7 +57,7 @@ const Header = () => {
   };
 
   return (
-    <div className="h-14 md:h-16 bg-dark-800 border-b border-dark-700 flex items-center justify-between px-2 md:px-4 shrink-0">
+    <div className="h-14 md:h-16 bg-dark-800 border-b border-dark-700 flex items-center justify-between px-2 md:px-4">
       <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
         {/* Back button — mobile only */}
         <button
