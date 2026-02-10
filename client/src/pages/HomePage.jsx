@@ -51,15 +51,16 @@ const HomePage = () => {
     if (!isInCall) return;
 
     const handleBeforeUnload = (e) => {
-      // Save call state for reconnection
+      // Save call state for reconnection (localStorage survives tab/browser close)
       const state = useCallStore.getState();
-      sessionStorage.setItem('pendingCallReconnect', JSON.stringify({
+      localStorage.setItem('pendingCallReconnect', JSON.stringify({
         callType: state.callType,
         remoteUserId: state.remoteUser?.userId,
         remoteUsername: state.remoteUser?.username,
         isGroupCall: state.isGroupCall,
         groupId: state.groupId,
         callDuration: state.callDuration,
+        savedAt: Date.now(),
       }));
 
       e.preventDefault();
@@ -75,15 +76,23 @@ const HomePage = () => {
   const reconnectAttempted = useRef(false);
   useEffect(() => {
     if (reconnectAttempted.current) return;
-    const raw = sessionStorage.getItem('pendingCallReconnect');
+    const raw = localStorage.getItem('pendingCallReconnect');
     if (!raw) return;
 
     reconnectAttempted.current = true;
-    sessionStorage.removeItem('pendingCallReconnect');
+    localStorage.removeItem('pendingCallReconnect');
+
     const savedCall = JSON.parse(raw);
     if (!savedCall?.remoteUserId && !savedCall?.isGroupCall) return;
 
-    console.log('🔄 Pending call reconnect found, waiting for socket...');
+    // Only reconnect if saved within last 30 seconds (stale = call already ended)
+    const age = Date.now() - (savedCall.savedAt || 0);
+    if (age > 30000) {
+      console.warn('⚠️ Saved call too old (' + Math.round(age / 1000) + 's), skipping reconnect');
+      return;
+    }
+
+    console.log('🔄 Pending call reconnect found (' + Math.round(age / 1000) + 's ago), waiting for socket...');
 
     // Poll until socket is connected, then trigger reconnect
     const poll = setInterval(() => {

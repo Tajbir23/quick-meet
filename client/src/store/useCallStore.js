@@ -216,6 +216,9 @@ const useCallStore = create((set, get) => ({
     // Close all WebRTC connections
     webrtcService.closeAllConnections();
 
+    // Clear any pending reconnect data (call ended normally)
+    localStorage.removeItem('pendingCallReconnect');
+
     // Reset state
     set({
       callStatus: CALL_STATUS.IDLE,
