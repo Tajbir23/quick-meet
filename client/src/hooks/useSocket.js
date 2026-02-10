@@ -199,14 +199,31 @@ const useSocket = () => {
     // Query active calls now that we're connected
     socket.emit('group-call:get-active-calls');
 
-    // Group call ended — remove banner
+    // Group call ended — remove banner & dismiss ringing
     socket.on('group-call:ended', ({ groupId }) => {
       useGroupStore.getState().removeActiveGroupCall(groupId);
-      // Also dismiss any legacy incoming notification
       const { incomingGroupCall } = useCallStore.getState();
       if (incomingGroupCall && incomingGroupCall.groupId === groupId) {
         useCallStore.getState().dismissGroupCall();
       }
+    });
+
+    // Ringing notification when a NEW group call starts
+    socket.on('group-call:incoming', ({ groupId, groupName, callerId, callerName, participantCount }) => {
+      if (callerId === user?._id) return;
+
+      const { callStatus, isGroupCall, groupId: currentGroupId } = useCallStore.getState();
+      if (callStatus !== 'idle' && !(isGroupCall && currentGroupId === groupId)) return;
+      if (isGroupCall && currentGroupId === groupId) return;
+
+      useCallStore.getState().setIncomingGroupCall({
+        groupId,
+        groupName,
+        callerName,
+        participantCount,
+      });
+
+      playNotificationSound('call');
     });
 
     socket.on('group-call:peer-joined', async ({ userId, username }) => {
@@ -291,6 +308,7 @@ const useSocket = () => {
       socket.off('group-call:active');
       socket.off('group-call:active-calls');
       socket.off('group-call:ended');
+      socket.off('group-call:incoming');
       socket.off('group-call:peer-joined');
       socket.off('group-call:peer-left');
       socket.off('group-call:offer');

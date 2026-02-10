@@ -122,6 +122,18 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
         participants: Array.from(callParticipants.entries()).map(([uid, uname]) => ({ userId: uid, username: uname })),
       });
 
+      // Also ring group members (incoming call popup) when call is new
+      if (isNewCall) {
+        io.to(`group:${groupId}`).emit('group-call:incoming', {
+          groupId,
+          groupName: group.name,
+          callerId: socket.userId,
+          callerName: socket.username,
+          participantCount: callParticipants.size,
+          isNewCall,
+        });
+      }
+
       // Tell the new peer about existing peers
       // New peer will create offers for each existing peer
       socket.emit('group-call:existing-peers', {

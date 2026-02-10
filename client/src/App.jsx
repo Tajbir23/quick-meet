@@ -6,6 +6,7 @@ import SignupPage from './pages/SignupPage';
 import HomePage from './pages/HomePage';
 import ProtectedRoute from './components/Auth/ProtectedRoute';
 import IncomingCall from './components/Call/IncomingCall';
+import IncomingGroupCall from './components/Call/IncomingGroupCall';
 import NetworkStatus from './components/Common/NetworkStatus';
 import Notification from './components/Common/Notification';
 
@@ -35,6 +36,7 @@ function App() {
       <NetworkStatus />
       <Notification />
       {isAuthenticated && <IncomingCall />}
+      {isAuthenticated && <IncomingGroupCall />}
 
       <Routes>
         <Route
