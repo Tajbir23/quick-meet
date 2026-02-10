@@ -44,6 +44,20 @@ const HomePage = () => {
                    callStatus === CALL_STATUS.RECONNECTING ||
                    callStatus === CALL_STATUS.FAILED;
 
+  // Warn user before refresh / tab close during an active call
+  useEffect(() => {
+    if (!isInCall) return;
+
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = '';          // Chrome requires returnValue to be set
+      return '';                   // some browsers use the return value
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isInCall]);
+
   return (
     <>
       <MainLayout />
