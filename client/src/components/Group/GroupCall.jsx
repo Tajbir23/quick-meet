@@ -102,11 +102,8 @@ const GroupCall = () => {
     return 'grid-cols-2 md:grid-cols-3 grid-rows-2'; // 5-6 participants
   }, [totalParticipants]);
 
-  // Don't render full overlay when minimized (must be after all hooks)
-  if (isMinimized) return null;
-
   return (
-    <div className="fixed inset-0 bg-dark-900 z-40 flex flex-col">
+    <div className={`fixed inset-0 bg-dark-900 z-40 flex flex-col ${isMinimized ? 'hidden' : ''}`}>
       {/* Header */}
       <div className="bg-dark-800/80 backdrop-blur-sm px-4 py-3 flex items-center justify-between z-10 safe-top">
         <div className="flex items-center gap-3">

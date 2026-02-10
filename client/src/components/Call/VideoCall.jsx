@@ -28,14 +28,14 @@ const VideoCall = () => {
   const remoteVideoRef = useRef(null);
   const [isLocalLarge, setIsLocalLarge] = useState(false);
 
-  // Attach local stream
+  // Attach local stream (re-run on maximize too)
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
     }
-  }, [localStream]);
+  }, [localStream, isMinimized]);
 
-  // Attach remote stream
+  // Attach remote stream (re-run on maximize too)
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
@@ -48,16 +48,13 @@ const VideoCall = () => {
         document.addEventListener('click', playOnClick);
       });
     }
-  }, [remoteStream]);
+  }, [remoteStream, isMinimized]);
 
   const isConnecting = callStatus === CALL_STATUS.CALLING || callStatus === CALL_STATUS.RECONNECTING;
   const isConnected = callStatus === CALL_STATUS.CONNECTED;
 
-  // Don't render full overlay when minimized (must be after all hooks)
-  if (isMinimized) return null;
-
   return (
-    <div className="fixed inset-0 bg-dark-900 z-40 flex flex-col safe-top">
+    <div className={`fixed inset-0 bg-dark-900 z-40 flex flex-col safe-top ${isMinimized ? 'hidden' : ''}`}>
       {/* Status bar */}
       <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/70 via-black/40 to-transparent p-3 md:p-4 safe-top">
         <div className="flex items-center justify-between">

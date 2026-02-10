@@ -22,7 +22,7 @@ const AudioCall = () => {
 
   const remoteAudioRef = useRef(null);
 
-  // Attach remote stream to audio element
+  // Attach remote stream to audio element (re-run on maximize too)
   useEffect(() => {
     if (remoteAudioRef.current && remoteStream) {
       remoteAudioRef.current.srcObject = remoteStream;
@@ -35,16 +35,13 @@ const AudioCall = () => {
         document.addEventListener('click', playOnClick);
       });
     }
-  }, [remoteStream]);
+  }, [remoteStream, isMinimized]);
 
   const isConnecting = callStatus === CALL_STATUS.CALLING || callStatus === CALL_STATUS.RECONNECTING;
   const isConnected = callStatus === CALL_STATUS.CONNECTED;
 
-  // Don't render full overlay when minimized (must be after all hooks)
-  if (isMinimized) return null;
-
   return (
-    <div className="fixed inset-0 bg-gradient-to-b from-dark-800 via-dark-900 to-dark-950 z-40 flex flex-col safe-top safe-bottom">
+    <div className={`fixed inset-0 bg-gradient-to-b from-dark-800 via-dark-900 to-dark-950 z-40 flex flex-col safe-top safe-bottom ${isMinimized ? 'hidden' : ''}`}>
       {/* Hidden audio element for remote audio playback */}
       <audio id="remote-audio" ref={remoteAudioRef} autoPlay playsInline />
 

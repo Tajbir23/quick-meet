@@ -25,7 +25,6 @@ const MinimizedCall = () => {
     callDuration,
     callStatus,
     remoteUser,
-    remoteStream,
     isGroupCall,
     groupCallParticipants,
     isAudioEnabled,
@@ -33,15 +32,6 @@ const MinimizedCall = () => {
     endCall,
     maximizeCall,
   } = useCallStore();
-
-  // Keep remote audio playing while minimized
-  const remoteAudioRef = useRef(null);
-  useEffect(() => {
-    if (remoteAudioRef.current && remoteStream) {
-      remoteAudioRef.current.srcObject = remoteStream;
-      remoteAudioRef.current.play().catch(() => {});
-    }
-  }, [remoteStream]);
 
   // Dragging state
   const containerRef = useRef(null);
@@ -111,9 +101,6 @@ const MinimizedCall = () => {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
-      {/* Hidden audio to keep remote audio playing while minimized */}
-      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
-
       <div className="flex items-center gap-2.5 bg-dark-800 border border-dark-600 rounded-2xl shadow-2xl shadow-black/40 px-3 py-2.5 backdrop-blur-sm cursor-grab active:cursor-grabbing">
         {/* Avatar / Icon */}
         <div
