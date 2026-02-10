@@ -60,7 +60,7 @@ const MessageBubble = ({ message, isMine, showAvatar }) => {
 
   return (
     <div className={`flex ${isMine ? 'justify-end' : 'justify-start'} mb-1 animate-fade-in`}>
-      <div className={`flex gap-2 ${isMine ? 'flex-row-reverse' : ''}`}>
+      <div className={`flex gap-2 max-w-[85%] md:max-w-[70%] ${isMine ? 'flex-row-reverse' : ''}`}>
         {/* Avatar (only for received messages) */}
         {!isMine && showAvatar ? (
           <div
@@ -74,7 +74,7 @@ const MessageBubble = ({ message, isMine, showAvatar }) => {
         )}
 
         {/* Message content */}
-        <div className="max-w-[85%] md:max-w-[70%]">
+        <div className="min-w-0">
           {/* Sender name (group messages) */}
           {!isMine && showAvatar && (
             <p className="text-[11px] text-dark-400 mb-1 ml-1 font-medium">{senderName}</p>
