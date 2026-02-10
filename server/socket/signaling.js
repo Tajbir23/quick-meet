@@ -44,6 +44,44 @@ const callTokenService = require('../security/CallTokenService');
 const socketGuard = require('../security/SocketGuard');
 const securityLogger = require('../security/SecurityEventLogger');
 const { SEVERITY } = require('../security/SecurityEventLogger');
+const Message = require('../models/Message');
+
+/**
+ * Helper: Create a call log message in DB and emit to both users in real-time.
+ * The CALLER is always the message sender so the UI shows correct direction.
+ */
+async function createCallMessage(io, onlineUsers, { callerId, receiverId, callType, callDuration, callStatus }) {
+  try {
+    const message = await Message.create({
+      sender: callerId,
+      receiver: receiverId,
+      content: '',
+      type: 'call',
+      callType: callType || 'audio',
+      callDuration: callDuration || 0,
+      callStatus: callStatus || 'completed',
+      encrypted: false,
+    });
+
+    await message.populate('sender', 'username avatar');
+    await message.populate('receiver', 'username avatar');
+
+    // Emit to BOTH users for real-time display
+    const callerSocketId = onlineUsers.get(callerId);
+    const receiverSocketId = onlineUsers.get(receiverId);
+
+    if (callerSocketId) {
+      io.to(callerSocketId).emit('call:message', { message, chatUserId: receiverId });
+    }
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit('call:message', { message, chatUserId: callerId });
+    }
+
+    console.log(`📞 Call message saved: ${callStatus} ${callType} call (${callDuration}s) between ${callerId} ↔ ${receiverId}`);
+  } catch (err) {
+    console.error('Failed to create call message:', err.message);
+  }
+}
 
 const setupSignalingHandlers = (io, socket, onlineUsers) => {
 
@@ -192,9 +230,9 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
   });
 
   /**
-   * Reject a call
+   * Reject a call — creates a 'rejected' call log message
    */
-  socket.on('call:reject', ({ callerId, reason }) => {
+  socket.on('call:reject', ({ callerId, reason, callType }) => {
     const callerSocketId = onlineUsers.get(callerId);
 
     if (callerSocketId) {
@@ -206,12 +244,23 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
         reason: reason || 'Call rejected',
       });
     }
+
+    // Save rejected call message (caller = sender, callee = socket.userId)
+    createCallMessage(io, onlineUsers, {
+      callerId,
+      receiverId: socket.userId,
+      callType: callType || 'audio',
+      callDuration: 0,
+      callStatus: 'rejected',
+    });
   });
 
   /**
-   * End a call
+   * End a call — creates a call log message with duration
+   * Client sends: targetUserId, callDuration, callType, isIncoming
+   * isIncoming tells us whether the ending user was the callee (true) or caller (false)
    */
-  socket.on('call:end', ({ targetUserId }) => {
+  socket.on('call:end', ({ targetUserId, callDuration, callType, isIncoming }) => {
     const targetSocketId = onlineUsers.get(targetUserId);
 
     if (targetSocketId) {
@@ -222,6 +271,24 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
         username: socket.username,
       });
     }
+
+    // Determine who the caller was
+    // If isIncoming=true → socket.userId is the callee, targetUserId is the caller
+    // If isIncoming=false → socket.userId is the caller, targetUserId is the callee
+    const callerId = isIncoming ? targetUserId : socket.userId;
+    const receiverId = isIncoming ? socket.userId : targetUserId;
+
+    // Determine call status from duration
+    const status = (callDuration && callDuration > 0) ? 'completed' : 'missed';
+
+    // Save call log message
+    createCallMessage(io, onlineUsers, {
+      callerId,
+      receiverId,
+      callType: callType || 'audio',
+      callDuration: callDuration || 0,
+      callStatus: status,
+    });
   });
 
   /**

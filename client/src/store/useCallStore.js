@@ -187,6 +187,7 @@ const useCallStore = create((set, get) => ({
       socket.emit('call:reject', {
         callerId: incomingCall.callerId,
         reason: 'Call rejected',
+        callType: incomingCall.callType || 'audio',
       });
     }
 
@@ -198,9 +199,11 @@ const useCallStore = create((set, get) => ({
 
   /**
    * End the current call
+   * @param {boolean} fromRemote — true when triggered by remote event (call:ended / call:rejected)
+   *                                to prevent emitting call:end back to server (avoids duplicate messages)
    */
-  endCall: () => {
-    const { remoteUser, callTimer, isGroupCall, groupId } = get();
+  endCall: (fromRemote = false) => {
+    const { remoteUser, callTimer, isGroupCall, groupId, callDuration, callType, isIncoming } = get();
     const socket = getSocket();
 
     if (isGroupCall && groupId) {
@@ -208,8 +211,15 @@ const useCallStore = create((set, get) => ({
       if (socket) {
         socket.emit('group-call:leave', { groupId });
       }
-    } else if (remoteUser && socket) {
-      socket.emit('call:end', { targetUserId: remoteUser.userId });
+    } else if (!fromRemote && remoteUser && socket) {
+      // Only emit call:end if WE are ending the call (not a remote event)
+      // Send call metadata so the server can create a call log message
+      socket.emit('call:end', {
+        targetUserId: remoteUser.userId,
+        callDuration: callDuration || 0,
+        callType: callType || 'audio',
+        isIncoming: isIncoming || false,
+      });
     }
 
     // Stop timer

@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { Download, FileText, Loader2 } from 'lucide-react';
-import { getInitials, stringToColor, formatMessageTime, isImageFile, formatFileSize } from '../../utils/helpers';
+import { Download, FileText, Loader2, Phone, Video, PhoneMissed, PhoneOff, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
+import { getInitials, stringToColor, formatMessageTime, isImageFile, formatFileSize, formatDuration } from '../../utils/helpers';
 import { SERVER_URL } from '../../utils/constants';
 
 const MessageBubble = ({ message, isMine, showAvatar }) => {
   const [downloading, setDownloading] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const isSystem = message.type === 'system';
+  const isCall = message.type === 'call';
   const hasFile = message.fileUrl;
   const isImage = hasFile && isImageFile(message.fileMimeType);
 
@@ -50,6 +51,89 @@ const MessageBubble = ({ message, isMine, showAvatar }) => {
         <span className="text-[11px] text-dark-500 bg-dark-800/80 px-3 py-1 rounded-full backdrop-blur-sm">
           {message.content}
         </span>
+      </div>
+    );
+  }
+
+  // ─── CALL LOG MESSAGE ─────────────────────────
+  if (isCall) {
+    const isCompleted = message.callStatus === 'completed';
+    const isMissed = message.callStatus === 'missed';
+    const isRejected = message.callStatus === 'rejected';
+    const isVideoCall = message.callType === 'video';
+
+    // Determine icon
+    let CallIcon;
+    if (isCompleted) {
+      CallIcon = isMine ? PhoneOutgoing : PhoneIncoming;
+    } else if (isMissed) {
+      CallIcon = PhoneMissed;
+    } else {
+      CallIcon = PhoneOff;
+    }
+
+    // Determine label
+    let callLabel;
+    if (isCompleted) {
+      callLabel = isMine
+        ? (isVideoCall ? 'Outgoing Video Call' : 'Outgoing Voice Call')
+        : (isVideoCall ? 'Incoming Video Call' : 'Incoming Voice Call');
+    } else if (isMissed) {
+      callLabel = isMine
+        ? (isVideoCall ? 'Cancelled Video Call' : 'Cancelled Voice Call')
+        : (isVideoCall ? 'Missed Video Call' : 'Missed Voice Call');
+    } else {
+      callLabel = isVideoCall ? 'Declined Video Call' : 'Declined Voice Call';
+    }
+
+    const iconColor = isCompleted ? 'text-green-400' : 'text-red-400';
+    const bgColor = isCompleted ? 'bg-green-500/10' : 'bg-red-500/10';
+    const borderColor = isCompleted ? 'border-green-500/20' : 'border-red-500/20';
+
+    return (
+      <div className={`flex ${isMine ? 'justify-end' : 'justify-start'} mb-1 animate-fade-in`}>
+        <div className={`flex gap-2 max-w-[85%] md:max-w-[70%] ${isMine ? 'flex-row-reverse' : ''}`}>
+          {/* Avatar (only for received messages) */}
+          {!isMine && showAvatar ? (
+            <div
+              className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-[10px] md:text-xs font-bold text-white flex-shrink-0 mt-auto"
+              style={{ backgroundColor: stringToColor(typeof message.sender === 'object' ? message.sender.username : 'Unknown') }}
+            >
+              {getInitials(typeof message.sender === 'object' ? message.sender.username : 'Unknown')}
+            </div>
+          ) : (
+            !isMine && <div className="w-7 md:w-8 flex-shrink-0" />
+          )}
+
+          <div className={`rounded-2xl px-4 py-3 border ${bgColor} ${borderColor} backdrop-blur-sm`}>
+            <div className="flex items-center gap-3">
+              {/* Call type icon */}
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center ${isCompleted ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                {isVideoCall && isCompleted ? (
+                  <Video size={18} className={iconColor} />
+                ) : (
+                  <CallIcon size={18} className={iconColor} />
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <p className={`text-[13px] font-medium ${isCompleted ? 'text-green-300' : 'text-red-300'}`}>
+                  {callLabel}
+                </p>
+                {isCompleted && message.callDuration > 0 && (
+                  <p className="text-[11px] text-dark-400 mt-0.5">
+                    ⏱ {formatDuration(message.callDuration)}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Timestamp */}
+            <p className="text-[10px] text-dark-500 text-right mt-1.5">
+              {formatMessageTime(message.createdAt)}
+            </p>
+          </div>
+        </div>
       </div>
     );
   }

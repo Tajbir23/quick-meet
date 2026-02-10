@@ -44,8 +44,23 @@ const messageSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['text', 'file', 'image', 'audio', 'video', 'system'],
+    enum: ['text', 'file', 'image', 'audio', 'video', 'system', 'call'],
     default: 'text',
+  },
+  // ─── CALL LOG METADATA ────────────────────────
+  callType: {
+    type: String,
+    enum: ['audio', 'video'],
+    default: null,
+  },
+  callDuration: {
+    type: Number,     // Duration in seconds (0 for missed/rejected)
+    default: null,
+  },
+  callStatus: {
+    type: String,
+    enum: ['completed', 'missed', 'rejected', 'no_answer'],
+    default: null,
   },
   // ─── ENCRYPTION METADATA ──────────────────────
   encrypted: {

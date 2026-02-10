@@ -149,17 +149,25 @@ const useSocket = () => {
 
     socket.on('call:rejected', ({ rejecterName, reason }) => {
       console.log(`📞 Call rejected by ${rejecterName}: ${reason}`);
-      useCallStore.getState().endCall();
+      useCallStore.getState().endCall(true); // fromRemote=true to prevent double emit
     });
 
     socket.on('call:ended', ({ username }) => {
       console.log(`📞 Call ended by ${username}`);
-      useCallStore.getState().endCall();
+      useCallStore.getState().endCall(true); // fromRemote=true to prevent double emit
     });
 
     socket.on('call:user-offline', ({ targetUserId }) => {
       console.log(`📞 User ${targetUserId} is offline`);
-      useCallStore.getState().endCall();
+      useCallStore.getState().endCall(true); // fromRemote=true — no call to log for offline
+    });
+
+    // ─── CALL LOG MESSAGE ─────────────────────────
+    // Server creates a call log message when a call ends/rejects
+    // and emits it to both users for real-time display in chat
+    socket.on('call:message', ({ message, chatUserId }) => {
+      console.log(`📞 Call log message received for chat: ${chatUserId}`);
+      useChatStore.getState().addReceivedMessage(chatUserId, message);
     });
 
     socket.on('call:media-toggled', ({ userId, kind, enabled }) => {
