@@ -8,7 +8,7 @@
 import { useState } from 'react';
 import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
-  PhoneOff, Settings
+  PhoneOff, Settings, Minimize2
 } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
 import DeviceSelector from './DeviceSelector';
@@ -24,6 +24,7 @@ const CallControls = ({ compact = false }) => {
     toggleVideo,
     toggleScreenShare,
     endCall,
+    toggleMinimize,
   } = useCallStore();
 
   const [showDeviceSelector, setShowDeviceSelector] = useState(false);
@@ -95,6 +96,15 @@ const CallControls = ({ compact = false }) => {
         title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
       >
         {isScreenSharing ? <MonitorOff size={iconSize} /> : <Monitor size={iconSize} />}
+      </button>
+
+      {/* Minimize call */}
+      <button
+        onClick={toggleMinimize}
+        className={`${btnBase} rounded-full flex items-center justify-center transition-all bg-dark-700/80 hover:bg-dark-600 text-white backdrop-blur-sm`}
+        title="Minimize call"
+      >
+        <Minimize2 size={iconSize} />
       </button>
 
       {/* End call */}

@@ -88,7 +88,11 @@ const GroupCall = () => {
     isAudioEnabled,
     callStatus,
     endCall,
+    isMinimized,
   } = useCallStore();
+
+  // Don't render full overlay when minimized
+  if (isMinimized) return null;
   const { user } = useAuthStore();
 
   // Calculate grid layout class based on participant count

@@ -18,6 +18,7 @@ import MainLayout from '../components/Layout/MainLayout';
 import VideoCall from '../components/Call/VideoCall';
 import AudioCall from '../components/Call/AudioCall';
 import GroupCall from '../components/Group/GroupCall';
+import MinimizedCall from '../components/Call/MinimizedCall';
 import { CALL_STATUS } from '../utils/constants';
 
 const HomePage = () => {
@@ -26,7 +27,7 @@ const HomePage = () => {
 
   const { fetchUsers, fetchUnreadCounts } = useChatStore();
   const { fetchMyGroups, joinAllGroupRooms } = useGroupStore();
-  const { callStatus, callType, isGroupCall } = useCallStore();
+  const { callStatus, callType, isGroupCall, isMinimized } = useCallStore();
 
   useEffect(() => {
     // Fetch initial data
@@ -47,7 +48,8 @@ const HomePage = () => {
     <>
       <MainLayout />
 
-      {/* Call overlays */}
+      {/* Call overlays — full or minimized */}
+      {isInCall && isMinimized && <MinimizedCall />}
       {isInCall && isGroupCall && <GroupCall />}
       {isInCall && !isGroupCall && callType === 'video' && <VideoCall />}
       {isInCall && !isGroupCall && callType === 'audio' && <AudioCall />}

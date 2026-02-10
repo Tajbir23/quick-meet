@@ -21,11 +21,15 @@ const VideoCall = () => {
     callDuration,
     isVideoEnabled,
     iceState,
+    isMinimized,
   } = useCallStore();
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const [isLocalLarge, setIsLocalLarge] = useState(false);
+
+  // Don't render full overlay when minimized
+  if (isMinimized) return null;
 
   // Attach local stream
   useEffect(() => {

@@ -38,6 +38,9 @@ const useCallStore = create((set, get) => ({
   groupId: null,
   groupCallParticipants: [],
 
+  // UI state
+  isMinimized: false,
+
   // Incoming call data
   incomingCall: null,      // { callerId, callerName, offer, callType }
 
@@ -229,11 +232,24 @@ const useCallStore = create((set, get) => ({
       callTimer: null,
       incomingCall: null,
       incomingGroupCall: null,
+      isMinimized: false,
       iceState: 'new',
       isGroupCall: false,
       groupId: null,
       groupCallParticipants: [],
     });
+  },
+
+  // ============================================
+  // MINIMIZE / MAXIMIZE
+  // ============================================
+
+  toggleMinimize: () => {
+    set((state) => ({ isMinimized: !state.isMinimized }));
+  },
+
+  maximizeCall: () => {
+    set({ isMinimized: false });
   },
 
   // ============================================

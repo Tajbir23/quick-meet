@@ -17,9 +17,13 @@ const AudioCall = () => {
     callStatus,
     callDuration,
     iceState,
+    isMinimized,
   } = useCallStore();
 
   const remoteAudioRef = useRef(null);
+
+  // Don't render full overlay when minimized (audio still plays via MinimizedCall)
+  if (isMinimized) return null;
 
   // Attach remote stream to audio element
   useEffect(() => {
