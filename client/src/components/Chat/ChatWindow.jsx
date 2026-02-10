@@ -65,11 +65,13 @@ const ChatWindow = () => {
   };
 
   return (
-    <div className="absolute inset-0 flex flex-col bg-dark-900">
-      {/* Chat header with back button & call buttons */}
-      <Header />
+    <div className="flex flex-col h-full overflow-hidden bg-dark-900 absolute inset-0">
+      {/* Chat header (Fixed height) */}
+      <div className="flex-shrink-0">
+        <Header />
+      </div>
 
-      {/* Messages area — scrollable, takes remaining space */}
+      {/* Messages area (Flexible height, scrollable) */}
       <div
         ref={containerRef}
         className="flex-1 overflow-y-auto px-3 md:px-4 py-3 md:py-4 space-y-1 overscroll-contain min-h-0"
