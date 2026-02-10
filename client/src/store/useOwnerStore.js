@@ -239,6 +239,49 @@ const useOwnerStore = create((set, get) => ({
     }
   },
 
+  downloadAllFilesZip: async () => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch(`${API_URL}/owner/files/download-all`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Download failed' }));
+        return { success: false, message: err.message };
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'backup-files.zip';
+      link.click();
+      URL.revokeObjectURL(url);
+      return { success: true };
+    } catch (error) {
+      return { success: false, message: 'Failed to download ZIP' };
+    }
+  },
+
+  uploadZipFile: async (file) => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      const formData = new FormData();
+      formData.append('zipFile', file);
+      const res = await fetch(`${API_URL}/owner/files/upload-zip`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, message: data.message || 'Upload failed' };
+      }
+      return { success: true, data: data.data, message: data.message };
+    } catch (error) {
+      return { success: false, message: 'Failed to upload ZIP' };
+    }
+  },
+
   // ─── Owner Mode Toggle ───────────────────────────
 
   toggleOwnerVisibility: async () => {

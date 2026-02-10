@@ -17,6 +17,8 @@
 
 const path = require('path');
 const fs = require('fs');
+const archiver = require('archiver');
+const AdmZip = require('adm-zip');
 const User = require('../models/User');
 const Message = require('../models/Message');
 const securityLogger = require('../security/SecurityEventLogger');
@@ -641,6 +643,175 @@ function formatUptime(seconds) {
   return parts.join(' ');
 }
 
+// ============================================
+// ZIP DOWNLOAD ALL FILES (BACKUP)
+// ============================================
+
+/**
+ * GET /api/owner/files/download-all
+ * Stream all uploaded files as a ZIP archive preserving VPS directory structure.
+ * Files are stored with their actual disk filenames (UUID names) inside an
+ * `uploads/` folder in the ZIP — this is a full backup.
+ */
+const downloadAllFilesZip = async (req, res) => {
+  try {
+    if (!fs.existsSync(uploadDir)) {
+      return res.status(404).json({ success: false, message: 'No upload directory found' });
+    }
+
+    const diskFiles = fs.readdirSync(uploadDir).filter(f => {
+      try {
+        return fs.statSync(path.join(uploadDir, f)).isFile();
+      } catch { return false; }
+    });
+
+    if (diskFiles.length === 0) {
+      return res.status(404).json({ success: false, message: 'No files to download' });
+    }
+
+    securityLogger.fileEvent('owner_download_all_zip', SEVERITY.INFO, {
+      ownerId: req.user._id.toString(),
+      fileCount: diskFiles.length,
+    });
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="backup-files.zip"');
+
+    const archive = archiver('zip', { zlib: { level: 5 } });
+
+    archive.on('error', (err) => {
+      console.error('Archiver error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, message: 'Error creating ZIP' });
+      }
+    });
+
+    archive.pipe(res);
+
+    // Add files under uploads/ folder to preserve VPS path structure
+    for (const filename of diskFiles) {
+      const filePath = path.join(uploadDir, filename);
+      archive.file(filePath, { name: `uploads/${filename}` });
+    }
+
+    await archive.finalize();
+  } catch (error) {
+    console.error('Download all files ZIP error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: 'Error creating ZIP archive' });
+    }
+  }
+};
+
+// ============================================
+// ZIP UPLOAD & EXTRACT (RESTORE BACKUP)
+// ============================================
+
+/**
+ * POST /api/owner/files/upload-zip
+ * Accept a ZIP backup file and restore it to the VPS uploads directory.
+ * Preserves exact filenames from the ZIP. If a file already exists it is replaced.
+ * Supports both flat ZIPs and ZIPs with an `uploads/` subfolder.
+ */
+const uploadAndExtractZip = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No ZIP file uploaded' });
+    }
+
+    const zipPath = req.file.path;
+
+    // Verify it's actually a ZIP (PK magic bytes)
+    const zipBuffer = fs.readFileSync(zipPath);
+    if (zipBuffer.length < 4 || zipBuffer[0] !== 0x50 || zipBuffer[1] !== 0x4B) {
+      fs.unlinkSync(zipPath);
+      return res.status(400).json({ success: false, message: 'Invalid ZIP file' });
+    }
+
+    const zip = new AdmZip(zipPath);
+    const entries = zip.getEntries();
+
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    const extracted = [];
+    const replaced = [];
+    const skipped = [];
+
+    for (const entry of entries) {
+      // Skip directories
+      if (entry.isDirectory) continue;
+
+      // Preserve the filename from the ZIP.
+      // If the ZIP was created by our backup, paths look like `uploads/abc-123.jpg`
+      // Strip the leading `uploads/` prefix if present, keep the actual filename.
+      let entryPath = entry.entryName.replace(/\\/g, '/');
+
+      // Remove leading uploads/ prefix if present
+      if (entryPath.startsWith('uploads/')) {
+        entryPath = entryPath.substring('uploads/'.length);
+      }
+
+      // Get just the filename (in case there are deeper nested paths)
+      const filename = path.basename(entryPath);
+
+      // Skip empty names
+      if (!filename) {
+        skipped.push(entry.entryName);
+        continue;
+      }
+
+      const targetPath = path.join(uploadDir, filename);
+
+      // Chroot validation — prevent path traversal
+      const resolvedTarget = path.resolve(targetPath);
+      if (!resolvedTarget.startsWith(path.resolve(uploadDir))) {
+        skipped.push(entry.entryName);
+        continue;
+      }
+
+      const existed = fs.existsSync(targetPath);
+      if (existed) {
+        replaced.push(filename);
+      }
+
+      // Write file (overwrites if exists)
+      const data = entry.getData();
+      fs.writeFileSync(targetPath, data);
+      extracted.push(filename);
+    }
+
+    // Clean up the uploaded ZIP temp file
+    fs.unlinkSync(zipPath);
+
+    securityLogger.fileEvent('owner_upload_zip_restore', SEVERITY.INFO, {
+      ownerId: req.user._id.toString(),
+      totalEntries: entries.length,
+      extracted: extracted.length,
+      replaced: replaced.length,
+      skipped: skipped.length,
+    });
+
+    res.json({
+      success: true,
+      message: `Restored ${extracted.length} files (${replaced.length} replaced)`,
+      data: {
+        extracted: extracted.length,
+        replaced: replaced.length,
+        skipped: skipped.length,
+        files: extracted,
+      },
+    });
+  } catch (error) {
+    console.error('Upload and extract ZIP error:', error);
+    if (req.file && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch {}
+    }
+    res.status(500).json({ success: false, message: 'Error restoring backup' });
+  }
+};
+
 module.exports = {
   getLogFiles,
   getLogsByDate,
@@ -653,6 +824,8 @@ module.exports = {
   getAllFiles,
   ownerDeleteFile,
   ownerDownloadFile,
+  downloadAllFilesZip,
+  uploadAndExtractZip,
   toggleOwnerVisibility,
   downloadLogFile,
 };

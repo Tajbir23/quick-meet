@@ -17,7 +17,8 @@ import {
   ArrowLeft, Download, Trash2, Ban, CheckCircle,
   Search, RefreshCw, Eye, EyeOff, Clock, Server,
   HardDrive, Cpu, ChevronDown, ChevronUp, X,
-  Lock, Unlock, Calendar, Filter, Terminal, Pause, Play
+  Lock, Unlock, Calendar, Filter, Terminal, Pause, Play,
+  Upload, Archive
 } from 'lucide-react';
 import useOwnerStore from '../store/useOwnerStore';
 import useAuthStore from '../store/useAuthStore';
@@ -437,9 +438,12 @@ const UsersTab = () => {
 
 // ─── Files Tab ──────────────────────────────────────────
 const FilesTab = () => {
-  const { allFiles, filesTotal, filesLoading, fetchAllFiles, deleteFile, downloadFile } = useOwnerStore();
+  const { allFiles, filesTotal, filesLoading, fetchAllFiles, deleteFile, downloadFile, downloadAllFilesZip, uploadZipFile } = useOwnerStore();
   const [search, setSearch] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [zipDownloading, setZipDownloading] = useState(false);
+  const [zipUploading, setZipUploading] = useState(false);
+  const zipInputRef = useRef(null);
 
   useEffect(() => {
     fetchAllFiles();
@@ -460,6 +464,38 @@ const FilesTab = () => {
     }
   };
 
+  const handleDownloadAllZip = async () => {
+    if (filesTotal === 0) return toast.error('No files to download');
+    setZipDownloading(true);
+    const result = await downloadAllFilesZip();
+    setZipDownloading(false);
+    if (result.success) {
+      toast.success('ZIP downloaded!');
+    } else {
+      toast.error(result.message || 'Failed to download ZIP');
+    }
+  };
+
+  const handleUploadZip = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.endsWith('.zip')) {
+      toast.error('Only .zip files are allowed');
+      e.target.value = '';
+      return;
+    }
+    setZipUploading(true);
+    const result = await uploadZipFile(file);
+    setZipUploading(false);
+    e.target.value = '';
+    if (result.success) {
+      toast.success(result.message || 'ZIP extracted successfully');
+      fetchAllFiles(); // Refresh file list
+    } else {
+      toast.error(result.message || 'Failed to upload ZIP');
+    }
+  };
+
   return (
     <div className="p-4 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-4">
@@ -468,9 +504,38 @@ const FilesTab = () => {
           All Files
           <span className="text-xs text-dark-400">({filesTotal})</span>
         </h2>
-        <button onClick={fetchAllFiles} className="btn-icon text-dark-400 hover:text-white">
-          <RefreshCw size={14} />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Backup — Download All as ZIP */}
+          <button
+            onClick={handleDownloadAllZip}
+            disabled={zipDownloading || filesTotal === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Backup all files as ZIP"
+          >
+            <Archive size={13} />
+            {zipDownloading ? 'Downloading...' : 'Backup ZIP'}
+          </button>
+          {/* Restore — Upload ZIP */}
+          <button
+            onClick={() => zipInputRef.current?.click()}
+            disabled={zipUploading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Restore files from ZIP backup"
+          >
+            <Upload size={13} />
+            {zipUploading ? 'Restoring...' : 'Restore ZIP'}
+          </button>
+          <input
+            ref={zipInputRef}
+            type="file"
+            accept=".zip"
+            onChange={handleUploadZip}
+            className="hidden"
+          />
+          <button onClick={fetchAllFiles} className="btn-icon text-dark-400 hover:text-white">
+            <RefreshCw size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Search */}
