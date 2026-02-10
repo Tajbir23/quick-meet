@@ -49,7 +49,7 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
    *   - Media types (audio, video)
    *   - DTLS fingerprint (for encryption)
    */
-  socket.on('call:offer', ({ targetUserId, offer, callType }) => {
+  socket.on('call:offer', ({ targetUserId, offer, callType, isReconnect }) => {
     const targetSocketId = onlineUsers.get(targetUserId);
 
     if (!targetSocketId) {
@@ -61,13 +61,14 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
       return;
     }
 
-    console.log(`📞 Call offer: ${socket.username} → ${targetUserId} (${callType})`);
+    console.log(`📞 Call offer${isReconnect ? ' (reconnect)' : ''}: ${socket.username} → ${targetUserId} (${callType})`);
 
     io.to(targetSocketId).emit('call:offer', {
       callerId: socket.userId,
       callerName: socket.username,
       offer,
       callType, // 'audio' | 'video' | 'screen'
+      isReconnect: isReconnect || false,
     });
   });
 

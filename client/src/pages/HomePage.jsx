@@ -9,7 +9,7 @@
  * - Call overlays
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import useSocket from '../hooks/useSocket';
 import useChatStore from '../store/useChatStore';
 import useGroupStore from '../store/useGroupStore';
@@ -19,6 +19,7 @@ import VideoCall from '../components/Call/VideoCall';
 import AudioCall from '../components/Call/AudioCall';
 import GroupCall from '../components/Group/GroupCall';
 import MinimizedCall from '../components/Call/MinimizedCall';
+import { getSocket } from '../services/socket';
 import { CALL_STATUS } from '../utils/constants';
 
 const HomePage = () => {
@@ -45,18 +46,63 @@ const HomePage = () => {
                    callStatus === CALL_STATUS.FAILED;
 
   // Warn user before refresh / tab close during an active call
+  // Also persist call metadata so we can reconnect after refresh
   useEffect(() => {
     if (!isInCall) return;
 
     const handleBeforeUnload = (e) => {
+      // Save call state for reconnection
+      const state = useCallStore.getState();
+      sessionStorage.setItem('pendingCallReconnect', JSON.stringify({
+        callType: state.callType,
+        remoteUserId: state.remoteUser?.userId,
+        remoteUsername: state.remoteUser?.username,
+        isGroupCall: state.isGroupCall,
+        groupId: state.groupId,
+        callDuration: state.callDuration,
+      }));
+
       e.preventDefault();
-      e.returnValue = '';          // Chrome requires returnValue to be set
-      return '';                   // some browsers use the return value
+      e.returnValue = '';
+      return '';
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isInCall]);
+
+  // On mount: check if we need to reconnect a call after page refresh
+  const reconnectAttempted = useRef(false);
+  useEffect(() => {
+    if (reconnectAttempted.current) return;
+    const raw = sessionStorage.getItem('pendingCallReconnect');
+    if (!raw) return;
+
+    reconnectAttempted.current = true;
+    sessionStorage.removeItem('pendingCallReconnect');
+    const savedCall = JSON.parse(raw);
+    if (!savedCall?.remoteUserId && !savedCall?.isGroupCall) return;
+
+    console.log('🔄 Pending call reconnect found, waiting for socket...');
+
+    // Poll until socket is connected, then trigger reconnect
+    const poll = setInterval(() => {
+      const socket = getSocket();
+      if (socket?.connected) {
+        clearInterval(poll);
+        console.log('🔄 Socket ready — reconnecting call');
+        useCallStore.getState().reconnectCall(savedCall);
+      }
+    }, 500);
+
+    // Give up after 15 seconds
+    const timeout = setTimeout(() => {
+      clearInterval(poll);
+      console.warn('⚠️ Call reconnect timed out');
+    }, 15000);
+
+    return () => { clearInterval(poll); clearTimeout(timeout); };
+  }, []);
 
   return (
     <>

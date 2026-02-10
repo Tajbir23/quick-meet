@@ -241,6 +241,81 @@ const useCallStore = create((set, get) => ({
   },
 
   // ============================================
+  // CALL RECONNECTION (after page refresh)
+  // ============================================
+
+  /**
+   * Reconnect a call that was interrupted by a page refresh.
+   * Restores call state from sessionStorage data, acquires media,
+   * creates a new PeerConnection and sends a fresh offer with
+   * the isReconnect flag so the remote peer auto-accepts.
+   */
+  reconnectCall: async (savedCall) => {
+    const { callType, remoteUserId, remoteUsername, isGroupCall, groupId, callDuration } = savedCall;
+
+    // Group calls — just re-join the room (server still has it)
+    if (isGroupCall && groupId) {
+      try {
+        await get().startGroupCall(groupId, callType || 'audio');
+      } catch (err) {
+        console.error('Group call reconnect failed:', err);
+      }
+      return;
+    }
+
+    // 1-to-1 call reconnection
+    if (!remoteUserId) return;
+
+    try {
+      const socket = getSocket();
+      if (!socket) throw new Error('Socket not connected');
+
+      set({
+        callStatus: CALL_STATUS.RECONNECTING,
+        callType,
+        remoteUser: { userId: remoteUserId, username: remoteUsername },
+        isAudioEnabled: true,
+        isVideoEnabled: callType === 'video',
+        callDuration: callDuration || 0,
+        isIncoming: false,
+      });
+
+      // Get local media
+      const constraints = { audio: true, video: callType === 'video' };
+      let localStream;
+      try {
+        localStream = await webrtcService.getLocalStream(constraints);
+      } catch (mediaErr) {
+        if (callType === 'video') {
+          console.warn('Camera unavailable, falling back to audio-only:', mediaErr.message);
+          localStream = await webrtcService.getLocalStream({ audio: true, video: false });
+          set({ isVideoEnabled: false });
+        } else {
+          throw mediaErr;
+        }
+      }
+      set({ localStream });
+
+      webrtcService.createPeerConnection(remoteUserId);
+      get().setupWebRTCCallbacks(remoteUserId);
+
+      const offer = await webrtcService.createOffer(remoteUserId);
+
+      socket.emit('call:offer', {
+        targetUserId: remoteUserId,
+        offer,
+        callType,
+        isReconnect: true,
+      });
+
+      console.log('🔄 Reconnect offer sent to', remoteUsername);
+    } catch (error) {
+      console.error('Call reconnect failed:', error);
+      get().endCall();
+    }
+  },
+
+  // ============================================
   // MINIMIZE / MAXIMIZE
   // ============================================
 

@@ -77,7 +77,27 @@ const useSocket = () => {
     // 1-TO-1 CALL EVENTS
     // ============================================
 
-    socket.on('call:offer', ({ callerId, callerName, offer, callType }) => {
+    socket.on('call:offer', async ({ callerId, callerName, offer, callType, isReconnect }) => {
+      const { callStatus, remoteUser } = useCallStore.getState();
+
+      // If this is a reconnect offer and we're still in a call with this user,
+      // auto-accept without showing incoming call UI
+      if (isReconnect && callStatus !== 'idle' && remoteUser?.userId === callerId) {
+        console.log(`🔄 Reconnect offer from ${callerName} — auto-accepting`);
+        try {
+          // Tear down old broken PeerConnection, build fresh one
+          webrtcService.closePeerConnection(callerId);
+          webrtcService.createPeerConnection(callerId);
+          useCallStore.getState().setupWebRTCCallbacks(callerId);
+
+          const answer = await webrtcService.handleOffer(callerId, offer);
+          socket.emit('call:answer', { callerId, answer });
+        } catch (err) {
+          console.error('Failed to handle reconnect offer:', err);
+        }
+        return;
+      }
+
       console.log(`📞 Incoming call from ${callerName} (${callType})`);
 
       useCallStore.getState().setIncomingCall({
