@@ -37,6 +37,12 @@ const useSocket = () => {
 
     socket.on('user:online', ({ userId, username }) => {
       useChatStore.getState().addOnlineUser({ userId });
+
+      // If this user isn't in our users list (e.g. new signup), refresh the list
+      const { users } = useChatStore.getState();
+      if (!users.some(u => u._id === userId)) {
+        useChatStore.getState().fetchUsers();
+      }
     });
 
     socket.on('user:offline', ({ userId }) => {
@@ -236,6 +242,8 @@ const useSocket = () => {
       const { myGroups } = useGroupStore.getState();
       myGroups.forEach(g => socket.emit('group:join-room', { groupId: g._id }));
       socket.emit('group-call:get-active-calls');
+      // Re-request online users (server also auto-sends on connect, but this is a safety net)
+      socket.emit('users:get-online-list');
     });
 
     // Group call ended — remove banner & dismiss ringing
@@ -346,13 +354,26 @@ const useSocket = () => {
     // OWNER MODE EVENT
     // ============================================
     socket.on('owner:mode-changed', ({ userId, ownerModeVisible }) => {
-      // Update the user in the users list when owner toggles visibility
-      const chatStore = useChatStore.getState();
-      const updatedUsers = chatStore.users.map(u =>
-        u._id === userId ? { ...u, role: ownerModeVisible ? 'owner' : 'user' } : u
+      // Update the user in the users list when owner toggles visibility.
+      // Uses updateUserRole which skips setState if no change needed,
+      // preventing the re-render cascade that wiped message content.
+      useChatStore.getState().updateUserRole(
+        userId,
+        ownerModeVisible ? 'owner' : 'user'
       );
-      useChatStore.setState({ users: updatedUsers });
     });
+
+    // ============================================
+    // REQUEST INITIAL STATE
+    // WHY: connectSocket() runs in checkAuth() and the socket
+    //      may connect BEFORE this useEffect registers listeners.
+    //      That means the server's auto-sent 'users:online-list'
+    //      was emitted to a socket with no listener → lost.
+    //      Explicitly requesting it here guarantees we get it.
+    // ============================================
+    if (socket.connected) {
+      socket.emit('users:get-online-list');
+    }
 
     // Heartbeat
     const heartbeatInterval = setInterval(() => {
@@ -380,6 +401,7 @@ const useSocket = () => {
       socket.off('call:rejected');
       socket.off('call:ended');
       socket.off('call:user-offline');
+      socket.off('call:message');
       socket.off('call:media-toggled');
       socket.off('call:renegotiate');
       socket.off('call:renegotiate-answer');

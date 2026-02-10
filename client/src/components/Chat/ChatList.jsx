@@ -5,8 +5,11 @@ import { getInitials, stringToColor, formatTime, truncate } from '../../utils/he
 import { MessageCircle, Shield } from 'lucide-react';
 
 const ChatList = ({ searchQuery }) => {
-  const { users, setActiveChat, unread, isUserOnline } = useChatStore();
-  const { user: currentUser } = useAuthStore();
+  const users = useChatStore(s => s.users);
+  const setActiveChat = useChatStore(s => s.setActiveChat);
+  const unread = useChatStore(s => s.unread);
+  const isUserOnline = useChatStore(s => s.isUserOnline);
+  const currentUser = useAuthStore(s => s.user);
 
   // Filter users that have conversations or match search
   const filteredUsers = users.filter(u => {

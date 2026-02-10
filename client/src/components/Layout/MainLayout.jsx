@@ -4,7 +4,7 @@ import useChatStore from '../../store/useChatStore';
 import { MessageCircle, Shield, Phone, Monitor } from 'lucide-react';
 
 const MainLayout = () => {
-  const { activeChat } = useChatStore();
+  const activeChat = useChatStore(s => s.activeChat);
 
   return (
     <div className="w-full h-full flex overflow-hidden">

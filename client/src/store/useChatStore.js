@@ -51,6 +51,23 @@ const useChatStore = create((set, get) => ({
     return get().onlineUsers.some(u => u.userId === userId);
   },
 
+  /**
+   * Update a user's role in the users list (e.g., owner mode toggle).
+   * IMPORTANT: Returns early if no change is needed, preventing unnecessary
+   * state updates and the cascading re-render storm that caused message
+   * content to visually disappear.
+   */
+  updateUserRole: (userId, role) => {
+    const { users } = get();
+    const target = users.find(u => u._id === userId);
+    if (!target || target.role === role) return; // No change needed → skip setState
+    set({
+      users: users.map(u =>
+        u._id === userId ? { ...u, role } : u
+      ),
+    });
+  },
+
   fetchUsers: async () => {
     try {
       const res = await api.get('/users');

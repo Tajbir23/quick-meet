@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { Download, FileText, Loader2, Phone, Video, PhoneMissed, PhoneOff, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
 import { getInitials, stringToColor, formatMessageTime, isImageFile, formatFileSize, formatDuration } from '../../utils/helpers';
 import { SERVER_URL } from '../../utils/constants';
@@ -227,4 +227,4 @@ const MessageBubble = ({ message, isMine, showAvatar }) => {
   );
 };
 
-export default MessageBubble;
+export default memo(MessageBubble);

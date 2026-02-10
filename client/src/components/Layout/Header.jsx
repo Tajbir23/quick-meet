@@ -9,10 +9,13 @@ import { getInitials, stringToColor } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 
 const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
-  const { activeChat, clearActiveChat, isUserOnline } = useChatStore();
+  // Use individual selectors to prevent re-render when unrelated state changes
+  const activeChat = useChatStore(s => s.activeChat);
+  const clearActiveChat = useChatStore(s => s.clearActiveChat);
+  const isUserOnline = useChatStore(s => s.isUserOnline);
   const { startCall, startGroupCall, callStatus } = useCallStore();
   const { activeGroupCalls } = useGroupStore();
-  const { user } = useAuthStore();
+  const user = useAuthStore(s => s.user);
 
   if (!activeChat) {
     return (

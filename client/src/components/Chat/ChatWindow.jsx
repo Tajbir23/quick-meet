@@ -9,8 +9,16 @@ import { formatDateSeparator, shouldShowDateSeparator } from '../../utils/helper
 import { ChevronDown } from 'lucide-react';
 
 const ChatWindow = () => {
-  const { activeChat, messages, fetchMessages, isLoadingMessages, typingUsers, markAsRead } = useChatStore();
-  const { user } = useAuthStore();
+  // Use individual selectors to prevent re-rendering when unrelated
+  // store state changes (e.g., 'users' or 'onlineUsers' updates).
+  // Without selectors, ANY state change in useChatStore triggers re-render.
+  const activeChat = useChatStore(s => s.activeChat);
+  const messages = useChatStore(s => s.messages);
+  const fetchMessages = useChatStore(s => s.fetchMessages);
+  const isLoadingMessages = useChatStore(s => s.isLoadingMessages);
+  const typingUsers = useChatStore(s => s.typingUsers);
+  const markAsRead = useChatStore(s => s.markAsRead);
+  const user = useAuthStore(s => s.user);
   const containerRef = useRef(null);
   const [pagination, setPagination] = useState(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);

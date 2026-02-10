@@ -96,6 +96,22 @@ const registerSocketHandlers = (io) => {
     socket.emit('users:online-list', onlineUsersList);
 
     // ============================================
+    // On-demand online users request
+    // WHY: Client's useSocket listeners may not be ready when the
+    //      initial 'users:online-list' is emitted on connection.
+    //      This lets the client re-request at any time.
+    // ============================================
+    socket.on('users:get-online-list', () => {
+      const list = [];
+      for (const [uid, sid] of onlineUsers.entries()) {
+        if (uid !== userId) {
+          list.push({ userId: uid, socketId: sid });
+        }
+      }
+      socket.emit('users:online-list', list);
+    });
+
+    // ============================================
     // Register sub-handlers (wrapped with SocketGuard)
     // ============================================
     setupPresenceHandlers(io, socket, onlineUsers);

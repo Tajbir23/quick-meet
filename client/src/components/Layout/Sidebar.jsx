@@ -19,8 +19,10 @@ const Sidebar = () => {
   const [activeTab, setActiveTab] = useState('chats'); // 'chats' | 'groups' | 'users'
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateGroup, setShowCreateGroup] = useState(false);
-  const { user, logout, isOwner } = useAuthStore();
-  const { users } = useChatStore();
+  const user = useAuthStore(s => s.user);
+  const logout = useAuthStore(s => s.logout);
+  const isOwner = useAuthStore(s => s.isOwner);
+  const users = useChatStore(s => s.users);
   const { myGroups } = useGroupStore();
   const { ownerModeVisible, toggleOwnerVisibility } = useOwnerStore();
   const navigate = useNavigate();
