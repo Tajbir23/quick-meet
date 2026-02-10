@@ -140,8 +140,11 @@ class FileScanner {
         threats.push(...svgThreats);
       }
 
-      // 7. Content pattern scanning (for text-like files)
-      if (this._isTextType(claimedMimeType) || stats.size < this.maxScanSize) {
+      // 7. Content pattern scanning (for text-like files ONLY)
+      // IMPORTANT: Skip binary files (images, audio, video, archives)
+      // Binary data contains random byte sequences that match text-based
+      // attack patterns (e.g. "on\w+=" in JPEG EXIF), causing false positives.
+      if (this._isTextType(claimedMimeType)) {
         const contentThreats = await this._scanContent(filePath);
         threats.push(...contentThreats);
       }
