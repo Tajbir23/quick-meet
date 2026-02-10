@@ -485,6 +485,20 @@ class WebRTCService {
 
       return answer;
     } catch (error) {
+      // SSL role conflict — recreate connection and retry once
+      if (error.message && error.message.includes('SSL role')) {
+        console.warn(`⚠️ SSL role conflict for ${peerId}, recreating connection...`);
+        this.closePeerConnection(peerId);
+        pc = this.createPeerConnection(peerId);
+
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        await this.processIceCandidateQueue(peerId);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        console.log(`📤 Answer created for ${peerId} (after SSL retry)`);
+        return answer;
+      }
+
       console.error(`Failed to handle offer from ${peerId}:`, error);
       throw error;
     }

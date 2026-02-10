@@ -458,7 +458,8 @@ const useCallStore = create((set, get) => ({
   },
 
   /**
-   * Handle new peer joining group call — create offer
+   * Handle new peer joining group call — WE (existing peer) create offer
+   * Only the EXISTING peer creates the offer to avoid glare/DTLS role conflict.
    */
   handleGroupPeerJoined: async (peerId, peerName) => {
     const socket = getSocket();
@@ -468,7 +469,7 @@ const useCallStore = create((set, get) => ({
     webrtcService.createPeerConnection(peerId);
     get().setupWebRTCCallbacks(peerId);
 
-    // Create and send offer
+    // Existing peer creates and sends offer to the new peer
     const offer = await webrtcService.createOffer(peerId);
 
     if (socket) {
@@ -489,26 +490,25 @@ const useCallStore = create((set, get) => ({
   },
 
   /**
-   * Handle existing peers when joining a group call — create offers
+   * Handle existing peers when joining a group call
+   * NEW peer does NOT create offers — it just prepares connections.
+   * Existing peers will send offers via handleGroupPeerJoined.
    */
   handleExistingPeers: async (peers) => {
-    const socket = getSocket();
-    const { groupId } = get();
-
+    // Just add participants to list; existing peers will initiate offers
     for (const peer of peers) {
+      // Pre-create peer connections so they're ready when offers arrive
       webrtcService.createPeerConnection(peer.userId);
       get().setupWebRTCCallbacks(peer.userId);
-
-      const offer = await webrtcService.createOffer(peer.userId);
-
-      if (socket) {
-        socket.emit('group-call:offer', {
-          groupId,
-          targetUserId: peer.userId,
-          offer,
-        });
-      }
     }
+
+    // Track as participants (username comes from the offer handler)
+    set((state) => ({
+      groupCallParticipants: [
+        ...state.groupCallParticipants,
+        ...peers.map(p => ({ userId: p.userId, username: p.username || 'Peer' })),
+      ],
+    }));
   },
 
   /**

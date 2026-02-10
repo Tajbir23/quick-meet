@@ -43,7 +43,7 @@
 
 const Group = require('../models/Group');
 
-// Track active group calls: groupId → Set of userIds
+// Track active group calls: groupId → Map<userId, username>
 const activeGroupCalls = new Map();
 
 const setupGroupCallHandlers = (io, socket, onlineUsers) => {
@@ -63,7 +63,7 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
 
       // Check call member limit (mesh topology constraint)
       if (!activeGroupCalls.has(groupId)) {
-        activeGroupCalls.set(groupId, new Set());
+        activeGroupCalls.set(groupId, new Map());
       }
 
       const callParticipants = activeGroupCalls.get(groupId);
@@ -77,11 +77,12 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
 
       // Get existing participants before adding new one
       const existingPeers = [];
-      for (const peerId of callParticipants) {
+      for (const [peerId, peerName] of callParticipants) {
         const peerSocketId = onlineUsers.get(peerId);
         if (peerSocketId) {
           existingPeers.push({
             userId: peerId,
+            username: peerName,
             socketId: peerSocketId,
           });
         }
@@ -90,8 +91,8 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
       // Was this the first person joining? (i.e. they're starting the call)
       const isNewCall = callParticipants.size === 0;
 
-      // Add new participant
-      callParticipants.add(socket.userId);
+      // Add new participant (store userId → username)
+      callParticipants.set(socket.userId, socket.username);
 
       // Join socket room for the group call
       socket.join(`group-call:${groupId}`);
@@ -130,7 +131,7 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
       io.to(`group-call:${groupId}`).emit('group-call:participants-update', {
         groupId,
         count: callParticipants.size,
-        participants: Array.from(callParticipants),
+        participants: Array.from(callParticipants.keys()),
       });
 
     } catch (error) {
@@ -254,7 +255,7 @@ function handleGroupCallLeave(io, socket, onlineUsers, groupId) {
   io.to(`group-call:${groupId}`).emit('group-call:participants-update', {
     groupId,
     count: callParticipants.size,
-    participants: Array.from(callParticipants),
+    participants: Array.from(callParticipants.keys()),
   });
 
   // Clean up empty calls
