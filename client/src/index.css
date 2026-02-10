@@ -17,7 +17,8 @@ html {
   /* Prevent iOS zoom on input focus */
   touch-action: manipulation;
   height: 100%;
-  overflow: hidden; /* Prevent dragging the whole page */
+  height: 100dvh; /* Use dynamic viewport height */
+  overflow: hidden; 
 }
 
 body {
@@ -26,15 +27,19 @@ body {
   color: #f8fafc;
   height: 100%;
   width: 100%;
-  overflow: hidden; /* Prevent dragging the whole page */
+  overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  position: fixed; /* Fix body to prevent any scroll behavior */
+  inset: 0;
 }
 
 #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
+  display: flex; /* Ensure root behaves as a flex container */
+  flex-direction: column;
 }
 
 /* Custom scrollbar - desktop only */
