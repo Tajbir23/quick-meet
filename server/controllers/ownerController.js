@@ -291,15 +291,18 @@ const blockUser = async (req, res) => {
 
     await user.save();
 
-    // Emit force logout via socket
+    // Find and disconnect ALL sockets belonging to this user in real-time.
+    // We iterate io.sockets because the onlineUsers Map is local to
+    // socket/index.js. Each socket has userId bound during auth middleware.
     const io = req.app.get('io');
-    if (io && user.socketId) {
-      const targetSocket = io.sockets.sockets.get(user.socketId);
-      if (targetSocket) {
-        targetSocket.emit('security:force-logout', {
-          reason: 'Your account has been blocked',
-        });
-        targetSocket.disconnect(true);
+    if (io) {
+      for (const [, sock] of io.sockets.sockets) {
+        if (sock.userId === userId) {
+          sock.emit('security:force-logout', {
+            reason: `Your account has been blocked. Reason: ${reason || 'Blocked by owner'}`,
+          });
+          sock.disconnect(true);
+        }
       }
     }
 
