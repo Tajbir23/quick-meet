@@ -65,15 +65,14 @@ const ChatWindow = () => {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-dark-900">
       {/* Chat header with back button & call buttons */}
       <Header />
 
-      {/* Messages area */}
-      <div className="flex-1 flex flex-col bg-dark-900 min-h-0 relative">
+      {/* Messages area — scrollable */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-y-auto px-3 md:px-4 py-3 md:py-4 space-y-1 overscroll-contain"
+        className="flex-1 overflow-y-auto px-3 md:px-4 py-3 md:py-4 space-y-1 overscroll-contain min-h-0 relative"
         onScroll={handleScroll}
       >
         {isLoadingMessages && chatMessages.length === 0 && (
@@ -146,7 +145,7 @@ const ChatWindow = () => {
       {showScrollBtn && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-20 md:bottom-24 right-4 w-10 h-10 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded-full flex items-center justify-center text-dark-300 shadow-lg transition-all animate-scale-in z-10"
+          className="absolute bottom-16 right-4 w-10 h-10 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded-full flex items-center justify-center text-dark-300 shadow-lg transition-all animate-scale-in z-10"
         >
           <ChevronDown size={20} />
         </button>
@@ -154,7 +153,6 @@ const ChatWindow = () => {
 
       {/* Message input */}
       <MessageInput />
-      </div>
     </div>
   );
 };
