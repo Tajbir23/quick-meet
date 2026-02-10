@@ -13,10 +13,11 @@
  */
 
 import { useEffect, useRef, useMemo, useState, useCallback } from 'react';
-import { Users, PhoneOff, Monitor } from 'lucide-react';
+import { Users, PhoneOff, Monitor, MicOff } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
 import useAuthStore from '../../store/useAuthStore';
 import CallControls from '../Call/CallControls';
+import useSpeakingDetector from '../../hooks/useSpeakingDetector';
 import { getInitials, stringToColor, formatDuration } from '../../utils/helpers';
 
 /**
@@ -34,6 +35,7 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false, isScreenSha
   const videoRef = useRef(null);
   const audioRef = useRef(null);
   const [hasVideo, setHasVideo] = useState(false);
+  const isSpeaking = useSpeakingDetector(stream);
 
   // Dynamically detect whether video data is flowing
   const checkVideoActive = useCallback(() => {
@@ -86,7 +88,9 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false, isScreenSha
     : hasVideo;
 
   return (
-    <div className="relative bg-dark-800 rounded-2xl overflow-hidden h-full w-full">
+    <div className={`relative bg-dark-800 rounded-2xl overflow-hidden h-full w-full transition-shadow duration-300 ${
+      isSpeaking && !isMuted ? 'ring-2 ring-emerald-400 shadow-lg shadow-emerald-400/20' : ''
+    }`}>
       {/* Hidden audio element — plays audio even when video is off / avatar shown */}
       {!isLocal && stream && (
         <audio ref={audioRef} autoPlay playsInline />
@@ -102,11 +106,22 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false, isScreenSha
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-dark-800 to-dark-900">
-          <div
-            className="w-14 h-14 md:w-16 md:h-16 rounded-full flex items-center justify-center text-lg md:text-xl font-bold text-white"
-            style={{ backgroundColor: stringToColor(name) }}
-          >
-            {getInitials(name)}
+          <div className="relative">
+            {/* Speaking pulse rings around avatar */}
+            {isSpeaking && !isMuted && (
+              <>
+                <div className="absolute -inset-2 rounded-full border-2 border-emerald-400/40 animate-ping" style={{ animationDuration: '1.5s' }} />
+                <div className="absolute -inset-1 rounded-full border-2 border-emerald-400/20" />
+              </>
+            )}
+            <div
+              className={`w-14 h-14 md:w-16 md:h-16 rounded-full flex items-center justify-center text-lg md:text-xl font-bold text-white transition-transform duration-200 ${
+                isSpeaking && !isMuted ? 'scale-110' : ''
+              }`}
+              style={{ backgroundColor: stringToColor(name) }}
+            >
+              {getInitials(name)}
+            </div>
           </div>
         </div>
       )}
@@ -119,12 +134,21 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false, isScreenSha
         </div>
       )}
 
+      {/* Mute icon — top right */}
+      {isMuted && (
+        <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-red-500/80 backdrop-blur-sm flex items-center justify-center">
+          <MicOff size={12} className="text-white" />
+        </div>
+      )}
+
+      {/* Speaking indicator bar — bottom animated bar */}
+      {isSpeaking && !isMuted && (
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-400 via-emerald-300 to-emerald-400 animate-pulse" />
+      )}
+
       {/* Name tag */}
       <div className="absolute bottom-2 left-2 bg-black/40 backdrop-blur-sm px-2.5 py-1 rounded-full text-xs text-white flex items-center gap-1.5">
         <span>{isLocal ? 'You' : name}</span>
-        {isMuted && (
-          <span className="text-red-400 text-[10px]">🔇</span>
-        )}
       </div>
     </div>
   );
@@ -200,6 +224,7 @@ const GroupCall = () => {
             key={participant.userId}
             stream={remoteStreams[participant.userId]}
             name={participant.username}
+            isMuted={participant.isMuted}
             isScreenSharing={participant.isScreenSharing}
           />
         ))}

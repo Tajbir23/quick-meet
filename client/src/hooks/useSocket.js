@@ -164,6 +164,11 @@ const useSocket = () => {
 
     socket.on('call:media-toggled', ({ userId, kind, enabled }) => {
       console.log(`Remote ${kind} ${enabled ? 'enabled' : 'disabled'} by ${userId}`);
+      if (kind === 'audio') {
+        useCallStore.setState({ remoteAudioMuted: !enabled });
+      } else if (kind === 'video') {
+        useCallStore.setState({ remoteVideoMuted: !enabled });
+      }
     });
 
     // Renegotiation (for screen share, ICE restart, etc.)
@@ -314,6 +319,15 @@ const useSocket = () => {
     // Media toggle notification from a group call peer
     socket.on('group-call:media-toggled', ({ userId, kind, enabled }) => {
       console.log(`📡 Group peer ${userId} ${kind} ${enabled ? 'on' : 'off'}`);
+      const { groupCallParticipants, isGroupCall } = useCallStore.getState();
+      if (isGroupCall) {
+        const updated = groupCallParticipants.map(p =>
+          p.userId === userId
+            ? { ...p, ...(kind === 'audio' ? { isMuted: !enabled } : { isVideoOff: !enabled }) }
+            : p
+        );
+        useCallStore.setState({ groupCallParticipants: updated });
+      }
     });
 
     socket.on('group-call:error', ({ message }) => {

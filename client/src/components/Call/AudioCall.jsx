@@ -5,22 +5,29 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { MicOff } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
 import CallControls from './CallControls';
+import useSpeakingDetector from '../../hooks/useSpeakingDetector';
 import { getInitials, stringToColor, formatDuration } from '../../utils/helpers';
 import { CALL_STATUS } from '../../utils/constants';
 
 const AudioCall = () => {
   const {
+    localStream,
     remoteStream,
     remoteUser,
     callStatus,
     callDuration,
+    isAudioEnabled,
     iceState,
     isMinimized,
+    remoteAudioMuted,
   } = useCallStore();
 
   const remoteAudioRef = useRef(null);
+  const remoteSpeaking = useSpeakingDetector(remoteStream);
+  const localSpeaking = useSpeakingDetector(localStream);
 
   // Attach remote stream to audio element (re-run on maximize too)
   useEffect(() => {
@@ -47,27 +54,43 @@ const AudioCall = () => {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col items-center justify-center px-6">
-        {/* Avatar with pulse animation when connecting */}
+        {/* Avatar with pulse animation when connecting / speaking */}
         <div className="relative mb-8">
-          {/* Outer ring animation */}
+          {/* Outer ring animation — connecting */}
           {isConnecting && (
             <>
               <div className="absolute inset-0 rounded-full border-4 border-primary-400/20 animate-ping" style={{ animationDuration: '2s' }} />
               <div className="absolute -inset-3 rounded-full border-2 border-primary-400/10 animate-ping" style={{ animationDuration: '3s' }} />
             </>
           )}
-          {isConnected && (
+          {/* Speaking glow rings */}
+          {isConnected && remoteSpeaking && !remoteAudioMuted && (
+            <>
+              <div className="absolute -inset-3 rounded-full border-2 border-emerald-400/30 animate-ping" style={{ animationDuration: '1.5s' }} />
+              <div className="absolute -inset-1.5 rounded-full border-2 border-emerald-400/40" />
+            </>
+          )}
+          {isConnected && !remoteSpeaking && (
             <div className="absolute -inset-2 rounded-full border-2 border-emerald-400/20" />
           )}
           
           <div
-            className={`w-28 h-28 md:w-32 md:h-32 rounded-full flex items-center justify-center text-4xl md:text-5xl font-bold text-white shadow-2xl ${
+            className={`w-28 h-28 md:w-32 md:h-32 rounded-full flex items-center justify-center text-4xl md:text-5xl font-bold text-white shadow-2xl transition-all duration-200 ${
               isConnecting ? 'animate-pulse' : ''
+            } ${
+              remoteSpeaking && !remoteAudioMuted ? 'scale-105 shadow-emerald-400/20' : ''
             }`}
             style={{ backgroundColor: stringToColor(remoteUser?.username) }}
           >
             {getInitials(remoteUser?.username)}
           </div>
+
+          {/* Remote mute badge on avatar */}
+          {remoteAudioMuted && isConnected && (
+            <div className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-red-500 flex items-center justify-center border-2 border-dark-900 shadow-lg">
+              <MicOff size={14} className="text-white" />
+            </div>
+          )}
         </div>
 
         {/* User info */}
@@ -77,7 +100,8 @@ const AudioCall = () => {
 
         <p className="text-dark-400 text-sm md:text-base mb-3">
           {isConnecting && 'Calling...'}
-          {isConnected && 'On call'}
+          {isConnected && remoteAudioMuted && 'Muted'}
+          {isConnected && !remoteAudioMuted && 'On call'}
           {callStatus === CALL_STATUS.FAILED && 'Connection failed'}
           {callStatus === CALL_STATUS.RECONNECTING && 'Reconnecting...'}
         </p>
@@ -89,12 +113,43 @@ const AudioCall = () => {
           </p>
         )}
 
-        {/* Audio waveform visualization */}
+        {/* Dynamic speaking waveform — shows real speaking activity */}
         {isConnected && (
           <div className="flex items-end gap-1.5 mt-8 h-8">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="audio-wave-bar" />
+              <div
+                key={i}
+                className={`w-1 rounded-full transition-all duration-150 ${
+                  remoteSpeaking && !remoteAudioMuted
+                    ? 'bg-emerald-400 animate-speaking-bar'
+                    : remoteAudioMuted
+                      ? 'bg-red-400/40 h-2'
+                      : 'bg-dark-600 h-2'
+                }`}
+                style={remoteSpeaking && !remoteAudioMuted ? { animationDelay: `${i * 0.12}s` } : {}}
+              />
             ))}
+          </div>
+        )}
+
+        {/* Local speaking indicator */}
+        {isConnected && (
+          <div className="flex items-center gap-2 mt-6">
+            {!isAudioEnabled ? (
+              <div className="flex items-center gap-1.5 bg-red-500/10 rounded-full px-3 py-1.5">
+                <MicOff size={12} className="text-red-400" />
+                <span className="text-xs text-red-400">You are muted</span>
+              </div>
+            ) : localSpeaking ? (
+              <div className="flex items-center gap-1.5 bg-emerald-500/10 rounded-full px-3 py-1.5">
+                <span className="flex gap-0.5 items-end h-3">
+                  {[...Array(3)].map((_, i) => (
+                    <span key={i} className="w-0.5 bg-emerald-400 rounded-full animate-speaking-bar" style={{ animationDelay: `${i * 0.15}s` }} />
+                  ))}
+                </span>
+                <span className="text-xs text-emerald-400">Speaking</span>
+              </div>
+            ) : null}
           </div>
         )}
 

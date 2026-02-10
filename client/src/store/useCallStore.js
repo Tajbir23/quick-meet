@@ -33,6 +33,10 @@ const useCallStore = create((set, get) => ({
   callTimer: null,
   iceState: 'new',
 
+  // Remote user media state (1-to-1 calls)
+  remoteAudioMuted: false,
+  remoteVideoMuted: false,
+
   // Group call state
   isGroupCall: false,
   groupId: null,
@@ -237,6 +241,8 @@ const useCallStore = create((set, get) => ({
       incomingGroupCall: null,
       isMinimized: false,
       iceState: 'new',
+      remoteAudioMuted: false,
+      remoteVideoMuted: false,
       isGroupCall: false,
       groupId: null,
       groupCallParticipants: [],

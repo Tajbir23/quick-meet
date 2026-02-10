@@ -5,10 +5,11 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { Maximize2, Minimize2, MicOff } from 'lucide-react';
 import { useState } from 'react';
 import useCallStore from '../../store/useCallStore';
 import CallControls from './CallControls';
+import useSpeakingDetector from '../../hooks/useSpeakingDetector';
 import { getInitials, stringToColor, formatDuration } from '../../utils/helpers';
 import { CALL_STATUS } from '../../utils/constants';
 
@@ -20,13 +21,18 @@ const VideoCall = () => {
     callStatus,
     callDuration,
     isVideoEnabled,
+    isAudioEnabled,
     iceState,
     isMinimized,
+    remoteAudioMuted,
   } = useCallStore();
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const [isLocalLarge, setIsLocalLarge] = useState(false);
+
+  const localSpeaking = useSpeakingDetector(localStream);
+  const remoteSpeaking = useSpeakingDetector(remoteStream);
 
   // Attach local stream (re-run on maximize too)
   useEffect(() => {
@@ -77,6 +83,22 @@ const VideoCall = () => {
 
           {/* ICE state */}
           <div className="flex items-center gap-1.5 bg-black/30 rounded-full px-2.5 py-1 backdrop-blur-sm">
+            {/* Remote mute indicator */}
+            {remoteAudioMuted && (
+              <span className="flex items-center gap-1 mr-1">
+                <MicOff size={10} className="text-red-400" />
+              </span>
+            )}
+            {/* Speaking indicator */}
+            {remoteSpeaking && !remoteAudioMuted && (
+              <span className="flex items-center gap-1 mr-1">
+                <span className="flex gap-0.5 items-end h-3">
+                  {[...Array(3)].map((_, i) => (
+                    <span key={i} className="w-0.5 bg-emerald-400 rounded-full animate-speaking-bar" style={{ animationDelay: `${i * 0.15}s` }} />
+                  ))}
+                </span>
+              </span>
+            )}
             <span className={`w-2 h-2 rounded-full ${
               iceState === 'connected' || iceState === 'completed' ? 'bg-emerald-400' :
               iceState === 'checking' ? 'bg-yellow-400 animate-pulse' :
@@ -89,6 +111,11 @@ const VideoCall = () => {
 
       {/* Video area */}
       <div className="flex-1 relative bg-dark-900">
+        {/* Remote speaking glow bar at top */}
+        {remoteSpeaking && !remoteAudioMuted && (
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-400/0 via-emerald-400 to-emerald-400/0 z-10 animate-pulse" />
+        )}
+
         {/* Remote video (main) */}
         {remoteStream ? (
           <video
@@ -126,7 +153,11 @@ const VideoCall = () => {
             className={`absolute shadow-2xl overflow-hidden cursor-pointer transition-all duration-300 ${
               isLocalLarge
                 ? 'inset-0 rounded-none z-10'
-                : 'bottom-28 md:bottom-24 right-3 w-24 h-36 xs:w-28 xs:h-40 md:w-48 md:h-36 rounded-2xl z-20 border-2 border-dark-700/50'
+                : 'bottom-28 md:bottom-24 right-3 w-24 h-36 xs:w-28 xs:h-40 md:w-48 md:h-36 rounded-2xl z-20 border-2'
+            } ${
+              !isLocalLarge && localSpeaking && isAudioEnabled
+                ? 'border-emerald-400 shadow-emerald-400/20'
+                : !isLocalLarge ? 'border-dark-700/50' : ''
             }`}
             onClick={() => setIsLocalLarge(!isLocalLarge)}
           >
@@ -141,6 +172,12 @@ const VideoCall = () => {
             ) : (
               <div className="w-full h-full bg-dark-700 flex items-center justify-center">
                 <span className="text-dark-400 text-xs">Camera off</span>
+              </div>
+            )}
+            {/* Local mute indicator */}
+            {!isAudioEnabled && !isLocalLarge && (
+              <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-red-500/80 flex items-center justify-center">
+                <MicOff size={10} className="text-white" />
               </div>
             )}
           </div>
