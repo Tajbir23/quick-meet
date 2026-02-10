@@ -3,11 +3,14 @@
  * NetworkStatus — Connection status banner
  * ============================================
  * 
- * Shows a banner when the browser goes offline.
- * Also monitors socket connection status.
+ * Shows a banner when the browser goes offline
+ * or the socket connection is lost.
+ * 
+ * Uses actual socket events (not polling) for instant,
+ * accurate status updates.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { WifiOff, Wifi } from 'lucide-react';
 import { getSocket } from '../../services/socket';
 
@@ -15,14 +18,17 @@ const NetworkStatus = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [socketConnected, setSocketConnected] = useState(true);
   const [showReconnected, setShowReconnected] = useState(false);
+  const reconnectedTimer = useRef(null);
+  // Track if socket has ever connected — suppress the banner during
+  // initial page load / first connection attempt
+  const hasEverConnected = useRef(false);
 
+  // Browser online/offline
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      setShowReconnected(true);
-      setTimeout(() => setShowReconnected(false), 3000);
+      showReconnectedBanner();
     };
-
     const handleOffline = () => {
       setIsOnline(false);
       setShowReconnected(false);
@@ -30,22 +36,80 @@ const NetworkStatus = () => {
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
-  // Monitor socket connection
+  // Socket event listeners — react instantly, no polling
   useEffect(() => {
-    const interval = setInterval(() => {
-      const socket = getSocket();
-      setSocketConnected(socket?.connected ?? true);
-    }, 2000);
+    let cleanup = null;
 
-    return () => clearInterval(interval);
+    const attach = () => {
+      const socket = getSocket();
+      if (!socket) return;
+
+      const onConnect = () => {
+        // If this is a RE-connect (not the very first connect), flash the green banner
+        if (hasEverConnected.current) {
+          showReconnectedBanner();
+        }
+        hasEverConnected.current = true;
+        setSocketConnected(true);
+      };
+
+      const onDisconnect = () => {
+        setSocketConnected(false);
+        setShowReconnected(false);
+      };
+
+      const onConnectError = () => {
+        // Only show disconnected banner if we had previously connected
+        if (hasEverConnected.current) {
+          setSocketConnected(false);
+        }
+      };
+
+      socket.on('connect', onConnect);
+      socket.on('disconnect', onDisconnect);
+      socket.on('connect_error', onConnectError);
+
+      // If socket is already connected right now
+      if (socket.connected) {
+        hasEverConnected.current = true;
+        setSocketConnected(true);
+      }
+
+      cleanup = () => {
+        socket.off('connect', onConnect);
+        socket.off('disconnect', onDisconnect);
+        socket.off('connect_error', onConnectError);
+      };
+    };
+
+    // The socket may not exist yet on first render (created later in checkAuth).
+    // Check periodically until we find it, then attach listeners and stop.
+    attach();
+    const poll = setInterval(() => {
+      if (getSocket()) {
+        attach();
+        clearInterval(poll);
+      }
+    }, 500);
+
+    return () => {
+      clearInterval(poll);
+      cleanup?.();
+      if (reconnectedTimer.current) clearTimeout(reconnectedTimer.current);
+    };
   }, []);
+
+  function showReconnectedBanner() {
+    setShowReconnected(true);
+    if (reconnectedTimer.current) clearTimeout(reconnectedTimer.current);
+    reconnectedTimer.current = setTimeout(() => setShowReconnected(false), 3000);
+  }
 
   // No issues — render nothing
   if (isOnline && socketConnected && !showReconnected) return null;
