@@ -205,6 +205,8 @@ const useGroupStore = create((set, get) => ({
     myGroups.forEach(group => {
       socket.emit('group:join-room', { groupId: group._id });
     });
+    // After joining rooms, query active group calls for banners/badges
+    socket.emit('group-call:get-active-calls');
   },
 }));
 

@@ -199,6 +199,16 @@ const useSocket = () => {
     // Query active calls now that we're connected
     socket.emit('group-call:get-active-calls');
 
+    // *** Reconnect handler ***
+    // When socket reconnects, room memberships are lost (new server socket).
+    // Re-join all group rooms and re-query active calls so banners/badges update.
+    socket.on('connect', () => {
+      console.log('🔌 Socket (re)connected — re-joining group rooms');
+      const { myGroups } = useGroupStore.getState();
+      myGroups.forEach(g => socket.emit('group:join-room', { groupId: g._id }));
+      socket.emit('group-call:get-active-calls');
+    });
+
     // Group call ended — remove banner & dismiss ringing
     socket.on('group-call:ended', ({ groupId }) => {
       useGroupStore.getState().removeActiveGroupCall(groupId);
@@ -272,6 +282,24 @@ const useSocket = () => {
       }
     });
 
+    // Screen share notification from a group call peer
+    socket.on('group-call:screen-share', ({ userId, username, sharing }) => {
+      console.log(`🖥️ ${username} ${sharing ? 'started' : 'stopped'} screen sharing`);
+      // Update participant's isScreenSharing flag
+      const { groupCallParticipants, isGroupCall } = useCallStore.getState();
+      if (isGroupCall) {
+        const updated = groupCallParticipants.map(p =>
+          p.userId === userId ? { ...p, isScreenSharing: sharing } : p
+        );
+        useCallStore.setState({ groupCallParticipants: updated });
+      }
+    });
+
+    // Media toggle notification from a group call peer
+    socket.on('group-call:media-toggled', ({ userId, kind, enabled }) => {
+      console.log(`📡 Group peer ${userId} ${kind} ${enabled ? 'on' : 'off'}`);
+    });
+
     socket.on('group-call:error', ({ message }) => {
       console.error('Group call error:', message);
     });
@@ -314,7 +342,10 @@ const useSocket = () => {
       socket.off('group-call:offer');
       socket.off('group-call:answer');
       socket.off('group-call:ice-candidate');
+      socket.off('group-call:screen-share');
+      socket.off('group-call:media-toggled');
       socket.off('group-call:error');
+      socket.off('connect');
       initialized.current = false;
     };
   }, []);

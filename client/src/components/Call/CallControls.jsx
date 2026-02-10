@@ -88,7 +88,7 @@ const CallControls = ({ compact = false }) => {
       {/* Screen share - hidden on very small mobile */}
       <button
         onClick={handleScreenShare}
-        className={`${btnBase} rounded-full flex items-center justify-center transition-all hidden sm:flex ${
+        className={`${btnBase} rounded-full flex items-center justify-center transition-all ${
           isScreenSharing
             ? 'bg-primary-500/20 text-primary-400 ring-2 ring-primary-400/30'
             : 'bg-dark-700/80 hover:bg-dark-600 text-white backdrop-blur-sm'

@@ -12,8 +12,8 @@
  * Grid layout adjusts dynamically based on participant count.
  */
 
-import { useEffect, useRef, useMemo } from 'react';
-import { Users, PhoneOff } from 'lucide-react';
+import { useEffect, useRef, useMemo, useState, useCallback } from 'react';
+import { Users, PhoneOff, Monitor } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
 import useAuthStore from '../../store/useAuthStore';
 import CallControls from '../Call/CallControls';
@@ -21,10 +21,51 @@ import { getInitials, stringToColor, formatDuration } from '../../utils/helpers'
 
 /**
  * Individual video tile for a participant
+ *
+ * WHY dynamic hasVideo:
+ * - WebRTC sendrecv transceiver always creates a video track on the receiver,
+ *   even for audio-only calls (track.enabled=true but track.muted=true).
+ * - replaceTrack (screen share) changes media content without firing ontrack,
+ *   so React doesn't re-render from stream reference changes.
+ * - By listening to track.onmute / track.onunmute we detect when video data
+ *   actually starts or stops flowing.
  */
-const VideoTile = ({ stream, name, isMuted = false, isLocal = false }) => {
+const VideoTile = ({ stream, name, isMuted = false, isLocal = false, isScreenSharing = false }) => {
   const videoRef = useRef(null);
   const audioRef = useRef(null);
+  const [hasVideo, setHasVideo] = useState(false);
+
+  // Dynamically detect whether video data is flowing
+  const checkVideoActive = useCallback(() => {
+    if (!stream) { setHasVideo(false); return; }
+    const active = stream.getVideoTracks().some(t => t.enabled && !t.muted && t.readyState === 'live');
+    setHasVideo(active);
+  }, [stream]);
+
+  useEffect(() => {
+    if (!stream) { setHasVideo(false); return; }
+    checkVideoActive();
+
+    const tracks = stream.getVideoTracks();
+    tracks.forEach(t => {
+      t.addEventListener('mute', checkVideoActive);
+      t.addEventListener('unmute', checkVideoActive);
+      t.addEventListener('ended', checkVideoActive);
+    });
+    // Also listen for tracks added/removed (e.g. screen share adds a track)
+    stream.addEventListener('addtrack', checkVideoActive);
+    stream.addEventListener('removetrack', checkVideoActive);
+
+    return () => {
+      tracks.forEach(t => {
+        t.removeEventListener('mute', checkVideoActive);
+        t.removeEventListener('unmute', checkVideoActive);
+        t.removeEventListener('ended', checkVideoActive);
+      });
+      stream.removeEventListener('addtrack', checkVideoActive);
+      stream.removeEventListener('removetrack', checkVideoActive);
+    };
+  }, [stream, checkVideoActive]);
 
   useEffect(() => {
     if (videoRef.current && stream) {
@@ -39,7 +80,10 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false }) => {
     }
   }, [stream, isLocal]);
 
-  const hasVideo = stream?.getVideoTracks().some(t => t.enabled);
+  // For local stream, check enabled (we control it) rather than muted
+  const showVideo = isLocal
+    ? stream?.getVideoTracks().some(t => t.enabled)
+    : hasVideo;
 
   return (
     <div className="relative bg-dark-800 rounded-2xl overflow-hidden h-full w-full">
@@ -48,7 +92,7 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false }) => {
         <audio ref={audioRef} autoPlay playsInline />
       )}
 
-      {stream && hasVideo ? (
+      {stream && showVideo ? (
         <video
           ref={videoRef}
           autoPlay
@@ -64,6 +108,14 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false }) => {
           >
             {getInitials(name)}
           </div>
+        </div>
+      )}
+
+      {/* Screen share indicator */}
+      {isScreenSharing && (
+        <div className="absolute top-2 left-2 bg-primary-500/80 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] text-white flex items-center gap-1">
+          <Monitor size={10} />
+          <span>Screen</span>
         </div>
       )}
 
@@ -86,6 +138,7 @@ const GroupCall = () => {
     callDuration,
     isVideoEnabled,
     isAudioEnabled,
+    isScreenSharing,
     callStatus,
     endCall,
     isMinimized,
@@ -138,6 +191,7 @@ const GroupCall = () => {
           name={user?.username}
           isLocal
           isMuted={!isAudioEnabled}
+          isScreenSharing={isScreenSharing}
         />
 
         {/* Remote participants */}
@@ -146,6 +200,7 @@ const GroupCall = () => {
             key={participant.userId}
             stream={remoteStreams[participant.userId]}
             name={participant.username}
+            isScreenSharing={participant.isScreenSharing}
           />
         ))}
 
