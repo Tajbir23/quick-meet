@@ -41,6 +41,9 @@ const useCallStore = create((set, get) => ({
   // Incoming call data
   incomingCall: null,      // { callerId, callerName, offer, callType }
 
+  // Incoming GROUP call data (separate from 1-to-1)
+  incomingGroupCall: null,  // { groupId, groupName, callerName, participantCount }
+
   // ============================================
   // 1-TO-1 CALL ACTIONS
   // ============================================
@@ -225,6 +228,7 @@ const useCallStore = create((set, get) => ({
       callDuration: 0,
       callTimer: null,
       incomingCall: null,
+      incomingGroupCall: null,
       iceState: 'new',
       isGroupCall: false,
       groupId: null,
@@ -390,6 +394,9 @@ const useCallStore = create((set, get) => ({
       const socket = getSocket();
       if (!socket) throw new Error('Socket not connected');
 
+      // Dismiss any incoming group call notification (we're the one starting/joining)
+      set({ incomingGroupCall: null });
+
       set({
         callStatus: CALL_STATUS.CONNECTED,
         callType,
@@ -401,7 +408,18 @@ const useCallStore = create((set, get) => ({
 
       // Get local media
       const constraints = { audio: true, video: callType === 'video' };
-      const localStream = await webrtcService.getLocalStream(constraints);
+      let localStream;
+      try {
+        localStream = await webrtcService.getLocalStream(constraints);
+      } catch (mediaErr) {
+        if (callType === 'video') {
+          console.warn('Camera unavailable, falling back to audio-only:', mediaErr.message);
+          localStream = await webrtcService.getLocalStream({ audio: true, video: false });
+          set({ isVideoEnabled: false });
+        } else {
+          throw mediaErr;
+        }
+      }
       set({ localStream });
 
       // Join group call room
@@ -411,6 +429,32 @@ const useCallStore = create((set, get) => ({
       get().endCall();
       throw error;
     }
+  },
+
+  /**
+   * Set incoming group call notification (from socket)
+   */
+  setIncomingGroupCall: (data) => {
+    // Don't show notification if we're already in this group call
+    const { isGroupCall, groupId, callStatus } = get();
+    if (isGroupCall && groupId === data.groupId && callStatus !== CALL_STATUS.IDLE) return;
+
+    set({ incomingGroupCall: data });
+  },
+
+  /**
+   * Dismiss the incoming group call notification without joining
+   */
+  dismissGroupCall: () => {
+    set({ incomingGroupCall: null });
+  },
+
+  /**
+   * Join an ongoing group call (from incoming notification)
+   */
+  joinGroupCall: async (groupId, callType = 'audio') => {
+    set({ incomingGroupCall: null });
+    await get().startGroupCall(groupId, callType);
   },
 
   /**

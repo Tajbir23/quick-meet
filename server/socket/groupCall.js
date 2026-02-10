@@ -87,6 +87,9 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
         }
       }
 
+      // Was this the first person joining? (i.e. they're starting the call)
+      const isNewCall = callParticipants.size === 0;
+
       // Add new participant
       callParticipants.add(socket.userId);
 
@@ -94,6 +97,18 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
       socket.join(`group-call:${groupId}`);
 
       console.log(`📞 Group call: ${socket.username} joined call in group ${groupId} (${callParticipants.size} participants)`);
+
+      // *** CRITICAL: Notify ALL group members about the call ***
+      // This goes to the group chat room (group:${groupId}), NOT the call room.
+      // This way every group member (online) sees "incoming group call".
+      io.to(`group:${groupId}`).emit('group-call:incoming', {
+        groupId,
+        groupName: group.name,
+        callerId: socket.userId,
+        callerName: socket.username,
+        participantCount: callParticipants.size,
+        isNewCall,
+      });
 
       // Tell the new peer about existing peers
       // New peer will create offers for each existing peer
@@ -246,6 +261,11 @@ function handleGroupCallLeave(io, socket, onlineUsers, groupId) {
   if (callParticipants.size === 0) {
     activeGroupCalls.delete(groupId);
     console.log(`📞 Group call ended for group ${groupId}`);
+
+    // Notify ALL group members that the call has ended
+    io.to(`group:${groupId}`).emit('group-call:ended', {
+      groupId,
+    });
   }
 }
 

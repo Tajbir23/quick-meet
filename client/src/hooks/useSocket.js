@@ -164,6 +164,38 @@ const useSocket = () => {
       }
     });
 
+    // *** Incoming group call notification ***
+    // This fires for ALL group members when someone starts/joins a group call
+    socket.on('group-call:incoming', ({ groupId, groupName, callerId, callerName, participantCount, isNewCall }) => {
+      // Don't show if WE are the one who started/joined
+      if (callerId === user?._id) return;
+
+      // Don't show if we're already in a call
+      const { callStatus, isGroupCall, groupId: currentGroupId } = useCallStore.getState();
+      if (callStatus !== 'idle' && !(isGroupCall && currentGroupId === groupId)) return;
+      // If already in this group call, ignore
+      if (isGroupCall && currentGroupId === groupId) return;
+
+      console.log(`📞 Incoming group call in "${groupName}" from ${callerName} (${participantCount} participants)`);
+
+      useCallStore.getState().setIncomingGroupCall({
+        groupId,
+        groupName,
+        callerName,
+        participantCount,
+      });
+
+      playNotificationSound('call');
+    });
+
+    // Group call ended — dismiss notification if showing
+    socket.on('group-call:ended', ({ groupId }) => {
+      const { incomingGroupCall } = useCallStore.getState();
+      if (incomingGroupCall && incomingGroupCall.groupId === groupId) {
+        useCallStore.getState().dismissGroupCall();
+      }
+    });
+
     socket.on('group-call:peer-joined', async ({ userId, username }) => {
       try {
         console.log(`📞 Group call: ${username} joined`);
@@ -243,6 +275,8 @@ const useSocket = () => {
       socket.off('call:renegotiate');
       socket.off('call:renegotiate-answer');
       socket.off('group-call:existing-peers');
+      socket.off('group-call:incoming');
+      socket.off('group-call:ended');
       socket.off('group-call:peer-joined');
       socket.off('group-call:peer-left');
       socket.off('group-call:offer');
