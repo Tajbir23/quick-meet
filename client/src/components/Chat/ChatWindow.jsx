@@ -4,6 +4,7 @@ import useAuthStore from '../../store/useAuthStore';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
 import Header from '../Layout/Header';
+import GroupChat from '../Group/GroupChat';
 import { formatDateSeparator, shouldShowDateSeparator } from '../../utils/helpers';
 import { ChevronDown } from 'lucide-react';
 
@@ -13,6 +14,7 @@ const ChatWindow = () => {
   const containerRef = useRef(null);
   const [pagination, setPagination] = useState(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
 
   // Fetch messages when active chat changes
   useEffect(() => {
@@ -25,6 +27,7 @@ const ChatWindow = () => {
         markAsRead(activeChat.id);
       }
     }
+    setShowGroupInfo(false); // Close group info when switching chats
   }, [activeChat?.id]);
 
   // Auto scroll to bottom on new messages
@@ -68,8 +71,17 @@ const ChatWindow = () => {
     <div className="flex flex-col h-full overflow-hidden bg-dark-900 absolute inset-0">
       {/* Chat header (Fixed height) */}
       <div className="flex-shrink-0">
-        <Header />
+        <Header
+          onToggleGroupInfo={() => setShowGroupInfo(prev => !prev)}
+          showGroupInfo={showGroupInfo}
+        />
       </div>
+
+      {/* Chat body: messages + optional group info panel side by side */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
+
+      {/* Messages column */}
+      <div className="flex-1 flex flex-col min-w-0">
 
       {/* Messages area (Flexible height, scrollable) */}
       <div
@@ -156,6 +168,18 @@ const ChatWindow = () => {
         )}
         <MessageInput />
       </div>
+
+      </div>{/* end messages column */}
+
+      {/* Group info panel */}
+      {showGroupInfo && activeChat?.type === 'group' && (
+        <GroupChat
+          groupId={activeChat.id}
+          onClose={() => setShowGroupInfo(false)}
+        />
+      )}
+
+      </div>{/* end chat body flex row */}
     </div>
   );
 };

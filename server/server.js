@@ -161,6 +161,9 @@ const startServer = async () => {
     // 4. Initialize Socket.io with JWT auth
     const io = initializeSocket(httpsServer);
 
+    // Store io on app so REST controllers can emit socket events
+    app.set('io', io);
+
     // 5. Register all socket event handlers
     registerSocketHandlers(io);
 

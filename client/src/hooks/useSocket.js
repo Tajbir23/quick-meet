@@ -75,6 +75,22 @@ const useSocket = () => {
     });
 
     // ============================================
+    // GROUP MEMBER EVENTS
+    // ============================================
+
+    socket.on('group:member-added', ({ groupId, addedUserId, addedUsername, addedBy }) => {
+      console.log(`👥 ${addedBy} added ${addedUsername} to group ${groupId}`);
+
+      // If I was the one added, fetch my groups and join the room
+      if (addedUserId === user?._id) {
+        useGroupStore.getState().fetchMyGroups().then(() => {
+          socket.emit('group:join-room', { groupId });
+        });
+        playNotificationSound('message');
+      }
+    });
+
+    // ============================================
     // 1-TO-1 CALL EVENTS
     // ============================================
 
@@ -323,6 +339,7 @@ const useSocket = () => {
       socket.off('typing:stop');
       socket.off('typing:group:start');
       socket.off('typing:group:stop');
+      socket.off('group:member-added');
       socket.off('call:offer');
       socket.off('call:answer');
       socket.off('call:ice-candidate');

@@ -279,10 +279,10 @@ const addMember = async (req, res) => {
       });
     }
 
-    if (!group.isAdmin(req.user._id)) {
+    if (!group.isMember(req.user._id)) {
       return res.status(403).json({
         success: false,
-        message: 'Only group admin can add members',
+        message: 'Only group members can add new members',
       });
     }
 
@@ -319,6 +319,30 @@ const addMember = async (req, res) => {
     });
 
     await group.populate('members', 'username avatar isOnline');
+
+    // Notify the added user via socket so they see the group immediately
+    const io = req.app.get('io');
+    if (io) {
+      const eventData = {
+        groupId: group._id.toString(),
+        addedUserId: userId,
+        addedUsername: userToAdd.username,
+        addedBy: req.user.username,
+      };
+
+      // Tell existing group members about the new member
+      io.to(`group:${group._id}`).emit('group:member-added', eventData);
+
+      // Also emit directly to the added user's socket (they're not in the room yet)
+      // Find their socketId from the connected sockets
+      const sockets = await io.fetchSockets();
+      const targetSocket = sockets.find(s => s.userId === userId);
+      if (targetSocket) {
+        targetSocket.emit('group:member-added', eventData);
+        // Auto-join them into the group room
+        targetSocket.join(`group:${group._id}`);
+      }
+    }
 
     res.json({
       success: true,

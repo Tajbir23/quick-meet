@@ -1,5 +1,5 @@
 import {
-  Phone, Video, ArrowLeft, Users
+  Phone, Video, ArrowLeft, Users, Info
 } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useCallStore from '../../store/useCallStore';
@@ -8,7 +8,7 @@ import useAuthStore from '../../store/useAuthStore';
 import { getInitials, stringToColor } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 
-const Header = () => {
+const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
   const { activeChat, clearActiveChat, isUserOnline } = useChatStore();
   const { startCall, startGroupCall, callStatus } = useCallStore();
   const { activeGroupCalls } = useGroupStore();
@@ -121,6 +121,19 @@ const Header = () => {
         >
           <Video size={20} />
         </button>
+        {isGroup && (
+          <button
+            onClick={onToggleGroupInfo}
+            className={`btn-icon transition-colors ${
+              showGroupInfo
+                ? 'text-primary-400 bg-primary-500/10'
+                : 'text-white hover:text-primary-400 hover:bg-primary-500/10'
+            }`}
+            title="Group info & members"
+          >
+            <Info size={20} />
+          </button>
+        )}
       </div>
     </div>
 
