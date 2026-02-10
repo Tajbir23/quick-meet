@@ -65,6 +65,12 @@ const registerSocketHandlers = require('./socket');
 // ============================================
 const app = express();
 
+// Trust first proxy (nginx reverse proxy)
+// WHY: Server runs behind Nginx which sets X-Forwarded-For header.
+// Without this, express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+// and cannot correctly identify client IPs for rate limiting.
+app.set('trust proxy', 1);
+
 // Security headers (helmet)
 // WHY: Prevents common web vulnerabilities (XSS, clickjacking, MIME sniffing)
 app.use(helmet({
