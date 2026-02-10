@@ -18,15 +18,15 @@ const MainLayout = () => {
 
       {/* Main content — hidden on mobile when no chat, full screen when chat active */}
       <div className={`
-        ${activeChat ? 'flex' : 'hidden md:flex'}
-        flex-col flex-1 min-w-0 h-full
+        ${activeChat ? 'block' : 'hidden md:block'}
+        flex-1 min-w-0 h-full relative
       `}>
         {activeChat ? (
-          /* ChatWindow now contains its own header */
+          /* ChatWindow uses absolute inset-0 to fill this container exactly */
           <ChatWindow />
         ) : (
           /* Desktop no-chat state */
-          <>
+          <div className="absolute inset-0 flex flex-col">
             <div className="h-16 bg-dark-800 border-b border-dark-700 hidden md:flex items-center justify-center flex-shrink-0">
               <p className="text-dark-500 text-sm">Select a conversation to start messaging</p>
             </div>
@@ -55,7 +55,7 @@ const MainLayout = () => {
                 </div>
               </div>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>
