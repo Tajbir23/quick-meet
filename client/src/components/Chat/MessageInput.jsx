@@ -7,7 +7,9 @@ import toast from 'react-hot-toast';
 const MessageInput = () => {
   const [content, setContent] = useState('');
   const [showFileUpload, setShowFileUpload] = useState(false);
-  const { activeChat, sendMessage, emitTyping } = useChatStore();
+  const activeChat = useChatStore(s => s.activeChat);
+  const sendMessage = useChatStore(s => s.sendMessage);
+  const emitTyping = useChatStore(s => s.emitTyping);
   const typingTimeoutRef = useRef(null);
   const inputRef = useRef(null);
 

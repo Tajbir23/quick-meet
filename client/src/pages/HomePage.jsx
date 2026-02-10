@@ -26,9 +26,14 @@ const HomePage = () => {
   // Initialize socket event listeners
   useSocket();
 
-  const { fetchUsers, fetchUnreadCounts } = useChatStore();
-  const { fetchMyGroups, joinAllGroupRooms } = useGroupStore();
-  const { callStatus, callType, isGroupCall, isMinimized } = useCallStore();
+  const fetchUsers = useChatStore(s => s.fetchUsers);
+  const fetchUnreadCounts = useChatStore(s => s.fetchUnreadCounts);
+  const fetchMyGroups = useGroupStore(s => s.fetchMyGroups);
+  const joinAllGroupRooms = useGroupStore(s => s.joinAllGroupRooms);
+  const callStatus = useCallStore(s => s.callStatus);
+  const callType = useCallStore(s => s.callType);
+  const isGroupCall = useCallStore(s => s.isGroupCall);
+  const isMinimized = useCallStore(s => s.isMinimized);
 
   useEffect(() => {
     // Fetch initial data

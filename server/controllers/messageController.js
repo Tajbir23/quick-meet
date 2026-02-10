@@ -57,19 +57,23 @@ function decryptContent(message) {
 }
 
 /**
- * Decrypt an array of message documents (mutates in place for performance)
+ * Decrypt an array of message documents.
+ * IMPORTANT: Converts each Mongoose doc to a plain object FIRST,
+ * then modifies the plain copy. This prevents Mongoose change-tracking
+ * from ever accidentally persisting decrypted content or stripped
+ * encryption metadata back to the database.
  */
 function decryptMessages(messages) {
-  for (const msg of messages) {
-    if (msg.encrypted) {
-      const obj = msg.toObject ? msg.toObject() : msg;
-      msg.content = decryptContent(obj);
-      // Strip encryption metadata from response
-      msg.encryptionIV = undefined;
-      msg.encryptionTag = undefined;
+  return messages.map(msg => {
+    const obj = msg.toObject ? msg.toObject() : { ...msg };
+    if (obj.encrypted && obj.encryptionIV && obj.encryptionTag) {
+      obj.content = decryptContent(obj);
     }
-  }
-  return messages;
+    // Strip encryption metadata from response (plain object — no DB side effects)
+    delete obj.encryptionIV;
+    delete obj.encryptionTag;
+    return obj;
+  });
 }
 
 /**
@@ -129,14 +133,17 @@ const sendMessage = async (req, res) => {
     await message.populate('sender', 'username avatar');
     await message.populate('receiver', 'username avatar');
 
-    // Decrypt for the response (client gets plaintext)
-    message.content = sanitized;
-    message.encryptionIV = undefined;
-    message.encryptionTag = undefined;
+    // Convert to plain object for response — NEVER mutate the Mongoose doc
+    // (mutating would mark fields as modified; if .save() were ever called
+    //  accidentally, it would overwrite encrypted content with plaintext)
+    const messageResponse = message.toObject();
+    messageResponse.content = sanitized;
+    delete messageResponse.encryptionIV;
+    delete messageResponse.encryptionTag;
 
     res.status(201).json({
       success: true,
-      data: { message },
+      data: { message: messageResponse },
     });
   } catch (error) {
     securityLogger.log('WARN', 'SYSTEM', 'Send message error', { error: error.message });
@@ -190,14 +197,15 @@ const sendGroupMessage = async (req, res) => {
 
     await message.populate('sender', 'username avatar');
 
-    // Decrypt for response
-    message.content = sanitized;
-    message.encryptionIV = undefined;
-    message.encryptionTag = undefined;
+    // Convert to plain object for response — NEVER mutate the Mongoose doc
+    const messageResponse = message.toObject();
+    messageResponse.content = sanitized;
+    delete messageResponse.encryptionIV;
+    delete messageResponse.encryptionTag;
 
     res.status(201).json({
       success: true,
-      data: { message },
+      data: { message: messageResponse },
     });
   } catch (error) {
     securityLogger.log('WARN', 'SYSTEM', 'Send group message error', { error: error.message });
@@ -222,8 +230,8 @@ const getConversation = async (req, res) => {
       limit
     );
 
-    // Decrypt all encrypted messages
-    decryptMessages(messages);
+    // Decrypt all encrypted messages (returns new plain-object array)
+    const decrypted = decryptMessages(messages);
 
     const total = await Message.countDocuments({
       $or: [
@@ -236,7 +244,7 @@ const getConversation = async (req, res) => {
     res.json({
       success: true,
       data: {
-        messages: messages.reverse(),
+        messages: decrypted.reverse(),
         pagination: { page, limit, total, pages: Math.ceil(total / limit) },
       },
     });
@@ -267,15 +275,15 @@ const getGroupMessages = async (req, res) => {
 
     const messages = await Message.getGroupMessages(groupId, page, limit);
 
-    // Decrypt all encrypted messages
-    decryptMessages(messages);
+    // Decrypt all encrypted messages (returns new plain-object array)
+    const decrypted = decryptMessages(messages);
 
     const total = await Message.countDocuments({ group: groupId });
 
     res.json({
       success: true,
       data: {
-        messages: messages.reverse(),
+        messages: decrypted.reverse(),
         pagination: { page, limit, total, pages: Math.ceil(total / limit) },
       },
     });

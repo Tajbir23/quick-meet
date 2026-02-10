@@ -2,7 +2,8 @@ import { Navigate } from 'react-router-dom';
 import useAuthStore from '../../store/useAuthStore';
 
 const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuthStore();
+  const isAuthenticated = useAuthStore(s => s.isAuthenticated);
+  const isLoading = useAuthStore(s => s.isLoading);
 
   if (isLoading) {
     return (
