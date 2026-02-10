@@ -70,6 +70,16 @@ const userSchema = new mongoose.Schema({
     default: false,
   },
 
+  // Privacy settings
+  profileHidden: {
+    type: Boolean,
+    default: false,
+  },
+  emailHidden: {
+    type: Boolean,
+    default: false,
+  },
+
   // Block status: only the owner can block users
   isBlocked: {
     type: Boolean,
@@ -208,6 +218,10 @@ userSchema.methods.toPublicObject = function () {
   }
   delete obj.ownerModeVisible;
   delete obj.isBlocked;
+  // Respect email visibility
+  if (obj.emailHidden) {
+    delete obj.email;
+  }
   return obj;
 };
 

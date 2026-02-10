@@ -6,6 +6,8 @@ const {
   searchUsers,
   getUserById,
   updateProfile,
+  updateSecurity,
+  updatePrivacy,
 } = require('../controllers/userController');
 const { protect } = require('../middleware/auth');
 const { apiLimiter } = require('../middleware/rateLimiter');
@@ -18,6 +20,8 @@ router.get('/', getUsers);
 router.get('/active', getActiveUsers);
 router.get('/search', searchUsers);
 router.put('/profile', updateProfile);
+router.put('/security', updateSecurity);
+router.put('/privacy', updatePrivacy);
 router.get('/:id', getUserById);
 
 module.exports = router;

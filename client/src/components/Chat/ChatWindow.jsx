@@ -5,8 +5,12 @@ import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
 import Header from '../Layout/Header';
 import GroupChat from '../Group/GroupChat';
+import ForwardMessageModal from '../Common/ForwardMessageModal';
+import UserProfileModal from '../Common/UserProfileModal';
 import { formatDateSeparator, shouldShowDateSeparator } from '../../utils/helpers';
 import { ChevronDown } from 'lucide-react';
+import api from '../../services/api';
+import toast from 'react-hot-toast';
 
 const ChatWindow = () => {
   // Use individual selectors to prevent re-rendering when unrelated
@@ -23,6 +27,37 @@ const ChatWindow = () => {
   const [pagination, setPagination] = useState(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
+  const [forwardMessage, setForwardMessage] = useState(null);
+  const [viewProfileUser, setViewProfileUser] = useState(null);
+
+  // Delete message handler
+  const handleDeleteMessage = async (messageId) => {
+    if (!window.confirm('Delete this message?')) return;
+    try {
+      await api.delete(`/messages/${messageId}`);
+      // Remove from local store
+      useChatStore.setState((state) => ({
+        messages: {
+          ...state.messages,
+          [activeChat.id]: (state.messages[activeChat.id] || []).filter(m => m._id !== messageId),
+        },
+      }));
+      toast.success('Message deleted');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to delete message');
+    }
+  };
+
+  // Forward message handler
+  const handleForwardMessage = (message) => {
+    setForwardMessage(message);
+  };
+
+  // View profile handler
+  const handleViewProfile = (sender) => {
+    const userId = typeof sender === 'object' ? (sender._id || sender.id) : sender;
+    if (userId) setViewProfileUser(userId);
+  };
 
   // Fetch messages when active chat changes
   useEffect(() => {
@@ -142,6 +177,9 @@ const ChatWindow = () => {
                 message={msg}
                 isMine={isMine}
                 showAvatar={showAvatar}
+                onDelete={handleDeleteMessage}
+                onForward={handleForwardMessage}
+                onViewProfile={handleViewProfile}
               />
             </div>
           );
@@ -188,6 +226,22 @@ const ChatWindow = () => {
       )}
 
       </div>{/* end chat body flex row */}
+
+      {/* Forward message modal */}
+      {forwardMessage && (
+        <ForwardMessageModal
+          message={forwardMessage}
+          onClose={() => setForwardMessage(null)}
+        />
+      )}
+
+      {/* View profile modal */}
+      {viewProfileUser && (
+        <UserProfileModal
+          userId={viewProfileUser}
+          onClose={() => setViewProfileUser(null)}
+        />
+      )}
     </div>
   );
 };

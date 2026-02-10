@@ -374,6 +374,36 @@ const getUnreadCounts = async (req, res) => {
   }
 };
 
+/**
+ * DELETE /api/messages/:messageId
+ * Delete a message (only sender can delete)
+ */
+const deleteMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ success: false, message: 'Message not found' });
+    }
+
+    // Only the sender can delete their message
+    if (message.sender.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'You can only delete your own messages' });
+    }
+
+    await Message.findByIdAndDelete(messageId);
+
+    res.json({
+      success: true,
+      message: 'Message deleted',
+    });
+  } catch (error) {
+    securityLogger.log('WARN', 'SYSTEM', 'Delete message error', { error: error.message });
+    res.status(500).json({ success: false, message: 'Server error deleting message' });
+  }
+};
+
 module.exports = {
   sendMessage,
   sendGroupMessage,
@@ -381,4 +411,5 @@ module.exports = {
   getGroupMessages,
   markAsRead,
   getUnreadCounts,
+  deleteMessage,
 };

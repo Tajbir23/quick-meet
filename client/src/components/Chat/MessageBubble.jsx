@@ -1,11 +1,15 @@
-import { useState, memo } from 'react';
-import { Download, FileText, Loader2, Phone, Video, PhoneMissed, PhoneOff, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
+import { useState, useRef, useEffect, memo } from 'react';
+import { Download, FileText, Loader2, Phone, Video, PhoneMissed, PhoneOff, PhoneIncoming, PhoneOutgoing, Trash2, Forward, MoreVertical, User as UserIcon } from 'lucide-react';
 import { getInitials, stringToColor, formatMessageTime, isImageFile, formatFileSize, formatDuration } from '../../utils/helpers';
 import { SERVER_URL } from '../../utils/constants';
+import ImagePreview from '../Common/ImagePreview';
 
-const MessageBubble = ({ message, isMine, showAvatar }) => {
+const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onViewProfile }) => {
   const [downloading, setDownloading] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef(null);
   const isSystem = message.type === 'system';
   const isCall = message.type === 'call';
   const hasFile = message.fileUrl;
@@ -43,6 +47,24 @@ const MessageBubble = ({ message, isMine, showAvatar }) => {
       setDownloading(false);
     }
   };
+
+  // Close menu on outside click
+  const handleMenuToggle = (e) => {
+    e.stopPropagation();
+    setShowMenu(!showMenu);
+  };
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    if (!showMenu) return;
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setShowMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showMenu]);
 
   // System message
   if (isSystem) {
@@ -161,10 +183,57 @@ const MessageBubble = ({ message, isMine, showAvatar }) => {
         <div className="min-w-0">
           {/* Sender name (group messages) */}
           {!isMine && showAvatar && (
-            <p className="text-[11px] text-dark-400 mb-1 ml-1 font-medium">{senderName}</p>
+            <p
+              className="text-[11px] text-dark-400 mb-1 ml-1 font-medium cursor-pointer hover:text-primary-400 transition-colors"
+              onClick={() => onViewProfile && onViewProfile(message.sender)}
+            >
+              {senderName}
+            </p>
           )}
 
-          <div className={`chat-bubble ${isMine ? 'chat-bubble-sent' : 'chat-bubble-received'}`}>
+          <div className={`chat-bubble ${isMine ? 'chat-bubble-sent' : 'chat-bubble-received'} relative group`}>
+            {/* Context menu button */}
+            <div ref={menuRef} className="absolute top-1 right-1 z-10">
+              <button
+                onClick={handleMenuToggle}
+                className="w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/20"
+              >
+                <MoreVertical size={14} className={isMine ? 'text-primary-200' : 'text-dark-400'} />
+              </button>
+              {showMenu && (
+                <div className={`absolute ${isMine ? 'right-0' : 'left-0'} top-7 bg-dark-700 border border-dark-600 rounded-xl shadow-xl py-1.5 min-w-[140px] z-50 animate-scale-in`}>
+                  {/* Forward */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowMenu(false); onForward && onForward(message); }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-dark-200 hover:bg-dark-600 transition-colors"
+                  >
+                    <Forward size={14} />
+                    Forward
+                  </button>
+                  {/* View Profile (only for others' messages) */}
+                  {!isMine && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setShowMenu(false); onViewProfile && onViewProfile(message.sender); }}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-dark-200 hover:bg-dark-600 transition-colors"
+                    >
+                      <UserIcon size={14} />
+                      View Profile
+                    </button>
+                  )}
+                  {/* Delete (only own messages) */}
+                  {isMine && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setShowMenu(false); onDelete && onDelete(message._id); }}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-red-400 hover:bg-dark-600 transition-colors"
+                    >
+                      <Trash2 size={14} />
+                      Delete
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Image attachment */}
             {isImage && (
               <div className="mb-2 -mx-2 -mt-1">
@@ -179,7 +248,7 @@ const MessageBubble = ({ message, isMine, showAvatar }) => {
                   className={`rounded-lg max-w-full h-auto max-h-72 object-cover cursor-pointer transition-opacity ${imageLoaded ? 'opacity-100' : 'opacity-0 h-0'}`}
                   loading="lazy"
                   onLoad={() => setImageLoaded(true)}
-                  onClick={() => window.open(`${SERVER_URL}${message.fileUrl}`, '_blank')}
+                  onClick={() => setShowPreview(true)}
                 />
               </div>
             )}
@@ -213,16 +282,33 @@ const MessageBubble = ({ message, isMine, showAvatar }) => {
 
             {/* Text content */}
             {message.content && (
-              <p className="whitespace-pre-wrap break-words text-[14px] md:text-sm leading-relaxed">{message.content}</p>
+              <>
+                {message.forwardedFrom && (
+                  <p className="text-[10px] text-dark-400 italic mb-1 flex items-center gap-1">
+                    <Forward size={10} />
+                    Forwarded
+                  </p>
+                )}
+                <p className="whitespace-pre-wrap break-words text-[14px] md:text-sm leading-relaxed">{message.content}</p>
+              </>
             )}
 
             {/* Timestamp */}
             <p className={`text-[10px] mt-1 ${isMine ? 'text-primary-200/70' : 'text-dark-500'} text-right`}>
-              {formatMessageTime(message.createdAt)}
+              {message.isDeleted ? 'Deleted' : formatMessageTime(message.createdAt)}
             </p>
           </div>
         </div>
       </div>
+
+      {/* Image preview popup */}
+      {showPreview && isImage && (
+        <ImagePreview
+          imageUrl={message.fileUrl}
+          fileName={message.fileName}
+          onClose={() => setShowPreview(false)}
+        />
+      )}
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   MessageCircle, Users, Search, LogOut, Plus, Hash, X,
-  Shield, Eye, EyeOff
+  Shield, Eye, EyeOff, Settings
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../../store/useAuthStore';
@@ -12,6 +12,7 @@ import ActiveUsers from '../Users/ActiveUsers';
 import ChatList from '../Chat/ChatList';
 import GroupList from '../Group/GroupList';
 import CreateGroup from '../Group/CreateGroup';
+import UserSettings from '../Common/UserSettings';
 import { getInitials, stringToColor } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 
@@ -19,6 +20,7 @@ const Sidebar = () => {
   const [activeTab, setActiveTab] = useState('chats'); // 'chats' | 'groups' | 'users'
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const user = useAuthStore(s => s.user);
   const logout = useAuthStore(s => s.logout);
   const isOwner = useAuthStore(s => s.isOwner);
@@ -97,6 +99,13 @@ const Sidebar = () => {
                 </button>
               </>
             )}
+            <button
+              onClick={() => setShowSettings(true)}
+              className="btn-icon text-dark-400 hover:text-primary-400 hover:bg-primary-500/10"
+              title="Settings"
+            >
+              <Settings size={18} />
+            </button>
             <button
               onClick={handleLogout}
               className="btn-icon text-dark-400 hover:text-red-400 hover:bg-red-500/10"
@@ -178,6 +187,11 @@ const Sidebar = () => {
       {/* Create Group Modal */}
       {showCreateGroup && (
         <CreateGroup onClose={() => setShowCreateGroup(false)} />
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <UserSettings onClose={() => setShowSettings(false)} />
       )}
     </div>
   );
