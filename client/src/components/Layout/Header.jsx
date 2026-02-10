@@ -62,7 +62,7 @@ const Header = () => {
         {/* Back button — mobile only */}
         <button
           onClick={clearActiveChat}
-          className="btn-icon text-dark-300 md:hidden flex-shrink-0"
+          className="btn-icon text-white md:hidden flex-shrink-0"
         >
           <ArrowLeft size={22} />
         </button>
@@ -94,11 +94,11 @@ const Header = () => {
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-0.5 md:gap-1 flex-shrink-0">
+      {/* Call actions — clearly visible */}
+      <div className="flex items-center gap-1 flex-shrink-0">
         <button
           onClick={handleAudioCall}
-          className="btn-icon text-dark-400 hover:text-primary-400 hover:bg-primary-500/10"
+          className="btn-icon text-white hover:text-primary-400 hover:bg-primary-500/10"
           title="Audio call"
           disabled={inCall}
         >
@@ -106,7 +106,7 @@ const Header = () => {
         </button>
         <button
           onClick={handleVideoCall}
-          className="btn-icon text-dark-400 hover:text-primary-400 hover:bg-primary-500/10"
+          className="btn-icon text-white hover:text-primary-400 hover:bg-primary-500/10"
           title="Video call"
           disabled={inCall}
         >
