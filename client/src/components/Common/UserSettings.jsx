@@ -367,12 +367,12 @@ const UserSettings = ({ onClose }) => {
                   </div>
                   <button
                     onClick={() => setProfileHidden(!profileHidden)}
-                    className={`w-11 h-6 rounded-full transition-colors relative ${
+                    className={`w-12 h-7 rounded-full transition-colors duration-200 relative flex-shrink-0 ${
                       profileHidden ? 'bg-primary-500' : 'bg-dark-600'
                     }`}
                   >
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                      profileHidden ? 'translate-x-5' : 'translate-x-0.5'
+                    <span className={`block w-5 h-5 rounded-full bg-white shadow-md absolute top-1 transition-all duration-200 ${
+                      profileHidden ? 'left-6' : 'left-1'
                     }`} />
                   </button>
                 </div>
@@ -390,12 +390,12 @@ const UserSettings = ({ onClose }) => {
                   </div>
                   <button
                     onClick={() => setEmailHidden(!emailHidden)}
-                    className={`w-11 h-6 rounded-full transition-colors relative ${
+                    className={`w-12 h-7 rounded-full transition-colors duration-200 relative flex-shrink-0 ${
                       emailHidden ? 'bg-primary-500' : 'bg-dark-600'
                     }`}
                   >
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                      emailHidden ? 'translate-x-5' : 'translate-x-0.5'
+                    <span className={`block w-5 h-5 rounded-full bg-white shadow-md absolute top-1 transition-all duration-200 ${
+                      emailHidden ? 'left-6' : 'left-1'
                     }`} />
                   </button>
                 </div>
