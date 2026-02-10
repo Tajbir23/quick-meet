@@ -25,22 +25,47 @@ const setupPresenceHandlers = require('./presence');
 const setupChatHandlers = require('./chat');
 const setupSignalingHandlers = require('./signaling');
 const setupGroupCallHandlers = require('./groupCall');
+const socketGuard = require('../security/SocketGuard');
+const securityLogger = require('../security/SecurityEventLogger');
+const { SEVERITY } = require('../security/SecurityEventLogger');
+const intrusionDetector = require('../security/IntrusionDetector');
 
 // Global state: maps userId → socketId for routing
-// WHY in-memory Map: Fast O(1) lookups, no DB queries for presence routing
-// LIMITATION: Single server only. For multi-server, use Redis adapter.
 const onlineUsers = new Map();
 
 const registerSocketHandlers = (io) => {
   io.on('connection', async (socket) => {
     const userId = socket.userId;
     const username = socket.username;
+    const ip = socket.ip || socket.handshake.address;
 
     console.log(`🔌 User connected: ${username} (${userId}) — socket: ${socket.id}`);
 
     // ============================================
     // Track user presence
     // ============================================
+
+    // Check concurrent session limits
+    const existingSocketId = onlineUsers.get(userId);
+    if (existingSocketId && existingSocketId !== socket.id) {
+      // Another socket exists for this user — check IDS
+      const sessionResult = intrusionDetector.registerSession(userId, socket.id);
+      if (!sessionResult.allowed) {
+        securityLogger.sessionEvent('concurrent_limit_enforced', SEVERITY.WARN, {
+          userId, ip,
+          message: `Concurrent session limit reached for ${username}`,
+        });
+        // Disconnect the OLD socket (keep newest session)
+        const oldSocket = io.sockets.sockets.get(existingSocketId);
+        if (oldSocket) {
+          oldSocket.emit('security:force-logout', {
+            reason: 'New session started from another device',
+          });
+          oldSocket.disconnect(true);
+        }
+      }
+    }
+    intrusionDetector.registerSession(userId, socket.id);
     onlineUsers.set(userId, socket.id);
 
     // Update DB
@@ -71,12 +96,24 @@ const registerSocketHandlers = (io) => {
     socket.emit('users:online-list', onlineUsersList);
 
     // ============================================
-    // Register sub-handlers
+    // Register sub-handlers (wrapped with SocketGuard)
     // ============================================
     setupPresenceHandlers(io, socket, onlineUsers);
     setupChatHandlers(io, socket, onlineUsers);
     setupSignalingHandlers(io, socket, onlineUsers);
     setupGroupCallHandlers(io, socket, onlineUsers);
+
+    // ============================================
+    // Security: Request nonce for anti-replay
+    // Client can request nonces for signing critical events
+    // ============================================
+    socket.on('security:request-nonce', () => {
+      const cryptoService = require('../security/CryptoService');
+      socket.emit('security:nonce', {
+        nonce: cryptoService.generateNonce(),
+        timestamp: Date.now(),
+      });
+    });
 
     // ============================================
     // Handle disconnect
@@ -85,6 +122,8 @@ const registerSocketHandlers = (io) => {
       console.log(`🔌 User disconnected: ${username} (${userId}) — reason: ${reason}`);
 
       onlineUsers.delete(userId);
+      socketGuard.cleanup(socket.id);
+      intrusionDetector.removeSession(userId, socket.id);
 
       try {
         await User.findByIdAndUpdate(userId, {
@@ -101,11 +140,19 @@ const registerSocketHandlers = (io) => {
         userId,
         username,
       });
+
+      securityLogger.socketEvent('disconnect', SEVERITY.INFO, {
+        userId, username, reason, ip,
+      });
     });
 
     // Handle errors
     socket.on('error', (error) => {
       console.error(`Socket error for ${username}:`, error);
+      securityLogger.socketEvent('error', SEVERITY.WARN, {
+        userId, username,
+        error: error.message,
+      });
     });
   });
 };

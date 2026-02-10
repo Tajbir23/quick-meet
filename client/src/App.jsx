@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import useAuthStore from './store/useAuthStore';
+import { onForceLogout } from './services/socket';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import HomePage from './pages/HomePage';
@@ -11,11 +12,13 @@ import NetworkStatus from './components/Common/NetworkStatus';
 import Notification from './components/Common/Notification';
 
 function App() {
-  const { checkAuth, isAuthenticated, isLoading } = useAuthStore();
+  const { checkAuth, isAuthenticated, isLoading, handleForceLogout } = useAuthStore();
 
   useEffect(() => {
     checkAuth();
-  }, [checkAuth]);
+    // Wire up socket force-logout to auth store
+    onForceLogout((reason) => handleForceLogout(reason));
+  }, [checkAuth, handleForceLogout]);
 
   if (isLoading) {
     return (

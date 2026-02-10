@@ -1,19 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const { uploadFile, uploadMultipleFiles, downloadFile, deleteFile } = require('../controllers/fileController');
+const { uploadFile, uploadMultipleFiles, downloadFile, deleteFile, getFileAccessToken } = require('../controllers/fileController');
 const { protect } = require('../middleware/auth');
 const { upload, handleUploadError } = require('../middleware/upload');
 const { uploadLimiter } = require('../middleware/rateLimiter');
 
-// ─── PUBLIC ROUTES (no auth needed) ─────────────────────────
-// Download is public because:
-// 1. Browser <a> clicks and window.open() cannot send Authorization headers
-// 2. Filenames are UUID-based (unguessable) — security-by-obscurity
-// 3. Images are already public via static /uploads/ serving
+// ─── ALL FILE ROUTES NOW REQUIRE AUTHENTICATION ─────────────
+// WHY: Direct public access is a security risk
+// Downloads now go through authenticated endpoint
+router.use(protect);
+
+// Download file (authenticated)
 router.get('/download/:filename', downloadFile);
 
-// ─── PROTECTED ROUTES (require JWT) ─────────────────────────
-router.use(protect);
+// Get time-limited access token for a file
+router.get('/access-token/:filename', getFileAccessToken);
 
 // Upload single file
 router.post('/upload', uploadLimiter, upload.single('file'), handleUploadError, uploadFile);

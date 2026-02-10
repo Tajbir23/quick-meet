@@ -1,22 +1,19 @@
 /**
  * ============================================
- * Message Model
+ * Message Model — HARDENED
  * ============================================
  * 
  * Supports both 1-to-1 and group messages.
  * 
+ * SECURITY UPGRADES:
+ * - Encryption metadata fields for at-rest encryption
+ * - Content is AES-256-GCM encrypted before storage
+ * - IV (initialization vector) stored per-message for decryption
+ * - Auth tag stored for integrity verification
+ * 
  * DESIGN DECISION:
  * - If `receiver` is set and `group` is null → 1-to-1 message
  * - If `group` is set and `receiver` is null → group message
- * - This avoids needing separate collections for DMs vs group chats
- * 
- * Message types:
- * - text: Plain text message
- * - file: Any file attachment
- * - image: Image file (for inline preview)
- * - audio: Audio recording/file
- * - video: Video file
- * - system: System notifications (user joined/left)
  */
 
 const mongoose = require('mongoose');
@@ -43,12 +40,25 @@ const messageSchema = new mongoose.Schema({
   content: {
     type: String,
     default: '',
-    maxlength: [5000, 'Message cannot exceed 5000 characters'],
+    maxlength: [10000, 'Message cannot exceed 10000 characters'], // Increased for encrypted content (base64 overhead)
   },
   type: {
     type: String,
     enum: ['text', 'file', 'image', 'audio', 'video', 'system'],
     default: 'text',
+  },
+  // ─── ENCRYPTION METADATA ──────────────────────
+  encrypted: {
+    type: Boolean,
+    default: false,
+  },
+  encryptionIV: {
+    type: String,     // Hex-encoded IV used for AES-256-GCM
+    default: null,
+  },
+  encryptionTag: {
+    type: String,     // Hex-encoded auth tag for integrity verification
+    default: null,
   },
   // File attachment metadata
   fileUrl: {

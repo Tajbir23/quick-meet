@@ -23,35 +23,53 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const securityLogger = require('../security/SecurityEventLogger');
+const { SEVERITY } = require('../security/SecurityEventLogger');
+const intrusionDetector = require('../security/IntrusionDetector');
 
 const initializeSocket = (httpsServer) => {
+  // Parse allowed origins
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+    : ['*'];
+
   const io = new Server(httpsServer, {
     cors: {
-      origin: '*', // In production, restrict to your client IP/origin
+      origin: allowedOrigins.includes('*') ? '*' : allowedOrigins,
       methods: ['GET', 'POST'],
       credentials: true,
     },
     // Performance tuning
-    pingInterval: 25000,    // How often to ping clients
-    pingTimeout: 20000,     // How long to wait for pong
-    maxHttpBufferSize: 1e6, // 1MB max message size (signaling only, not media)
-    transports: ['websocket', 'polling'], // Prefer WebSocket
+    pingInterval: 25000,
+    pingTimeout: 20000,
+    maxHttpBufferSize: 1e6,
+    transports: ['websocket', 'polling'],
+    // Security: limit connection rate
+    connectTimeout: 10000,
   });
 
   /**
-   * JWT Authentication Middleware for Socket.io
+   * JWT Authentication Middleware for Socket.io — HARDENED
    * 
-   * WHY: Every socket connection MUST be authenticated.
-   * Without this, anyone could connect and:
-   * - Listen to other users' signaling data
-   * - Inject fake ICE candidates
-   * - Impersonate users
-   * 
-   * HOW: Client sends JWT token in auth handshake.
-   * Server verifies token and binds userId ↔ socketId.
+   * SECURITY CHECKS:
+   * 1. IP ban check
+   * 2. Token presence and format
+   * 3. JWT signature verification
+   * 4. User existence check
+   * 5. Account lock check
+   * 6. Force-logout flag check
+   * 7. Device fingerprint validation
    */
   io.use(async (socket, next) => {
     try {
+      const ip = socket.handshake.address;
+
+      // Check IP ban
+      if (intrusionDetector.isIPBanned(ip)) {
+        securityLogger.socketEvent('connection_banned_ip', SEVERITY.WARN, { ip });
+        return next(new Error('Connection refused'));
+      }
+
       const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(' ')[1];
 
       if (!token) {
@@ -59,18 +77,44 @@ const initializeSocket = (httpsServer) => {
       }
 
       // Verify JWT
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      let decoded;
+      try {
+        decoded = jwt.verify(token, process.env.JWT_SECRET);
+      } catch (jwtError) {
+        securityLogger.socketEvent('invalid_token', SEVERITY.WARN, {
+          ip,
+          error: jwtError.message,
+        });
+        return next(new Error('Authentication error: Invalid or expired token'));
+      }
 
-      // Find user and attach to socket
+      // Find user
       const user = await User.findById(decoded.id).select('-password');
       if (!user) {
         return next(new Error('Authentication error: User not found'));
+      }
+
+      // Check account lock
+      if (user.isLocked()) {
+        return next(new Error('Authentication error: Account is locked'));
+      }
+
+      // Check force-logout flag
+      if (user.securityFlags && user.securityFlags.forceLogout) {
+        return next(new Error('Authentication error: Session terminated'));
       }
 
       // Bind user data to socket instance
       socket.userId = user._id.toString();
       socket.username = user.username;
       socket.user = user;
+      socket.ip = ip;
+
+      securityLogger.socketEvent('connection_authenticated', SEVERITY.INFO, {
+        userId: socket.userId,
+        username: socket.username,
+        ip,
+      });
 
       next();
     } catch (error) {

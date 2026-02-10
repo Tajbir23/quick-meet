@@ -1,20 +1,28 @@
 /**
  * ============================================
- * Presence Socket Handlers
+ * Presence Socket Handlers — HARDENED
  * ============================================
  * 
- * Manages real-time user presence:
- * - Typing indicators
- * - Activity status updates
- * - Heartbeat/ping for stale connection detection
+ * Manages real-time user presence with security layer.
+ * 
+ * SECURITY UPGRADES:
+ * - SocketGuard wraps all handlers
+ * - Input validation on all parameters
+ * - Group room join restricted to verified members
+ * - Heartbeat rate limiting
  */
 
+const { socketGuard, securityLogger } = require('../security');
+const Group = require('../models/Group');
+
 const setupPresenceHandlers = (io, socket, onlineUsers) => {
+  const guard = socketGuard;
+
   /**
-   * Typing indicator for 1-to-1 chat
-   * WHY: UX feature — shows "User is typing..." in real-time
+   * Typing indicator for 1-to-1 chat — GUARDED
    */
-  socket.on('typing:start', ({ receiverId }) => {
+  socket.on('typing:start', guard.wrapHandler(socket, 'typing:start', ({ receiverId }) => {
+    if (!receiverId || typeof receiverId !== 'string' || receiverId.length > 30) return;
     const receiverSocketId = onlineUsers.get(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit('typing:start', {
@@ -22,55 +30,78 @@ const setupPresenceHandlers = (io, socket, onlineUsers) => {
         username: socket.username,
       });
     }
-  });
+  }));
 
-  socket.on('typing:stop', ({ receiverId }) => {
+  socket.on('typing:stop', guard.wrapHandler(socket, 'typing:stop', ({ receiverId }) => {
+    if (!receiverId || typeof receiverId !== 'string' || receiverId.length > 30) return;
     const receiverSocketId = onlineUsers.get(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit('typing:stop', {
         userId: socket.userId,
       });
     }
-  });
+  }));
 
   /**
-   * Typing indicator for group chat
+   * Typing indicator for group chat — GUARDED
    */
-  socket.on('typing:group:start', ({ groupId }) => {
+  socket.on('typing:group:start', guard.wrapHandler(socket, 'typing:group:start', ({ groupId }) => {
+    if (!groupId || typeof groupId !== 'string' || groupId.length > 30) return;
     socket.to(`group:${groupId}`).emit('typing:group:start', {
       userId: socket.userId,
       username: socket.username,
       groupId,
     });
-  });
+  }));
 
-  socket.on('typing:group:stop', ({ groupId }) => {
+  socket.on('typing:group:stop', guard.wrapHandler(socket, 'typing:group:stop', ({ groupId }) => {
+    if (!groupId || typeof groupId !== 'string' || groupId.length > 30) return;
     socket.to(`group:${groupId}`).emit('typing:group:stop', {
       userId: socket.userId,
       groupId,
     });
-  });
+  }));
 
   /**
-   * Join group room (for receiving group events)
-   * WHY Socket.io rooms: Efficient broadcasting to group members
+   * Join group room — GUARDED + membership verification
+   * SECURITY: Verify the user is actually a member before joining room
    */
-  socket.on('group:join-room', ({ groupId }) => {
-    socket.join(`group:${groupId}`);
-    console.log(`👥 ${socket.username} joined room: group:${groupId}`);
-  });
+  socket.on('group:join-room', guard.wrapHandler(socket, 'group:join-room', async ({ groupId }) => {
+    if (!groupId || typeof groupId !== 'string' || groupId.length > 30) return;
 
-  socket.on('group:leave-room', ({ groupId }) => {
+    try {
+      const group = await Group.findById(groupId);
+      if (!group || !group.isMember(socket.userId)) {
+        securityLogger.log('WARN', 'SOCKET', 'Unauthorized group room join attempt', {
+          userId: socket.userId,
+          groupId,
+        });
+        socket.emit('group:error', { message: 'Not authorized to join this group' });
+        return;
+      }
+
+      socket.join(`group:${groupId}`);
+    } catch (err) {
+      // Invalid ObjectId or DB error — silently reject
+      securityLogger.log('WARN', 'SOCKET', 'Invalid group room join request', {
+        userId: socket.userId,
+        groupId,
+        error: err.message,
+      });
+    }
+  }));
+
+  socket.on('group:leave-room', guard.wrapHandler(socket, 'group:leave-room', ({ groupId }) => {
+    if (!groupId || typeof groupId !== 'string' || groupId.length > 30) return;
     socket.leave(`group:${groupId}`);
-    console.log(`👥 ${socket.username} left room: group:${groupId}`);
-  });
+  }));
 
   /**
-   * Heartbeat — client pings periodically to confirm connection is alive
+   * Heartbeat — rate-limited via SocketGuard
    */
-  socket.on('heartbeat', () => {
+  socket.on('heartbeat', guard.wrapHandler(socket, 'heartbeat', () => {
     socket.emit('heartbeat:ack', { timestamp: new Date().toISOString() });
-  });
+  }));
 };
 
 module.exports = setupPresenceHandlers;

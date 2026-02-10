@@ -55,6 +55,59 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+
+  // ─── SECURITY FIELDS ─────────────────────────────
+
+  // Refresh token (hashed) for token rotation
+  refreshToken: {
+    type: String,
+    select: false,
+    default: null,
+  },
+
+  // Device fingerprint hash — binds token to device
+  deviceFingerprint: {
+    type: String,
+    select: false,
+    default: null,
+  },
+
+  // Failed login tracking (brute force protection)
+  failedLoginAttempts: {
+    type: Number,
+    default: 0,
+  },
+  lastFailedLogin: {
+    type: Date,
+    default: null,
+  },
+  accountLockedUntil: {
+    type: Date,
+    default: null,
+  },
+
+  // Session tracking
+  activeSessions: [{
+    sessionId: String,
+    deviceFingerprint: String,
+    ip: String,
+    userAgent: String,
+    createdAt: { type: Date, default: Date.now },
+    lastActivity: { type: Date, default: Date.now },
+  }],
+
+  // Password policy
+  passwordChangedAt: {
+    type: Date,
+    default: null,
+  },
+
+  // Security flags
+  securityFlags: {
+    forceLogout: { type: Boolean, default: false },
+    requirePasswordChange: { type: Boolean, default: false },
+    twoFactorEnabled: { type: Boolean, default: false },
+  },
 }, {
   timestamps: true, // Adds createdAt and updatedAt
 });
@@ -95,8 +148,72 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 userSchema.methods.toSafeObject = function () {
   const obj = this.toObject();
   delete obj.password;
+  delete obj.refreshToken;
+  delete obj.deviceFingerprint;
+  delete obj.activeSessions;
+  delete obj.securityFlags;
+  delete obj.failedLoginAttempts;
+  delete obj.lastFailedLogin;
+  delete obj.accountLockedUntil;
+  delete obj.passwordChangedAt;
   delete obj.__v;
   return obj;
+};
+
+/**
+ * Check if account is currently locked
+ */
+userSchema.methods.isLocked = function () {
+  if (!this.accountLockedUntil) return false;
+  if (new Date() > this.accountLockedUntil) {
+    // Lock expired
+    this.accountLockedUntil = null;
+    this.failedLoginAttempts = 0;
+    return false;
+  }
+  return true;
+};
+
+/**
+ * Record a failed login attempt
+ */
+userSchema.methods.recordFailedLogin = async function () {
+  this.failedLoginAttempts += 1;
+  this.lastFailedLogin = new Date();
+
+  // Progressive lockout: 5 failures = 15 min, 10 = 1 hour, 15+ = 24 hours
+  if (this.failedLoginAttempts >= 15) {
+    this.accountLockedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  } else if (this.failedLoginAttempts >= 10) {
+    this.accountLockedUntil = new Date(Date.now() + 60 * 60 * 1000);
+  } else if (this.failedLoginAttempts >= 5) {
+    this.accountLockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+  }
+
+  await this.save();
+};
+
+/**
+ * Clear failed login attempts on successful login
+ */
+userSchema.methods.clearFailedLogins = async function () {
+  if (this.failedLoginAttempts > 0) {
+    this.failedLoginAttempts = 0;
+    this.lastFailedLogin = null;
+    this.accountLockedUntil = null;
+    await this.save();
+  }
+};
+
+/**
+ * Check if password was changed after a token was issued
+ */
+userSchema.methods.changedPasswordAfter = function (tokenIssuedAt) {
+  if (this.passwordChangedAt) {
+    const changedTimestamp = parseInt(this.passwordChangedAt.getTime() / 1000, 10);
+    return tokenIssuedAt < changedTimestamp;
+  }
+  return false;
 };
 
 // Index for faster presence queries

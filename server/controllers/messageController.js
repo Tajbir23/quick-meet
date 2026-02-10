@@ -1,56 +1,123 @@
 /**
  * ============================================
- * Message Controller
+ * Message Controller — HARDENED
  * ============================================
  * 
- * Handles: Send message, get conversations, mark as read
- * 
- * NOTE: Messages are persisted via REST API.
- * Real-time delivery is handled by Socket.io (see socket/chat.js).
- * The flow is:
- * 1. Client sends message via REST → saved to DB
- * 2. Server emits socket event → recipient gets real-time notification
+ * SECURITY UPGRADES:
+ * - AES-256-GCM encryption at rest for all message content
+ * - Messages encrypted before DB write, decrypted on read
+ * - Content sanitization (XSS prevention)
+ * - Input validation hardened
+ * - SecurityEventLogger audit trail
  */
 
 const Message = require('../models/Message');
 const User = require('../models/User');
 const Group = require('../models/Group');
+const { cryptoService, securityLogger } = require('../security');
+
+// ─── HELPERS ────────────────────────────────────────────────
+
+/**
+ * Encrypt message content before storage
+ */
+function encryptContent(plaintext) {
+  if (!plaintext || plaintext.trim() === '') return { content: '', encrypted: false };
+  try {
+    const encrypted = cryptoService.encrypt(plaintext);
+    return {
+      content: encrypted.ciphertext,
+      encrypted: true,
+      encryptionIV: encrypted.iv,
+      encryptionTag: encrypted.tag,
+    };
+  } catch (err) {
+    securityLogger.log('WARN', 'SYSTEM', 'Message encryption failed, storing plaintext', { error: err.message });
+    return { content: plaintext, encrypted: false };
+  }
+}
+
+/**
+ * Decrypt message content on retrieval
+ */
+function decryptContent(message) {
+  if (!message.encrypted || !message.encryptionIV || !message.encryptionTag) {
+    return message.content;
+  }
+  try {
+    return cryptoService.decrypt(message.content, message.encryptionIV, message.encryptionTag);
+  } catch (err) {
+    // If decryption fails, return placeholder (data integrity issue)
+    securityLogger.log('ALERT', 'SYSTEM', 'Message decryption failed', {
+      messageId: message._id?.toString(),
+      error: err.message,
+    });
+    return '[Encrypted message - decryption failed]';
+  }
+}
+
+/**
+ * Decrypt an array of message documents (mutates in place for performance)
+ */
+function decryptMessages(messages) {
+  for (const msg of messages) {
+    if (msg.encrypted) {
+      const obj = msg.toObject ? msg.toObject() : msg;
+      msg.content = decryptContent(obj);
+      // Strip encryption metadata from response
+      msg.encryptionIV = undefined;
+      msg.encryptionTag = undefined;
+    }
+  }
+  return messages;
+}
+
+/**
+ * Basic HTML/XSS sanitization for text content
+ */
+function sanitizeText(text) {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .slice(0, 5000); // Hard limit
+}
 
 /**
  * POST /api/messages
- * Send a 1-to-1 message
+ * Send a 1-to-1 message — ENCRYPTED AT REST
  */
 const sendMessage = async (req, res) => {
   try {
     const { receiverId, content, type, fileUrl, fileName, fileSize, fileMimeType } = req.body;
 
     if (!receiverId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Receiver ID is required',
-      });
+      return res.status(400).json({ success: false, message: 'Receiver ID is required' });
     }
 
     if (!content && !fileUrl) {
-      return res.status(400).json({
-        success: false,
-        message: 'Message content or file is required',
-      });
+      return res.status(400).json({ success: false, message: 'Message content or file is required' });
     }
 
     // Verify receiver exists
     const receiver = await User.findById(receiverId);
     if (!receiver) {
-      return res.status(404).json({
-        success: false,
-        message: 'Receiver not found',
-      });
+      return res.status(404).json({ success: false, message: 'Receiver not found' });
     }
+
+    // Sanitize and encrypt content
+    const sanitized = sanitizeText(content || '');
+    const encData = encryptContent(sanitized);
 
     const message = await Message.create({
       sender: req.user._id,
       receiver: receiverId,
-      content: content || '',
+      content: encData.content,
+      encrypted: encData.encrypted,
+      encryptionIV: encData.encryptionIV,
+      encryptionTag: encData.encryptionTag,
       type: type || 'text',
       fileUrl,
       fileName,
@@ -62,61 +129,58 @@ const sendMessage = async (req, res) => {
     await message.populate('sender', 'username avatar');
     await message.populate('receiver', 'username avatar');
 
+    // Decrypt for the response (client gets plaintext)
+    message.content = sanitized;
+    message.encryptionIV = undefined;
+    message.encryptionTag = undefined;
+
     res.status(201).json({
       success: true,
       data: { message },
     });
   } catch (error) {
-    console.error('Send message error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error sending message',
-    });
+    securityLogger.log('WARN', 'SYSTEM', 'Send message error', { error: error.message });
+    res.status(500).json({ success: false, message: 'Server error sending message' });
   }
 };
 
 /**
  * POST /api/messages/group
- * Send a group message
+ * Send a group message — ENCRYPTED AT REST
  */
 const sendGroupMessage = async (req, res) => {
   try {
     const { groupId, content, type, fileUrl, fileName, fileSize, fileMimeType } = req.body;
 
     if (!groupId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Group ID is required',
-      });
+      return res.status(400).json({ success: false, message: 'Group ID is required' });
     }
 
     if (!content && !fileUrl) {
-      return res.status(400).json({
-        success: false,
-        message: 'Message content or file is required',
-      });
+      return res.status(400).json({ success: false, message: 'Message content or file is required' });
     }
 
     // Verify group exists and user is a member
     const group = await Group.findById(groupId);
     if (!group) {
-      return res.status(404).json({
-        success: false,
-        message: 'Group not found',
-      });
+      return res.status(404).json({ success: false, message: 'Group not found' });
     }
 
     if (!group.isMember(req.user._id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'You are not a member of this group',
-      });
+      return res.status(403).json({ success: false, message: 'You are not a member of this group' });
     }
+
+    // Sanitize and encrypt content
+    const sanitized = sanitizeText(content || '');
+    const encData = encryptContent(sanitized);
 
     const message = await Message.create({
       sender: req.user._id,
       group: groupId,
-      content: content || '',
+      content: encData.content,
+      encrypted: encData.encrypted,
+      encryptionIV: encData.encryptionIV,
+      encryptionTag: encData.encryptionTag,
       type: type || 'text',
       fileUrl,
       fileName,
@@ -126,28 +190,30 @@ const sendGroupMessage = async (req, res) => {
 
     await message.populate('sender', 'username avatar');
 
+    // Decrypt for response
+    message.content = sanitized;
+    message.encryptionIV = undefined;
+    message.encryptionTag = undefined;
+
     res.status(201).json({
       success: true,
       data: { message },
     });
   } catch (error) {
-    console.error('Send group message error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error sending group message',
-    });
+    securityLogger.log('WARN', 'SYSTEM', 'Send group message error', { error: error.message });
+    res.status(500).json({ success: false, message: 'Server error sending group message' });
   }
 };
 
 /**
  * GET /api/messages/:userId
- * Get conversation with a specific user (paginated)
+ * Get conversation with a specific user — DECRYPTS messages
  */
 const getConversation = async (req, res) => {
   try {
     const { userId } = req.params;
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100); // Cap at 100
 
     const messages = await Message.getConversation(
       req.user._id,
@@ -156,7 +222,9 @@ const getConversation = async (req, res) => {
       limit
     );
 
-    // Get total count for pagination
+    // Decrypt all encrypted messages
+    decryptMessages(messages);
+
     const total = await Message.countDocuments({
       $or: [
         { sender: req.user._id, receiver: userId },
@@ -168,51 +236,39 @@ const getConversation = async (req, res) => {
     res.json({
       success: true,
       data: {
-        messages: messages.reverse(), // Oldest first for display
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit),
-        },
+        messages: messages.reverse(),
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) },
       },
     });
   } catch (error) {
-    console.error('Get conversation error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error fetching conversation',
-    });
+    res.status(500).json({ success: false, message: 'Server error fetching conversation' });
   }
 };
 
 /**
  * GET /api/messages/group/:groupId
- * Get group messages (paginated)
+ * Get group messages — DECRYPTS messages
  */
 const getGroupMessages = async (req, res) => {
   try {
     const { groupId } = req.params;
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100); // Cap at 100
 
     // Verify membership
     const group = await Group.findById(groupId);
     if (!group) {
-      return res.status(404).json({
-        success: false,
-        message: 'Group not found',
-      });
+      return res.status(404).json({ success: false, message: 'Group not found' });
     }
 
     if (!group.isMember(req.user._id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'You are not a member of this group',
-      });
+      return res.status(403).json({ success: false, message: 'You are not a member of this group' });
     }
 
     const messages = await Message.getGroupMessages(groupId, page, limit);
+
+    // Decrypt all encrypted messages
+    decryptMessages(messages);
 
     const total = await Message.countDocuments({ group: groupId });
 
@@ -220,20 +276,11 @@ const getGroupMessages = async (req, res) => {
       success: true,
       data: {
         messages: messages.reverse(),
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit),
-        },
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) },
       },
     });
   } catch (error) {
-    console.error('Get group messages error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error fetching group messages',
-    });
+    res.status(500).json({ success: false, message: 'Server error fetching group messages' });
   }
 };
 
@@ -244,6 +291,9 @@ const getGroupMessages = async (req, res) => {
 const markAsRead = async (req, res) => {
   try {
     const { userId } = req.params;
+    if (!userId || typeof userId !== 'string' || userId.length > 30) {
+      return res.status(400).json({ success: false, message: 'Invalid user ID' });
+    }
 
     await Message.updateMany(
       {
@@ -257,16 +307,9 @@ const markAsRead = async (req, res) => {
       }
     );
 
-    res.json({
-      success: true,
-      message: 'Messages marked as read',
-    });
+    res.json({ success: true, message: 'Messages marked as read' });
   } catch (error) {
-    console.error('Mark as read error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error marking messages as read',
-    });
+    res.status(500).json({ success: false, message: 'Server error marking messages as read' });
   }
 };
 
@@ -292,7 +335,6 @@ const getUnreadCounts = async (req, res) => {
       },
     ]);
 
-    // Convert to object { senderId: count }
     const unreadMap = {};
     counts.forEach(item => {
       unreadMap[item._id.toString()] = item.count;
@@ -303,11 +345,7 @@ const getUnreadCounts = async (req, res) => {
       data: { unread: unreadMap },
     });
   } catch (error) {
-    console.error('Get unread counts error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error getting unread counts',
-    });
+    res.status(500).json({ success: false, message: 'Server error getting unread counts' });
   }
 };
 

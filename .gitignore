@@ -40,3 +40,7 @@ desktop.ini
 # Misc
 *.tmp
 *.bak
+
+# Security audit logs (sensitive — never commit)
+server/logs/
+logs/security/

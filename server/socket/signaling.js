@@ -39,21 +39,76 @@
  * 9. ICE completes → DTLS-SRTP handshake → media flows P2P
  */
 
+const sdpSanitizer = require('../security/SDPSanitizer');
+const callTokenService = require('../security/CallTokenService');
+const socketGuard = require('../security/SocketGuard');
+const securityLogger = require('../security/SecurityEventLogger');
+const { SEVERITY } = require('../security/SecurityEventLogger');
+
 const setupSignalingHandlers = (io, socket, onlineUsers) => {
+
+  /**
+   * REQUEST CALL TOKEN — must be obtained before initiating a call
+   * One-time token binds caller ↔ callee and expires in 60 seconds
+   */
+  socket.on('call:request-token', ({ targetUserId, callType }, callback) => {
+    const tokenData = callTokenService.generateCallToken(
+      socket.userId,
+      targetUserId,
+      callType
+    );
+
+    if (typeof callback === 'function') {
+      callback(tokenData);
+    } else {
+      socket.emit('call:token', tokenData);
+    }
+  });
+
   /**
    * Initiate a call — send offer to target user
-   * 
-   * WHAT'S IN THE OFFER:
-   * - SDP (Session Description Protocol) describing:
-   *   - Media capabilities (codecs, bitrates)
-   *   - Media types (audio, video)
-   *   - DTLS fingerprint (for encryption)
+   * SECURITY: SDP sanitized + optional call token validation
    */
-  socket.on('call:offer', ({ targetUserId, offer, callType, isReconnect }) => {
+  socket.on('call:offer', ({ targetUserId, offer, callType, isReconnect, callToken }) => {
+    // Rate limit check via SocketGuard
+    const rateResult = require('../security/IntrusionDetector').checkSocketRate(
+      socket.id, socket.userId, 'call:offer'
+    );
+    if (!rateResult.allowed) {
+      socket.emit('security:rate-limited', { event: 'call:offer' });
+      return;
+    }
+
+    // Validate call token if provided
+    if (callToken && !isReconnect) {
+      const tokenData = callTokenService.consumeCallToken(callToken, socket.userId);
+      if (!tokenData) {
+        securityLogger.callEvent('offer_invalid_token', SEVERITY.WARN, {
+          callerId: socket.userId,
+          targetUserId,
+        });
+        socket.emit('call:error', { message: 'Invalid or expired call token' });
+        return;
+      }
+    }
+
+    // Sanitize SDP
+    if (offer && offer.sdp) {
+      const sdpResult = sdpSanitizer.sanitizeSDP(offer.sdp, 'offer', socket.userId);
+      if (!sdpResult.valid) {
+        securityLogger.callEvent('sdp_rejected', SEVERITY.ALERT, {
+          userId: socket.userId,
+          type: 'offer',
+          warnings: sdpResult.warnings,
+        });
+        socket.emit('call:error', { message: 'Invalid SDP offer' });
+        return;
+      }
+    }
+
     const targetSocketId = onlineUsers.get(targetUserId);
 
     if (!targetSocketId) {
-      // Target user is offline
       socket.emit('call:user-offline', {
         targetUserId,
         message: 'User is offline',
@@ -63,19 +118,40 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
 
     console.log(`📞 Call offer${isReconnect ? ' (reconnect)' : ''}: ${socket.username} → ${targetUserId} (${callType})`);
 
+    securityLogger.callEvent('offer', SEVERITY.INFO, {
+      callerId: socket.userId,
+      targetUserId,
+      callType,
+      isReconnect: isReconnect || false,
+    });
+
     io.to(targetSocketId).emit('call:offer', {
       callerId: socket.userId,
       callerName: socket.username,
       offer,
-      callType, // 'audio' | 'video' | 'screen'
+      callType,
       isReconnect: isReconnect || false,
     });
   });
 
   /**
    * Accept a call — send answer back to caller
+   * SECURITY: SDP sanitized
    */
   socket.on('call:answer', ({ callerId, answer }) => {
+    // Sanitize SDP answer
+    if (answer && answer.sdp) {
+      const sdpResult = sdpSanitizer.sanitizeSDP(answer.sdp, 'answer', socket.userId);
+      if (!sdpResult.valid) {
+        securityLogger.callEvent('sdp_answer_rejected', SEVERITY.ALERT, {
+          userId: socket.userId,
+          type: 'answer',
+          warnings: sdpResult.warnings,
+        });
+        return;
+      }
+    }
+
     const callerSocketId = onlineUsers.get(callerId);
 
     if (callerSocketId) {
@@ -90,25 +166,21 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
   });
 
   /**
-   * Exchange ICE candidates
-   * 
-   * WHY ICE (Interactive Connectivity Establishment):
-   * - Discovers all possible network paths between peers
-   * - Handles NAT traversal (most devices are behind NAT)
-   * - Tries multiple candidates (host, server-reflexive, relay)
-   * - Picks the best path automatically
-   * 
-   * CANDIDATE TYPES:
-   * - host: Direct local IP (works on same network)
-   * - srflx: Server-reflexive (public IP via STUN)
-   * - relay: Relayed through TURN (we don't have TURN)
-   * 
-   * WITHOUT TURN:
-   * - Symmetric NAT ↔ Symmetric NAT: WILL FAIL
-   * - Most other NAT combinations: Will work with STUN
-   * - Same network: Always works
+   * Exchange ICE candidates — SANITIZED
    */
   socket.on('call:ice-candidate', ({ targetUserId, candidate }) => {
+    // Sanitize ICE candidate
+    if (candidate) {
+      const iceResult = sdpSanitizer.sanitizeICECandidate(candidate, socket.userId);
+      if (!iceResult.valid) {
+        securityLogger.callEvent('ice_candidate_rejected', SEVERITY.WARN, {
+          userId: socket.userId,
+          warnings: iceResult.warnings,
+        });
+        return;
+      }
+    }
+
     const targetSocketId = onlineUsers.get(targetUserId);
 
     if (targetSocketId) {

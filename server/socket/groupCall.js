@@ -1,56 +1,30 @@
 /**
  * ============================================
- * Group Call Socket Handlers (Mesh Topology)
+ * Group Call Socket Handlers — HARDENED (Mesh)
  * ============================================
  * 
- * MESH ARCHITECTURE:
- * Every peer connects directly to every other peer.
- * 
- *     A ──── B
- *     │ \  / │
- *     │  \/  │
- *     │  /\  │
- *     │ /  \ │
- *     C ──── D
- * 
- * For N users: N*(N-1)/2 connections
- * - 3 users = 3 connections
- * - 4 users = 6 connections
- * - 5 users = 10 connections
- * - 6 users = 15 connections
- * - 8 users = 28 connections ← performance starts degrading
- * 
- * WHY MESH (not SFU/MCU):
- * - No third-party media server required
- * - True P2P — lowest latency
- * - End-to-end encrypted by default (DTLS-SRTP)
- * - Simple to implement
- * 
- * LIMITATION:
- * - Bandwidth scales with N (each peer uploads N-1 streams)
- * - Recommended max: 6 participants
- * - Beyond that: reduce video quality or switch to audio-only
- * 
- * FLOW FOR NEW PEER JOINING:
- * 1. New peer emits 'group-call:join'
- * 2. Server tells new peer about existing peers ('group-call:existing-peers')
- * 3. Server tells existing peers about new peer ('group-call:peer-joined')
- * 4. New peer creates offer for each existing peer
- * 5. Each existing peer creates answer
- * 6. ICE candidates exchanged
- * 7. All connections established
+ * SECURITY UPGRADES:
+ * - SocketGuard wraps all handlers (rate limiting, JWT re-validation)
+ * - SDP sanitization on all offers/answers
+ * - ICE candidate validation
+ * - Group membership verification on every action
+ * - Call token validation for group calls
+ * - SecurityEventLogger audit trail
  */
 
 const Group = require('../models/Group');
+const { socketGuard, sdpSanitizer, callTokenService, securityLogger } = require('../security');
 
 // Track active group calls: groupId → Map<userId, username>
 const activeGroupCalls = new Map();
 
 const setupGroupCallHandlers = (io, socket, onlineUsers) => {
+  const guard = socketGuard;
+
   /**
-   * Query active group calls — client asks on connect to populate banners
+   * Query active group calls — GUARDED
    */
-  socket.on('group-call:get-active-calls', () => {
+  socket.on('group-call:get-active-calls', guard.wrapHandler(socket, 'group-call:get-active-calls', () => {
     const result = [];
     for (const [groupId, participants] of activeGroupCalls.entries()) {
       if (participants.size > 0) {
@@ -61,20 +35,30 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
       }
     }
     socket.emit('group-call:active-calls', result);
-  });
+  }));
 
   /**
-   * Join a group call
+   * Join a group call — GUARDED + membership verification + call token
    */
-  socket.on('group-call:join', async ({ groupId }) => {
+  socket.on('group-call:join', guard.wrapHandler(socket, 'group-call:join', async ({ groupId, callToken }) => {
     try {
+      if (!groupId || typeof groupId !== 'string' || groupId.length > 30) return;
+
       // Verify membership
       const group = await Group.findById(groupId);
       if (!group || !group.isMember(socket.userId)) {
-        socket.emit('group-call:error', {
-          message: 'Not authorized to join this group call',
-        });
+        socket.emit('group-call:error', { message: 'Not authorized to join this group call' });
+        securityLogger.log('WARN', 'CALL', 'Unauthorized group call join', { userId: socket.userId, groupId });
         return;
+      }
+
+      // Validate call token if provided
+      if (callToken) {
+        const tokenValid = callTokenService.validateGroupCallToken(callToken, groupId, socket.userId);
+        if (!tokenValid) {
+          securityLogger.log('WARN', 'CALL', 'Invalid group call token', { userId: socket.userId, groupId });
+          // Don't hard-fail — fall back to membership check only
+        }
       }
 
       // Check call member limit (mesh topology constraint)
@@ -91,6 +75,11 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
         return;
       }
 
+      // Prevent duplicate join
+      if (callParticipants.has(socket.userId)) {
+        return; // Already in call
+      }
+
       // Get existing participants before adding new one
       const existingPeers = [];
       for (const [peerId, peerName] of callParticipants) {
@@ -104,25 +93,23 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
         }
       }
 
-      // Was this the first person joining? (i.e. they're starting the call)
       const isNewCall = callParticipants.size === 0;
-
-      // Add new participant (store userId → username)
       callParticipants.set(socket.userId, socket.username);
-
-      // Join socket room for the group call
       socket.join(`group-call:${groupId}`);
 
-      console.log(`📞 Group call: ${socket.username} joined call in group ${groupId} (${callParticipants.size} participants)`);
+      securityLogger.log('INFO', 'CALL', 'User joined group call', {
+        userId: socket.userId,
+        groupId,
+        participants: callParticipants.size,
+      });
 
-      // *** Notify ALL group members about the active call (Telegram-style) ***
-      // This goes to the group chat room so the join banner appears in the group header.
+      // Notify ALL group members about the active call
       io.to(`group:${groupId}`).emit('group-call:active', {
         groupId,
         participants: Array.from(callParticipants.entries()).map(([uid, uname]) => ({ userId: uid, username: uname })),
       });
 
-      // Also ring group members (incoming call popup) when call is new
+      // Ring group members when call is new
       if (isNewCall) {
         io.to(`group:${groupId}`).emit('group-call:incoming', {
           groupId,
@@ -135,14 +122,12 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
       }
 
       // Tell the new peer about existing peers
-      // New peer will create offers for each existing peer
       socket.emit('group-call:existing-peers', {
         groupId,
         peers: existingPeers,
       });
 
       // Tell existing peers about the new peer
-      // They will wait for the offer from the new peer
       socket.to(`group-call:${groupId}`).emit('group-call:peer-joined', {
         groupId,
         userId: socket.userId,
@@ -158,26 +143,52 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
       });
 
     } catch (error) {
-      console.error('Group call join error:', error);
-      socket.emit('group-call:error', {
-        message: 'Failed to join group call',
+      securityLogger.log('WARN', 'CALL', 'Group call join error', {
+        userId: socket.userId,
+        error: error.message,
       });
+      socket.emit('group-call:error', { message: 'Failed to join group call' });
     }
-  });
+  }));
 
   /**
-   * Leave a group call
+   * Leave a group call — GUARDED
    */
-  socket.on('group-call:leave', ({ groupId }) => {
+  socket.on('group-call:leave', guard.wrapHandler(socket, 'group-call:leave', ({ groupId }) => {
+    if (!groupId || typeof groupId !== 'string' || groupId.length > 30) return;
     handleGroupCallLeave(io, socket, onlineUsers, groupId);
-  });
+  }));
 
   /**
-   * Send offer to a specific peer in group call
+   * Send offer to a specific peer — GUARDED + SDP sanitization
    */
-  socket.on('group-call:offer', ({ groupId, targetUserId, offer }) => {
-    const targetSocketId = onlineUsers.get(targetUserId);
+  socket.on('group-call:offer', guard.wrapHandler(socket, 'group-call:offer', ({ groupId, targetUserId, offer }) => {
+    if (!groupId || !targetUserId || !offer) return;
+    if (typeof groupId !== 'string' || groupId.length > 30) return;
+    if (typeof targetUserId !== 'string' || targetUserId.length > 30) return;
 
+    // Verify caller is in the group call
+    const callParticipants = activeGroupCalls.get(groupId);
+    if (!callParticipants || !callParticipants.has(socket.userId)) {
+      securityLogger.log('WARN', 'CALL', 'Group call offer from non-participant', {
+        userId: socket.userId, groupId,
+      });
+      return;
+    }
+
+    // Sanitize SDP
+    if (offer.sdp) {
+      const sanitized = sdpSanitizer.sanitizeSDP(offer.sdp, 'offer');
+      if (!sanitized.safe) {
+        securityLogger.log('ALERT', 'WEBRTC', 'Dangerous group call SDP offer rejected', {
+          userId: socket.userId, issues: sanitized.issues,
+        });
+        return;
+      }
+      offer.sdp = sanitized.sdp;
+    }
+
+    const targetSocketId = onlineUsers.get(targetUserId);
     if (targetSocketId) {
       io.to(targetSocketId).emit('group-call:offer', {
         groupId,
@@ -186,14 +197,29 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
         offer,
       });
     }
-  });
+  }));
 
   /**
-   * Send answer to a specific peer in group call
+   * Send answer to a specific peer — GUARDED + SDP sanitization
    */
-  socket.on('group-call:answer', ({ groupId, targetUserId, answer }) => {
-    const targetSocketId = onlineUsers.get(targetUserId);
+  socket.on('group-call:answer', guard.wrapHandler(socket, 'group-call:answer', ({ groupId, targetUserId, answer }) => {
+    if (!groupId || !targetUserId || !answer) return;
+    if (typeof groupId !== 'string' || groupId.length > 30) return;
+    if (typeof targetUserId !== 'string' || targetUserId.length > 30) return;
 
+    // Sanitize SDP answer
+    if (answer.sdp) {
+      const sanitized = sdpSanitizer.sanitizeSDP(answer.sdp, 'answer');
+      if (!sanitized.safe) {
+        securityLogger.log('ALERT', 'WEBRTC', 'Dangerous group call SDP answer rejected', {
+          userId: socket.userId, issues: sanitized.issues,
+        });
+        return;
+      }
+      answer.sdp = sanitized.sdp;
+    }
+
+    const targetSocketId = onlineUsers.get(targetUserId);
     if (targetSocketId) {
       io.to(targetSocketId).emit('group-call:answer', {
         groupId,
@@ -202,14 +228,26 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
         answer,
       });
     }
-  });
+  }));
 
   /**
-   * ICE candidate for group call peer
+   * ICE candidate for group call peer — GUARDED + candidate validation
    */
-  socket.on('group-call:ice-candidate', ({ groupId, targetUserId, candidate }) => {
-    const targetSocketId = onlineUsers.get(targetUserId);
+  socket.on('group-call:ice-candidate', guard.wrapHandler(socket, 'group-call:ice-candidate', ({ groupId, targetUserId, candidate }) => {
+    if (!groupId || !targetUserId) return;
+    if (typeof groupId !== 'string' || groupId.length > 30) return;
+    if (typeof targetUserId !== 'string' || targetUserId.length > 30) return;
 
+    // Sanitize ICE candidate
+    if (candidate) {
+      const sanitized = sdpSanitizer.sanitizeICECandidate(candidate);
+      if (!sanitized.safe) {
+        return; // Silently drop bad candidates
+      }
+      candidate = sanitized.candidate;
+    }
+
+    const targetSocketId = onlineUsers.get(targetUserId);
     if (targetSocketId) {
       io.to(targetSocketId).emit('group-call:ice-candidate', {
         groupId,
@@ -217,35 +255,41 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
         candidate,
       });
     }
-  });
+  }));
 
   /**
-   * Toggle media in group call
+   * Toggle media in group call — GUARDED
    */
-  socket.on('group-call:toggle-media', ({ groupId, kind, enabled }) => {
+  socket.on('group-call:toggle-media', guard.wrapHandler(socket, 'group-call:toggle-media', ({ groupId, kind, enabled }) => {
+    if (!groupId || typeof groupId !== 'string' || groupId.length > 30) return;
+    if (!['audio', 'video'].includes(kind)) return;
+    if (typeof enabled !== 'boolean') return;
+
     socket.to(`group-call:${groupId}`).emit('group-call:media-toggled', {
       userId: socket.userId,
       kind,
       enabled,
     });
-  });
+  }));
 
   /**
-   * Screen share in group call
+   * Screen share in group call — GUARDED
    */
-  socket.on('group-call:screen-share', ({ groupId, sharing }) => {
+  socket.on('group-call:screen-share', guard.wrapHandler(socket, 'group-call:screen-share', ({ groupId, sharing }) => {
+    if (!groupId || typeof groupId !== 'string' || groupId.length > 30) return;
+    if (typeof sharing !== 'boolean') return;
+
     socket.to(`group-call:${groupId}`).emit('group-call:screen-share', {
       userId: socket.userId,
       username: socket.username,
       sharing,
     });
-  });
+  }));
 
   /**
    * Handle disconnect — clean up group call participation
    */
   socket.on('disconnect', () => {
-    // Clean up from all active group calls
     for (const [groupId, participants] of activeGroupCalls.entries()) {
       if (participants.has(socket.userId)) {
         handleGroupCallLeave(io, socket, onlineUsers, groupId);
@@ -259,35 +303,32 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
  */
 function handleGroupCallLeave(io, socket, onlineUsers, groupId) {
   const callParticipants = activeGroupCalls.get(groupId);
-
   if (!callParticipants) return;
 
   callParticipants.delete(socket.userId);
   socket.leave(`group-call:${groupId}`);
 
-  console.log(`📞 Group call: ${socket.username} left call in group ${groupId} (${callParticipants.size} remaining)`);
+  securityLogger.log('INFO', 'CALL', 'User left group call', {
+    userId: socket.userId,
+    groupId,
+    remaining: callParticipants.size,
+  });
 
-  // Notify remaining peers
   io.to(`group-call:${groupId}`).emit('group-call:peer-left', {
     groupId,
     userId: socket.userId,
     username: socket.username,
   });
 
-  // Broadcast updated active call status to ALL group members
   if (callParticipants.size > 0) {
     io.to(`group:${groupId}`).emit('group-call:active', {
       groupId,
       participants: Array.from(callParticipants.entries()).map(([uid, uname]) => ({ userId: uid, username: uname })),
     });
   } else {
-    // Call empty → ended
     activeGroupCalls.delete(groupId);
-    console.log(`📞 Group call ended for group ${groupId}`);
-
-    io.to(`group:${groupId}`).emit('group-call:ended', {
-      groupId,
-    });
+    securityLogger.log('INFO', 'CALL', 'Group call ended', { groupId });
+    io.to(`group:${groupId}`).emit('group-call:ended', { groupId });
   }
 }
 

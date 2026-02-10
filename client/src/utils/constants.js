@@ -1,50 +1,50 @@
 /**
  * ============================================
- * Application Constants
+ * Application Constants — HARDENED
  * ============================================
+ * SECURITY: ICE transport policy, DTLS enforcement, candidate filtering
  */
 
 // Server URL — MUST be HTTPS for WebRTC to work
-// In production, change this to your server's IP
 export const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'https://localhost:5000';
 
 // API base URL
 export const API_URL = `${SERVER_URL}/api`;
 
-// WebRTC ICE Server Configuration
+// WebRTC ICE Server Configuration — HARDENED
 // ─────────────────────────────────────────
-// STUN = discover your public IP (free, Google)
-// TURN = relay media when direct P2P fails (REQUIRED for production!)
-//
-// WITHOUT TURN: calls WILL fail when both users are behind NATs.
-// Configure TURN via .env:
-//   VITE_TURN_URL=turn:your-server.com:3478
-//   VITE_TURN_USERNAME=user
-//   VITE_TURN_CREDENTIAL=pass
-//
-// Recommended: Install coturn on your VPS (see README)
+// SECURITY UPGRADES:
+// - iceTransportPolicy: 'all' (use 'relay' in high-security mode to hide IPs)
+// - bundlePolicy: 'max-bundle' (reduces attack surface by multiplexing)
+// - rtcpMuxPolicy: 'require' (forces RTCP multiplexing)
+// - Reduced STUN servers (fewer external dependencies)
+// - TURN with TLS (turns:) preferred over TCP
 export const ICE_SERVERS = {
   iceServers: [
-    // STUN servers (free, for NAT discovery)
+    // STUN servers (minimal set — reduce fingerprinting surface)
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
     // TURN server (for relaying media when P2P fails)
-    // Configured via environment variables
     ...(import.meta.env.VITE_TURN_URL ? [{
       urls: import.meta.env.VITE_TURN_URL,
       username: import.meta.env.VITE_TURN_USERNAME || '',
       credential: import.meta.env.VITE_TURN_CREDENTIAL || '',
     }] : []),
-    // Fallback TURN — also add UDP variant if TCP is specified
+    // TURNS (TLS) variant — encrypted relay
     ...(import.meta.env.VITE_TURN_URL ? [{
       urls: import.meta.env.VITE_TURN_URL.replace('turn:', 'turns:').replace(':3478', ':5349'),
       username: import.meta.env.VITE_TURN_USERNAME || '',
       credential: import.meta.env.VITE_TURN_CREDENTIAL || '',
     }] : []),
-  ].filter(s => s.urls), // Remove any empty entries
-  iceCandidatePoolSize: 10,
+  ].filter(s => s.urls),
+  iceCandidatePoolSize: 5, // Reduced from 10 — fewer pre-allocated candidates
+
+  // SECURITY POLICIES:
+  // 'all' = allow P2P + relay (default, good for performance)
+  // 'relay' = force TURN relay only (hides user IPs but higher latency)
+  iceTransportPolicy: import.meta.env.VITE_ICE_TRANSPORT_POLICY || 'all',
+  bundlePolicy: 'max-bundle',       // Multiplex all media on one transport
+  rtcpMuxPolicy: 'require',         // Force RTCP multiplexing
 };
 
 // Media constraints defaults
@@ -138,4 +138,9 @@ export const SOCKET_EVENTS = {
   GROUP_CALL_EXISTING: 'group-call:existing-peers',
   GROUP_CALL_PEER_JOINED: 'group-call:peer-joined',
   GROUP_CALL_PEER_LEFT: 'group-call:peer-left',
+
+  // Security events
+  SECURITY_FORCE_LOGOUT: 'security:force-logout',
+  SECURITY_TOKEN_EXPIRED: 'security:token-expired',
+  SECURITY_NONCE: 'security:nonce',
 };

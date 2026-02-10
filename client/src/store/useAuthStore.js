@@ -1,29 +1,30 @@
 /**
  * ============================================
- * Auth Store (Zustand)
+ * Auth Store (Zustand) — HARDENED
  * ============================================
  * 
- * Manages: User authentication state, login, signup, logout
- * 
- * WHY Zustand over Redux:
- * - Zero boilerplate (no actions, reducers, dispatchers)
- * - No Provider wrapper needed
- * - Built-in subscriptions
- * - Tiny bundle size (~1KB)
- * - Works perfectly with React hooks
+ * SECURITY UPGRADES:
+ * - Dual-token support (accessToken + refreshToken)
+ * - Device fingerprint binding
+ * - Backward-compatible with legacy 'token' key
+ * - Security event handling from server (force logout, session revoked)
+ * - Token expiry awareness
  */
 
 import { create } from 'zustand';
 import api from '../services/api';
+import { getDeviceFingerprint } from '../services/api';
 import { connectSocket, disconnectSocket } from '../services/socket';
 
 const useAuthStore = create((set, get) => ({
   // State
   user: null,
-  token: localStorage.getItem('token') || null,
+  accessToken: localStorage.getItem('accessToken') || localStorage.getItem('token') || null,
+  refreshToken: localStorage.getItem('refreshToken') || null,
   isAuthenticated: false,
   isLoading: true,
   error: null,
+  tokenExpiresAt: null,
 
   // ============================================
   // ACTIONS
@@ -31,11 +32,12 @@ const useAuthStore = create((set, get) => ({
 
   /**
    * Check if user is authenticated (on app load)
+   * Supports both new dual-token and legacy single-token format
    */
   checkAuth: async () => {
-    const token = localStorage.getItem('token');
+    const accessToken = localStorage.getItem('accessToken') || localStorage.getItem('token');
 
-    if (!token) {
+    if (!accessToken) {
       set({ isLoading: false, isAuthenticated: false });
       return;
     }
@@ -46,50 +48,69 @@ const useAuthStore = create((set, get) => ({
 
       set({
         user,
-        token,
+        accessToken,
         isAuthenticated: true,
         isLoading: false,
       });
 
-      // Connect socket with token
-      connectSocket(token);
+      // Connect socket with access token
+      connectSocket(accessToken);
     } catch (error) {
-      // Token is invalid/expired
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      set({
-        user: null,
-        token: null,
-        isAuthenticated: false,
-        isLoading: false,
-      });
+      // Token is invalid/expired — the API interceptor will try to refresh
+      // If refresh also fails, the interceptor calls forceLogout
+      // Only clear here if there's no refresh token at all
+      const refreshToken = localStorage.getItem('refreshToken');
+      if (!refreshToken) {
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        set({
+          user: null,
+          accessToken: null,
+          refreshToken: null,
+          isAuthenticated: false,
+          isLoading: false,
+        });
+      } else {
+        // Let the interceptor handle refresh, just mark as not loading
+        set({ isLoading: false });
+      }
     }
   },
 
   /**
-   * Sign up a new user
+   * Sign up a new user — now receives accessToken + refreshToken
    */
   signup: async (username, email, password) => {
     set({ error: null, isLoading: true });
 
     try {
-      const res = await api.post('/auth/signup', { username, email, password });
-      const { user, token } = res.data.data;
+      const res = await api.post('/auth/signup', {
+        username,
+        email,
+        password,
+        deviceFingerprint: getDeviceFingerprint(),
+      });
+      const { user, accessToken, refreshToken } = res.data.data;
 
-      localStorage.setItem('token', token);
+      // Store dual tokens
+      localStorage.setItem('accessToken', accessToken);
+      localStorage.setItem('refreshToken', refreshToken);
       localStorage.setItem('user', JSON.stringify(user));
+      // Remove legacy key
+      localStorage.removeItem('token');
 
       set({
         user,
-        token,
+        accessToken,
+        refreshToken,
         isAuthenticated: true,
         isLoading: false,
         error: null,
       });
 
-      // Connect socket
-      connectSocket(token);
-
+      connectSocket(accessToken);
       return { success: true };
     } catch (error) {
       const message = error.response?.data?.message || 'Signup failed';
@@ -99,39 +120,49 @@ const useAuthStore = create((set, get) => ({
   },
 
   /**
-   * Log in existing user
+   * Log in existing user — now receives accessToken + refreshToken
    */
   login: async (email, password) => {
     set({ error: null, isLoading: true });
 
     try {
-      const res = await api.post('/auth/login', { email, password });
-      const { user, token } = res.data.data;
+      const res = await api.post('/auth/login', {
+        email,
+        password,
+        deviceFingerprint: getDeviceFingerprint(),
+      });
+      const { user, accessToken, refreshToken, warning } = res.data.data;
 
-      localStorage.setItem('token', token);
+      // Store dual tokens
+      localStorage.setItem('accessToken', accessToken);
+      localStorage.setItem('refreshToken', refreshToken);
       localStorage.setItem('user', JSON.stringify(user));
+      localStorage.removeItem('token');
 
       set({
         user,
-        token,
+        accessToken,
+        refreshToken,
         isAuthenticated: true,
         isLoading: false,
         error: null,
       });
 
-      // Connect socket
-      connectSocket(token);
+      connectSocket(accessToken);
 
-      return { success: true };
+      // Return warning if there were failed login attempts
+      return { success: true, warning };
     } catch (error) {
       const message = error.response?.data?.message || 'Login failed';
+      const attemptsRemaining = error.response?.data?.attemptsRemaining;
+      const lockUntil = error.response?.data?.lockUntil;
       set({ error: message, isLoading: false });
-      return { success: false, message };
+      return { success: false, message, attemptsRemaining, lockUntil };
     }
   },
 
   /**
-   * Log out
+   * Log out — revokes refresh token on server
    */
   logout: async () => {
     try {
@@ -140,20 +171,61 @@ const useAuthStore = create((set, get) => ({
       // Ignore — we're logging out anyway
     }
 
-    // Disconnect socket
     disconnectSocket();
 
-    // Clear storage
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
     localStorage.removeItem('token');
     localStorage.removeItem('user');
 
     set({
       user: null,
-      token: null,
+      accessToken: null,
+      refreshToken: null,
       isAuthenticated: false,
       isLoading: false,
       error: null,
     });
+  },
+
+  /**
+   * Revoke all sessions (panic button)
+   * Forces logout on ALL devices
+   */
+  revokeAllSessions: async () => {
+    try {
+      await api.post('/auth/revoke-all-sessions');
+    } catch (error) {
+      // Continue with local logout regardless
+    }
+
+    // Logout locally
+    get().logout();
+  },
+
+  /**
+   * Handle force logout from server (called by socket event)
+   */
+  handleForceLogout: (reason) => {
+    disconnectSocket();
+
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+
+    set({
+      user: null,
+      accessToken: null,
+      refreshToken: null,
+      isAuthenticated: false,
+      isLoading: false,
+      error: reason || 'You have been logged out by the server.',
+    });
+
+    if (!window.location.pathname.includes('/login')) {
+      window.location.href = '/login';
+    }
   },
 
   /**
