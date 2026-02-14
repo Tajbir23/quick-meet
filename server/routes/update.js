@@ -14,7 +14,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
-const requireOwner = require('../middleware/ownerAuth');
+const { requireOwner } = require('../middleware/ownerAuth');
 const {
   checkUpdate,
   getVersionInfo,
