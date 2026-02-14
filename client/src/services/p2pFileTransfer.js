@@ -140,6 +140,10 @@ class TransferSession {
     this.writeStream = null;
     this.writer = null;
     
+    // ICE candidate queue — stores candidates that arrive before remoteDescription is set
+    this._pendingIceCandidates = [];
+    this._remoteDescriptionSet = false;
+    
     // Callbacks
     this.onProgress = null;
     this.onComplete = null;
@@ -350,14 +354,19 @@ class P2PFileTransferService {
 
     socket.on('file-transfer:ice-candidate', async (data) => {
       const session = this.sessions.get(data.transferId);
-      if (session && session.peerConnection) {
+      if (!session) return;
+
+      // If PeerConnection exists and remoteDescription is set → add immediately
+      if (session.peerConnection && session._remoteDescriptionSet) {
         try {
-          if (session.peerConnection.remoteDescription) {
-            await session.peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-          }
+          await session.peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
         } catch (e) {
-          console.warn('Failed to add ICE candidate for file transfer:', e);
+          console.warn('[P2P] Failed to add ICE candidate:', e);
         }
+      } else {
+        // Queue the candidate — will be flushed after setRemoteDescription
+        session._pendingIceCandidates.push(data.candidate);
+        console.log(`[P2P] Queued ICE candidate for ${data.transferId} (${session._pendingIceCandidates.length} queued)`);
       }
     });
 
@@ -693,6 +702,11 @@ class P2PFileTransferService {
     // Set remote offer and create answer
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      session._remoteDescriptionSet = true;
+
+      // Flush any ICE candidates that arrived before remoteDescription was set
+      await this._flushPendingIceCandidates(session);
+
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
@@ -718,9 +732,34 @@ class P2PFileTransferService {
     try {
       if (session.peerConnection && session.peerConnection.signalingState === 'have-local-offer') {
         await session.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        session._remoteDescriptionSet = true;
+
+        // Flush any ICE candidates that arrived before remoteDescription was set
+        await this._flushPendingIceCandidates(session);
       }
     } catch (err) {
       console.error('Failed to set answer for file transfer:', err);
+    }
+  }
+
+  /**
+   * Flush queued ICE candidates after remoteDescription is set
+   * This fixes the race condition where candidates arrive before the remote description
+   */
+  async _flushPendingIceCandidates(session) {
+    if (!session._pendingIceCandidates || session._pendingIceCandidates.length === 0) return;
+
+    const candidates = [...session._pendingIceCandidates];
+    session._pendingIceCandidates = [];
+
+    console.log(`[P2P] Flushing ${candidates.length} queued ICE candidates for ${session.transferId}`);
+
+    for (const candidate of candidates) {
+      try {
+        await session.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.warn('[P2P] Failed to add queued ICE candidate:', e);
+      }
     }
   }
 
