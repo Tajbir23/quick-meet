@@ -335,3 +335,60 @@ export const playNotificationSound = (type = 'message') => {
     // Audio not available, silently ignore
   }
 };
+
+/**
+ * Show a native OS notification (browser Notification API or Electron native).
+ * Falls back silently if permission denied or not supported.
+ * @param {string} title
+ * @param {string} body
+ * @param {object} options - { onClick, tag, requireInteraction }
+ */
+export const showNativeNotification = (title, body, options = {}) => {
+  try {
+    // Electron native notification (works even when window hidden)
+    if (window.electronAPI?.showNotification) {
+      window.electronAPI.showNotification({ title, body });
+      // Also flash taskbar and bring window to front
+      if (window.electronAPI.flashWindow) {
+        window.electronAPI.flashWindow();
+      }
+      return;
+    }
+
+    // Browser Notification API
+    if ('Notification' in window && Notification.permission === 'granted') {
+      const notification = new Notification(title, {
+        body,
+        icon: '/favicon.ico',
+        tag: options.tag || undefined,
+        requireInteraction: options.requireInteraction || false,
+      });
+      if (options.onClick) {
+        notification.onclick = () => {
+          window.focus();
+          options.onClick();
+          notification.close();
+        };
+      }
+      // Auto-close after 15s for calls
+      if (!options.requireInteraction) {
+        setTimeout(() => notification.close(), 15000);
+      }
+    }
+  } catch (e) {
+    // Silently ignore
+  }
+};
+
+/**
+ * Bring the app window to focus (Electron or browser).
+ */
+export const bringWindowToFront = () => {
+  try {
+    if (window.electronAPI?.showAndFocus) {
+      window.electronAPI.showAndFocus();
+    } else {
+      window.focus();
+    }
+  } catch (e) {}
+};

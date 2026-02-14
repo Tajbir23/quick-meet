@@ -249,9 +249,12 @@ function sendOSNotification(request) {
   const title = `📁 ${request.senderName} wants to send a file`;
   const body = `${request.fileName} (${formatSize(request.fileSize)})`;
 
-  // Electron: native OS notification
+  // Electron: native OS notification + flash taskbar
   if (window.electronAPI?.isElectron) {
     window.electronAPI.showNotification({ title, body });
+    if (window.electronAPI.flashWindow) {
+      window.electronAPI.flashWindow();
+    }
     return;
   }
 
@@ -262,10 +265,9 @@ function sendOSNotification(request) {
         body,
         icon: '/favicon.ico',
         tag: `file-transfer-${request.transferId}`,
-        requireInteraction: true, // Don't auto-dismiss
+        requireInteraction: true,
       });
       
-      // Click notification → focus app window
       notification.onclick = () => {
         window.focus();
         notification.close();

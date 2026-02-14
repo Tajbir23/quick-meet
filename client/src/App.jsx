@@ -13,6 +13,7 @@ import IncomingGroupCall from './components/Call/IncomingGroupCall';
 import NetworkStatus from './components/Common/NetworkStatus';
 import Notification from './components/Common/Notification';
 import UpdateNotification from './components/Common/UpdateNotification';
+import StatusBar from './components/Common/StatusBar';
 import FileTransferPanel from './components/FileTransfer/FileTransferPanel';
 import FileTransferIndicator from './components/FileTransfer/FileTransferIndicator';
 import IncomingFileTransfer from './components/FileTransfer/IncomingFileTransfer';
@@ -42,16 +43,18 @@ function App() {
   }
 
   return (
-    <div className="h-full bg-dark-900 overflow-hidden">
+    <div className="h-full bg-dark-900 overflow-hidden flex flex-col">
       <NetworkStatus />
       <Notification />
       <UpdateNotification />
+      {isAuthenticated && <StatusBar />}
       {isAuthenticated && <IncomingCall />}
       {isAuthenticated && <IncomingGroupCall />}
       {isAuthenticated && <IncomingFileTransfer />}
       {isAuthenticated && <FileTransferPanel />}
       {isAuthenticated && <FileTransferIndicator />}
 
+      <div className="flex-1 overflow-hidden">
       <Routes>
         <Route
           path="/login"
@@ -86,6 +89,7 @@ function App() {
           }
         />
       </Routes>
+      </div>
     </div>
   );
 }

@@ -16,8 +16,8 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
   const isImage = hasFile && isImageFile(message.fileMimeType);
 
   /**
-   * Download file — opens the public download URL in a new tab.
-   * If that fails, falls back to fetch+blob with auth headers.
+   * Download file — uses Electron native download if available,
+   * otherwise falls back to fetch+blob in the browser.
    */
   const handleDownload = async (e) => {
     e.preventDefault();
@@ -25,9 +25,21 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
 
     const filename = message.fileUrl.split('/').pop();
     const downloadUrl = `${SERVER_URL}/api/files/download/${filename}`;
+    const downloadName = message.fileName || filename;
 
     try {
       setDownloading(true);
+
+      // Electron: use native file download via IPC
+      if (window.electronAPI?.downloadFile) {
+        const result = await window.electronAPI.downloadFile(downloadUrl, downloadName);
+        if (!result.success && result.error !== 'Cancelled') {
+          throw new Error(result.error);
+        }
+        return;
+      }
+
+      // Browser: fetch blob and trigger download
       const res = await fetch(downloadUrl);
       if (!res.ok) throw new Error('Download failed');
 
@@ -35,7 +47,7 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = message.fileName || filename;
+      a.download = downloadName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

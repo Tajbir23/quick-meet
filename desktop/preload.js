@@ -47,6 +47,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
+  flashWindow: () => ipcRenderer.send('window:flash'),
+  showAndFocus: () => ipcRenderer.send('window:show-and-focus'),
+
+  // ─── Native File Download ─────────────────
+  downloadFile: (url, fileName) =>
+    ipcRenderer.invoke('file:download-url', { url, fileName }),
 
   // ─── Auto-Update ──────────────────────────
   onUpdateStatus: (callback) => {

@@ -11,7 +11,7 @@
 import { useEffect, useRef } from 'react';
 import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
-import { playNotificationSound } from '../../utils/helpers';
+import { playNotificationSound, showNativeNotification } from '../../utils/helpers';
 
 const Notification = () => {
   const { isAuthenticated } = useAuthStore();
@@ -39,18 +39,12 @@ const Notification = () => {
       if (curr > prev && activeChat?.id !== chatId) {
         playNotificationSound('message');
 
-        // Show browser notification if permitted
-        if ('Notification' in window && Notification.permission === 'granted') {
-          try {
-            new window.Notification('Quick Meet', {
-              body: `You have ${curr} new message${curr > 1 ? 's' : ''}`,
-              icon: '/favicon.ico',
-              tag: `msg-${chatId}`,
-            });
-          } catch (e) {
-            // Notifications not supported in this context
-          }
-        }
+        // Show native notification (works in Electron background + browser)
+        showNativeNotification(
+          'Quick Meet',
+          `You have ${curr} new message${curr > 1 ? 's' : ''}`,
+          { tag: `msg-${chatId}` }
+        );
       }
     });
 

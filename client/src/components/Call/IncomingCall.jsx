@@ -7,7 +7,7 @@
 import { useEffect, useRef } from 'react';
 import { Phone, PhoneOff, Video } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
-import { getInitials, stringToColor, playNotificationSound } from '../../utils/helpers';
+import { getInitials, stringToColor, playNotificationSound, showNativeNotification, bringWindowToFront } from '../../utils/helpers';
 
 const IncomingCall = () => {
   const { incomingCall, acceptCall, rejectCall, callStatus } = useCallStore();

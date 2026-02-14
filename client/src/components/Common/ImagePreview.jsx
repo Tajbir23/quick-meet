@@ -39,9 +39,21 @@ const ImagePreview = ({ imageUrl, fileName, onClose }) => {
 
     const filename = imageUrl.split('/').pop();
     const downloadUrl = `${SERVER_URL}/api/files/download/${filename}`;
+    const downloadName = fileName || filename;
 
     try {
       setDownloading(true);
+
+      // Electron: use native file download via IPC
+      if (window.electronAPI?.downloadFile) {
+        const result = await window.electronAPI.downloadFile(downloadUrl, downloadName);
+        if (!result.success && result.error !== 'Cancelled') {
+          throw new Error(result.error);
+        }
+        return;
+      }
+
+      // Browser: fetch blob and trigger download
       const res = await fetch(downloadUrl);
       if (!res.ok) throw new Error('Download failed');
 
@@ -49,7 +61,7 @@ const ImagePreview = ({ imageUrl, fileName, onClose }) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = fileName || filename;
+      a.download = downloadName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

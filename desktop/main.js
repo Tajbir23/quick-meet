@@ -308,7 +308,65 @@ ipcMain.handle('file:get-size', async (event, { filePath }) => {
 // ─── Other IPC ───────────────────────────────────────────
 
 ipcMain.handle('notification:show', async (event, { title, body }) => {
-  if (Notification.isSupported()) new Notification({ title, body }).show();
+  if (Notification.isSupported()) {
+    const notification = new Notification({ title, body });
+    notification.on('click', () => showWindow());
+    notification.show();
+  }
+});
+
+// Flash taskbar to get user attention (incoming call, file transfer)
+ipcMain.on('window:flash', () => {
+  if (mainWindow) {
+    mainWindow.flashFrame(true);
+    // Stop flashing after 10 seconds
+    setTimeout(() => mainWindow?.flashFrame(false), 10000);
+  }
+});
+
+// Show and focus the window (from background/tray)
+ipcMain.on('window:show-and-focus', () => showWindow());
+
+// Native file download — downloads a URL to user-chosen location
+ipcMain.handle('file:download-url', async (event, { url, fileName }) => {
+  if (!mainWindow) return { success: false, error: 'No window' };
+  try {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: fileName || 'download',
+      title: 'Save File',
+      filters: [{ name: 'All Files', extensions: ['*'] }],
+    });
+    if (result.canceled || !result.filePath) return { success: false, error: 'Cancelled' };
+
+    // Use Node.js to fetch and save
+    const https = require('https');
+    const http = require('http');
+    const urlObj = new URL(url);
+    const protocol = urlObj.protocol === 'https:' ? https : http;
+
+    return new Promise((resolve) => {
+      const req = protocol.get(url, { rejectUnauthorized: false }, (res) => {
+        if (res.statusCode !== 200) {
+          resolve({ success: false, error: `HTTP ${res.statusCode}` });
+          return;
+        }
+        const fileStream = fs.createWriteStream(result.filePath);
+        res.pipe(fileStream);
+        fileStream.on('finish', () => {
+          fileStream.close();
+          resolve({ success: true, filePath: result.filePath });
+        });
+        fileStream.on('error', (err) => {
+          try { fs.unlinkSync(result.filePath); } catch (e) {}
+          resolve({ success: false, error: err.message });
+        });
+      });
+      req.on('error', (err) => resolve({ success: false, error: err.message }));
+      req.setTimeout(30000, () => { req.destroy(); resolve({ success: false, error: 'Timeout' }); });
+    });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 ipcMain.handle('app:info', () => ({

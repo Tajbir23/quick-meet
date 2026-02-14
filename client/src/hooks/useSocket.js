@@ -15,7 +15,7 @@ import useCallStore from '../store/useCallStore';
 import useGroupStore from '../store/useGroupStore';
 import useAuthStore from '../store/useAuthStore';
 import webrtcService from '../services/webrtc';
-import { playNotificationSound } from '../utils/helpers';
+import { playNotificationSound, showNativeNotification, bringWindowToFront } from '../utils/helpers';
 import useFileTransferStore from '../store/useFileTransferStore';
 
 const useSocket = () => {
@@ -143,6 +143,18 @@ const useSocket = () => {
       });
 
       playNotificationSound('call');
+
+      // Native notification for background/minimized window
+      const callLabel = callType === 'video' ? 'Video Call' : 'Voice Call';
+      showNativeNotification(
+        `Incoming ${callLabel}`,
+        `${callerName} is calling you`,
+        {
+          tag: `call-${callerId}`,
+          requireInteraction: true,
+          onClick: () => bringWindowToFront(),
+        }
+      );
     });
 
     socket.on('call:answer', async ({ answererId, answer }) => {
@@ -295,6 +307,17 @@ const useSocket = () => {
       });
 
       playNotificationSound('call');
+
+      // Native notification for background/minimized window
+      showNativeNotification(
+        `Group Call — ${groupName || 'Group'}`,
+        `${callerName} started a call · ${participantCount} in call`,
+        {
+          tag: `group-call-${groupId}`,
+          requireInteraction: true,
+          onClick: () => bringWindowToFront(),
+        }
+      );
     });
 
     socket.on('group-call:peer-joined', async ({ userId, username }) => {
