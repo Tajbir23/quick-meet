@@ -23,13 +23,6 @@
       "preload.js",
       "icon.*"
     ],
-    "extraResources": [
-      {
-        "from": "../client/dist",
-        "to": "client",
-        "filter": ["**/*"]
-      }
-    ],
     "win": {
       "target": [
         {
