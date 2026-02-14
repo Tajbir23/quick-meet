@@ -139,35 +139,39 @@ const registerSocketHandlers = (io) => {
     socket.on('disconnect', async (reason) => {
       console.log(`🔌 User disconnected: ${username} (${userId}) — socket: ${socket.id} — reason: ${reason}`);
 
-      // IMPORTANT: Only remove from onlineUsers if THIS socket is still the current one.
+      // IMPORTANT: Only process offline logic if THIS socket is still the current one.
       // Prevents race condition where a reconnect creates a new socket before
-      // the old socket's disconnect handler fires.
-      if (onlineUsers.get(userId) === socket.id) {
-        onlineUsers.delete(userId);
-      } else {
-        console.log(`🔌 Skipping onlineUsers delete for ${username} — socket ${socket.id} is stale, current: ${onlineUsers.get(userId)}`);
-      }
+      // the old socket's disconnect handler fires — which would falsely mark
+      // the user offline even though their NEW socket is active.
+      const isCurrentSocket = onlineUsers.get(userId) === socket.id;
+
       socketGuard.cleanup(socket.id);
       intrusionDetector.removeSession(userId, socket.id);
 
-      try {
-        await User.findByIdAndUpdate(userId, {
-          isOnline: false,
-          socketId: null,
-          lastSeen: new Date(),
+      if (isCurrentSocket) {
+        onlineUsers.delete(userId);
+
+        try {
+          await User.findByIdAndUpdate(userId, {
+            isOnline: false,
+            socketId: null,
+            lastSeen: new Date(),
+          });
+        } catch (err) {
+          console.error('Error updating user offline status:', err);
+        }
+
+        // Broadcast offline status ONLY if this was the active socket
+        socket.broadcast.emit('user:offline', {
+          userId,
+          username,
         });
-      } catch (err) {
-        console.error('Error updating user offline status:', err);
+      } else {
+        console.log(`🔌 Stale socket disconnect for ${username} — socket ${socket.id} is NOT current (current: ${onlineUsers.get(userId)}). Skipping offline broadcast & DB update.`);
       }
 
-      // Broadcast offline status
-      socket.broadcast.emit('user:offline', {
-        userId,
-        username,
-      });
-
       securityLogger.socketEvent('disconnect', SEVERITY.INFO, {
-        userId, username, reason, ip,
+        userId, username, reason, ip, staleSocket: !isCurrentSocket,
       });
     });
 

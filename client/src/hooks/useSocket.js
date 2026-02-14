@@ -47,11 +47,13 @@ const useSocket = () => {
     // ============================================
 
     socket.on('users:online-list', (users) => {
+      console.log(`👤 Online users list received: ${users.length} users`);
       useChatStore.getState().setOnlineUsers(users);
     });
 
-    socket.on('user:online', ({ userId, username }) => {
-      useChatStore.getState().addOnlineUser({ userId });
+    socket.on('user:online', ({ userId, username, socketId }) => {
+      console.log(`👤 User online: ${username} (${userId})`);
+      useChatStore.getState().addOnlineUser({ userId, socketId });
 
       // If this user isn't in our users list (e.g. new signup), refresh the list
       const { users } = useChatStore.getState();
@@ -61,6 +63,7 @@ const useSocket = () => {
     });
 
     socket.on('user:offline', ({ userId }) => {
+      console.log(`👤 User offline: ${userId}`);
       useChatStore.getState().removeOnlineUser(userId);
     });
 
@@ -253,12 +256,14 @@ const useSocket = () => {
     // When socket reconnects, room memberships are lost (new server socket).
     // Re-join all group rooms and re-query active calls so banners/badges update.
     socket.on('connect', () => {
-      console.log('🔌 Socket (re)connected — re-joining group rooms');
+      console.log('🔌 Socket (re)connected — re-joining group rooms & refreshing online users');
       const { myGroups } = useGroupStore.getState();
       myGroups.forEach(g => socket.emit('group:join-room', { groupId: g._id }));
       socket.emit('group-call:get-active-calls');
       // Re-request online users (server also auto-sends on connect, but this is a safety net)
       socket.emit('users:get-online-list');
+      // Refresh users list in case new users signed up
+      useChatStore.getState().fetchUsers();
     });
 
     // Group call ended — remove banner & dismiss ringing
