@@ -454,9 +454,19 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
 
   /**
    * On disconnect — pause all active transfers for this user
+   * IMPORTANT: Must be fault-tolerant — if MongoDB is temporarily
+   * disconnected (e.g. during server restart), this should NOT crash
+   * or cause PM2 to restart the process.
    */
   socket.on('disconnect', async () => {
     try {
+      const mongoose = require('mongoose');
+      // Skip DB operation if mongoose is not connected
+      if (mongoose.connection.readyState !== 1) {
+        console.warn(`📁 Skipping file-transfer disconnect cleanup for ${socket.username} — MongoDB not connected (state: ${mongoose.connection.readyState})`);
+        return;
+      }
+
       const result = await FileTransfer.updateMany(
         {
           $or: [{ sender: socket.userId }, { receiver: socket.userId }],
@@ -475,7 +485,8 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
         console.log(`📁 Paused ${result.modifiedCount} transfers for disconnected user ${socket.username}`);
       }
     } catch (err) {
-      console.error('file-transfer disconnect cleanup error:', err);
+      // Log but never crash — this is non-critical cleanup
+      console.warn('file-transfer disconnect cleanup error (non-fatal):', err.message);
     }
   });
 };
