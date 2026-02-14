@@ -20,6 +20,7 @@
  * - This enables routing signaling to the correct socket
  */
 
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const setupPresenceHandlers = require('./presence');
 const setupChatHandlers = require('./chat');
@@ -30,6 +31,9 @@ const socketGuard = require('../security/SocketGuard');
 const securityLogger = require('../security/SecurityEventLogger');
 const { SEVERITY } = require('../security/SecurityEventLogger');
 const intrusionDetector = require('../security/IntrusionDetector');
+
+// Helper: check if MongoDB is connected before DB operations
+const isMongoConnected = () => mongoose.connection.readyState === 1;
 
 // Global state: maps userId → socketId for routing
 const onlineUsers = new Map();
@@ -69,15 +73,17 @@ const registerSocketHandlers = (io) => {
     intrusionDetector.registerSession(userId, socket.id);
     onlineUsers.set(userId, socket.id);
 
-    // Update DB
-    try {
-      await User.findByIdAndUpdate(userId, {
-        isOnline: true,
-        socketId: socket.id,
-        lastSeen: new Date(),
-      });
-    } catch (err) {
-      console.error('Error updating user online status:', err);
+    // Update DB (skip if MongoDB not ready — prevents crash during startup race)
+    if (isMongoConnected()) {
+      try {
+        await User.findByIdAndUpdate(userId, {
+          isOnline: true,
+          socketId: socket.id,
+          lastSeen: new Date(),
+        });
+      } catch (err) {
+        console.warn('Error updating user online status (non-fatal):', err.message);
+      }
     }
 
     // Broadcast to all clients that this user is now online
@@ -151,14 +157,16 @@ const registerSocketHandlers = (io) => {
       if (isCurrentSocket) {
         onlineUsers.delete(userId);
 
-        try {
-          await User.findByIdAndUpdate(userId, {
-            isOnline: false,
-            socketId: null,
-            lastSeen: new Date(),
-          });
-        } catch (err) {
-          console.error('Error updating user offline status:', err);
+        if (isMongoConnected()) {
+          try {
+            await User.findByIdAndUpdate(userId, {
+              isOnline: false,
+              socketId: null,
+              lastSeen: new Date(),
+            });
+          } catch (err) {
+            console.warn('Error updating user offline status (non-fatal):', err.message);
+          }
         }
 
         // Broadcast offline status ONLY if this was the active socket
