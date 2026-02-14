@@ -15,6 +15,7 @@
  */
 
 const { app, BrowserWindow, Tray, Menu, shell, ipcMain, dialog, session, Notification, nativeImage } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 
@@ -324,12 +325,136 @@ ipcMain.on('window:maximize', () => {
 ipcMain.on('window:close', () => mainWindow?.close());
 
 // ============================================
+// Auto-Updater (electron-updater via GitHub Releases)
+// ============================================
+// Uses GitHub Releases as update feed.
+// On startup: checks for updates → downloads → prompts to restart.
+// Fully automatic — no user action needed except clicking "Restart".
+
+function setupAutoUpdater() {
+  // Don't check for updates in dev mode
+  if (!app.isPackaged) {
+    console.log('⏭️  Skipping auto-update (dev mode)');
+    return;
+  }
+
+  // Configure auto-updater
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowDowngrade = false;
+
+  // ─── Update Events ─────────────────────────
+  autoUpdater.on('checking-for-update', () => {
+    console.log('🔍 Checking for updates...');
+    mainWindow?.webContents.send('update:status', { status: 'checking' });
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    console.log(`📦 Update available: v${info.version}`);
+    mainWindow?.webContents.send('update:status', {
+      status: 'available',
+      version: info.version,
+      releaseNotes: info.releaseNotes,
+      releaseDate: info.releaseDate,
+    });
+
+    // Show native notification
+    if (Notification.isSupported()) {
+      new Notification({
+        title: `${APP_NAME} Update Available`,
+        body: `Version ${info.version} is being downloaded...`,
+      }).show();
+    }
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('✅ App is up to date');
+    mainWindow?.webContents.send('update:status', { status: 'up-to-date' });
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    const percent = Math.round(progress.percent);
+    mainWindow?.webContents.send('update:status', {
+      status: 'downloading',
+      percent,
+      bytesPerSecond: progress.bytesPerSecond,
+      transferred: progress.transferred,
+      total: progress.total,
+    });
+    mainWindow?.setProgressBar(percent / 100);
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log(`✅ Update downloaded: v${info.version}`);
+    mainWindow?.setProgressBar(-1); // Remove progress bar
+    mainWindow?.webContents.send('update:status', {
+      status: 'downloaded',
+      version: info.version,
+    });
+
+    // Show notification with install prompt
+    if (Notification.isSupported()) {
+      const notification = new Notification({
+        title: `${APP_NAME} Update Ready`,
+        body: `Version ${info.version} downloaded. Restart to install.`,
+      });
+      notification.on('click', () => {
+        autoUpdater.quitAndInstall(false, true);
+      });
+      notification.show();
+    }
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('Auto-update error:', err?.message || err);
+    mainWindow?.webContents.send('update:status', {
+      status: 'error',
+      error: err?.message || 'Update check failed',
+    });
+  });
+
+  // Check for updates now, then every 4 hours
+  autoUpdater.checkForUpdatesAndNotify().catch(err => {
+    console.warn('Initial update check failed:', err.message);
+  });
+
+  setInterval(() => {
+    autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+  }, 4 * 60 * 60 * 1000);
+}
+
+// IPC: Renderer can request install
+ipcMain.on('update:install', () => {
+  autoUpdater.quitAndInstall(false, true);
+});
+
+// IPC: Renderer can request manual check
+ipcMain.handle('update:check', async () => {
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return { success: true, version: result?.updateInfo?.version };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// ============================================
 // App Lifecycle
 // ============================================
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Clear cache on startup to always load latest web assets
+  // This ensures auto-deploy changes are picked up immediately
+  try {
+    await session.defaultSession.clearCache();
+    console.log('✅ Cache cleared — loading latest web assets');
+  } catch (e) {
+    console.warn('Cache clear failed:', e.message);
+  }
+
   createWindow();
   createTray();
+  setupAutoUpdater();
 });
 
 app.on('window-all-closed', () => {

@@ -18,6 +18,14 @@
     "directories": {
       "output": "dist"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Tajbir23",
+        "repo": "quick-meet",
+        "releaseType": "release"
+      }
+    ],
     "files": [
       "main.js",
       "preload.js",

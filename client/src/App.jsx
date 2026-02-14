@@ -12,6 +12,7 @@ import IncomingCall from './components/Call/IncomingCall';
 import IncomingGroupCall from './components/Call/IncomingGroupCall';
 import NetworkStatus from './components/Common/NetworkStatus';
 import Notification from './components/Common/Notification';
+import UpdateNotification from './components/Common/UpdateNotification';
 import FileTransferPanel from './components/FileTransfer/FileTransferPanel';
 import FileTransferIndicator from './components/FileTransfer/FileTransferIndicator';
 import IncomingFileTransfer from './components/FileTransfer/IncomingFileTransfer';
@@ -44,6 +45,7 @@ function App() {
     <div className="h-full bg-dark-900 overflow-hidden">
       <NetworkStatus />
       <Notification />
+      <UpdateNotification />
       {isAuthenticated && <IncomingCall />}
       {isAuthenticated && <IncomingGroupCall />}
       {isAuthenticated && <IncomingFileTransfer />}

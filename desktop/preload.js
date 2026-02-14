@@ -47,4 +47,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
+
+  // ─── Auto-Update ──────────────────────────
+  onUpdateStatus: (callback) => {
+    const handler = (_, data) => callback(data);
+    ipcRenderer.on('update:status', handler);
+    return () => ipcRenderer.removeListener('update:status', handler);
+  },
+  installUpdate: () => ipcRenderer.send('update:install'),
+  checkForUpdate: () => ipcRenderer.invoke('update:check'),
 });
