@@ -33,25 +33,17 @@ const useSocket = () => {
     // ============================================
     useFileTransferStore.getState().initialize();
 
-    // Also retry on socket 'connect' in case first init was too early
-    socket.on('connect', () => {
-      const ftStore = useFileTransferStore.getState();
-      if (!ftStore.initialized) {
-        console.log('[useSocket] Socket connected/reconnected — retrying file transfer init');
-        ftStore.initialize();
-      }
-    });
-
     // ============================================
     // PRESENCE EVENTS
     // ============================================
 
-    socket.on('users:online-list', (users) => {
+    const onOnlineList = (users) => {
       console.log(`👤 Online users list received: ${users.length} users`);
       useChatStore.getState().setOnlineUsers(users);
-    });
+    };
+    socket.on('users:online-list', onOnlineList);
 
-    socket.on('user:online', ({ userId, username, socketId }) => {
+    const onUserOnline = ({ userId, username, socketId }) => {
       console.log(`👤 User online: ${username} (${userId})`);
       useChatStore.getState().addOnlineUser({ userId, socketId });
 
@@ -60,12 +52,14 @@ const useSocket = () => {
       if (!users.some(u => u._id === userId)) {
         useChatStore.getState().fetchUsers();
       }
-    });
+    };
+    socket.on('user:online', onUserOnline);
 
-    socket.on('user:offline', ({ userId }) => {
+    const onUserOffline = ({ userId }) => {
       console.log(`👤 User offline: ${userId}`);
       useChatStore.getState().removeOnlineUser(userId);
-    });
+    };
+    socket.on('user:offline', onUserOffline);
 
     // ============================================
     // CHAT EVENTS
@@ -252,19 +246,29 @@ const useSocket = () => {
     // Query active calls now that we're connected
     socket.emit('group-call:get-active-calls');
 
-    // *** Reconnect handler ***
-    // When socket reconnects, room memberships are lost (new server socket).
-    // Re-join all group rooms and re-query active calls so banners/badges update.
-    socket.on('connect', () => {
-      console.log('🔌 Socket (re)connected — re-joining group rooms & refreshing online users');
+    // *** Unified connect/reconnect handler ***
+    // Handles both initial connection and reconnections.
+    // On reconnect: room memberships are lost (new server socket),
+    // so we re-join groups, refresh online users, and re-query active calls.
+    const onConnect = () => {
+      console.log('🔌 Socket (re)connected — syncing presence & group rooms');
+
+      // File transfer init retry
+      const ftStore = useFileTransferStore.getState();
+      if (!ftStore.initialized) ftStore.initialize();
+
+      // Re-join all group rooms
       const { myGroups } = useGroupStore.getState();
       myGroups.forEach(g => socket.emit('group:join-room', { groupId: g._id }));
       socket.emit('group-call:get-active-calls');
-      // Re-request online users (server also auto-sends on connect, but this is a safety net)
+
+      // Re-request online users (server also auto-sends, this is a safety net)
       socket.emit('users:get-online-list');
+
       // Refresh users list in case new users signed up
       useChatStore.getState().fetchUsers();
-    });
+    };
+    socket.on('connect', onConnect);
 
     // Group call ended — remove banner & dismiss ringing
     socket.on('group-call:ended', ({ groupId }) => {
@@ -393,21 +397,37 @@ const useSocket = () => {
     // ============================================
     if (socket.connected) {
       socket.emit('users:get-online-list');
+      // Also join group rooms immediately
+      const { myGroups } = useGroupStore.getState();
+      myGroups.forEach(g => socket.emit('group:join-room', { groupId: g._id }));
+      socket.emit('group-call:get-active-calls');
     }
 
-    // Heartbeat
+    // Heartbeat + periodic presence sync
     const heartbeatInterval = setInterval(() => {
       if (socket.connected) {
         socket.emit('heartbeat');
       }
     }, 30000);
 
+    // Periodic presence sync — safety net to keep online list accurate
+    // WHY: If a user:online/offline event is missed (network glitch),
+    // this ensures the list self-corrects within 60 seconds.
+    const presenceSyncInterval = setInterval(() => {
+      if (socket.connected) {
+        socket.emit('users:get-online-list');
+      }
+    }, 60000);
+
     // Cleanup on unmount
     return () => {
       clearInterval(heartbeatInterval);
-      socket.off('users:online-list');
-      socket.off('user:online');
-      socket.off('user:offline');
+      clearInterval(presenceSyncInterval);
+      // Use specific handler references for connect to avoid removing socket.js handlers
+      socket.off('connect', onConnect);
+      socket.off('users:online-list', onOnlineList);
+      socket.off('user:online', onUserOnline);
+      socket.off('user:offline', onUserOffline);
       socket.off('message:receive');
       socket.off('message:group:receive');
       socket.off('typing:start');
@@ -439,7 +459,6 @@ const useSocket = () => {
       socket.off('group-call:media-toggled');
       socket.off('group-call:error');
       socket.off('owner:mode-changed');
-      socket.off('connect');
       // Cleanup file transfer
       useFileTransferStore.getState().cleanup();
       initialized.current = false;

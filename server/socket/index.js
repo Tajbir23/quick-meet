@@ -39,7 +39,7 @@ const isMongoConnected = () => mongoose.connection.readyState === 1;
 const onlineUsers = new Map();
 
 const registerSocketHandlers = (io) => {
-  io.on('connection', async (socket) => {
+  io.on('connection', (socket) => {
     const userId = socket.userId;
     const username = socket.username;
     const ip = socket.ip || socket.handshake.address;
@@ -47,7 +47,7 @@ const registerSocketHandlers = (io) => {
     console.log(`🔌 User connected: ${username} (${userId}) — socket: ${socket.id}`);
 
     // ============================================
-    // Track user presence
+    // Track user presence — SYNCHRONOUS (never await before handler registration)
     // ============================================
 
     // Check concurrent session limits
@@ -73,20 +73,17 @@ const registerSocketHandlers = (io) => {
     intrusionDetector.registerSession(userId, socket.id);
     onlineUsers.set(userId, socket.id);
 
-    // Update DB (skip if MongoDB not ready — prevents crash during startup race)
-    if (isMongoConnected()) {
-      try {
-        await User.findByIdAndUpdate(userId, {
-          isOnline: true,
-          socketId: socket.id,
-          lastSeen: new Date(),
-        });
-      } catch (err) {
-        console.warn('Error updating user online status (non-fatal):', err.message);
-      }
-    }
+    // ─── BROADCAST IMMEDIATELY (before any async work) ───
+    // WHY: The old code did `await User.findByIdAndUpdate(...)` BEFORE
+    // registering event handlers and broadcasting. This meant:
+    // 1. All broadcasts were delayed by MongoDB latency (50-500ms)
+    // 2. All event handlers were registered LATE — any client events
+    //    arriving during the await were silently dropped
+    // 3. If MongoDB was slow/disconnected, presence was broken entirely
+    //
+    // FIX: Broadcast + register handlers FIRST (synchronous),
+    //      then do DB update in the background (fire-and-forget).
 
-    // Broadcast to all clients that this user is now online
     socket.broadcast.emit('user:online', {
       userId,
       username,
@@ -101,6 +98,17 @@ const registerSocketHandlers = (io) => {
       }
     }
     socket.emit('users:online-list', onlineUsersList);
+
+    // ─── DB update (fire-and-forget — never block the connection handler) ───
+    if (isMongoConnected()) {
+      User.findByIdAndUpdate(userId, {
+        isOnline: true,
+        socketId: socket.id,
+        lastSeen: new Date(),
+      }).catch(err => {
+        console.warn('DB: online status update failed (non-fatal):', err.message);
+      });
+    }
 
     // ============================================
     // On-demand online users request
@@ -142,7 +150,7 @@ const registerSocketHandlers = (io) => {
     // ============================================
     // Handle disconnect
     // ============================================
-    socket.on('disconnect', async (reason) => {
+    socket.on('disconnect', (reason) => {
       console.log(`🔌 User disconnected: ${username} (${userId}) — socket: ${socket.id} — reason: ${reason}`);
 
       // IMPORTANT: Only process offline logic if THIS socket is still the current one.
@@ -157,23 +165,22 @@ const registerSocketHandlers = (io) => {
       if (isCurrentSocket) {
         onlineUsers.delete(userId);
 
-        if (isMongoConnected()) {
-          try {
-            await User.findByIdAndUpdate(userId, {
-              isOnline: false,
-              socketId: null,
-              lastSeen: new Date(),
-            });
-          } catch (err) {
-            console.warn('Error updating user offline status (non-fatal):', err.message);
-          }
-        }
-
-        // Broadcast offline status ONLY if this was the active socket
+        // Broadcast offline IMMEDIATELY (before DB update)
         socket.broadcast.emit('user:offline', {
           userId,
           username,
         });
+
+        // DB update (fire-and-forget)
+        if (isMongoConnected()) {
+          User.findByIdAndUpdate(userId, {
+            isOnline: false,
+            socketId: null,
+            lastSeen: new Date(),
+          }).catch(err => {
+            console.warn('DB: offline status update failed (non-fatal):', err.message);
+          });
+        }
       } else {
         console.log(`🔌 Stale socket disconnect for ${username} — socket ${socket.id} is NOT current (current: ${onlineUsers.get(userId)}). Skipping offline broadcast & DB update.`);
       }
