@@ -62,6 +62,7 @@ const messageRoutes = require('./routes/message');
 const groupRoutes = require('./routes/group');
 const fileRoutes = require('./routes/file');
 const ownerRoutes = require('./routes/owner');
+const fileTransferRoutes = require('./routes/fileTransfer');
 
 // Socket handlers
 const registerSocketHandlers = require('./socket');
@@ -198,6 +199,7 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/owner', ownerRoutes);
+app.use('/api/transfers', fileTransferRoutes);
 
 // Health check endpoint — sanitized (don't expose internals)
 app.get('/api/health', (req, res) => {

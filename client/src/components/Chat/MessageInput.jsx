@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Send, Paperclip, X } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import FileUpload from '../Common/FileUpload';
+import P2PFileSend from '../FileTransfer/P2PFileSend';
 import toast from 'react-hot-toast';
 
 const MessageInput = () => {
@@ -98,7 +99,10 @@ const MessageInput = () => {
 
       {/* Input area */}
       <div className="flex items-end gap-2">
-        {/* Attachment button */}
+        {/* P2P file transfer button */}
+        <P2PFileSend />
+
+        {/* Attachment button (server upload, small files) */}
         <button
           onClick={() => setShowFileUpload(!showFileUpload)}
           className={`btn-icon flex-shrink-0 ${showFileUpload ? 'text-primary-400 bg-primary-500/10' : 'text-dark-400 hover:text-dark-200'}`}

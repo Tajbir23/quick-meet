@@ -11,6 +11,9 @@ import IncomingCall from './components/Call/IncomingCall';
 import IncomingGroupCall from './components/Call/IncomingGroupCall';
 import NetworkStatus from './components/Common/NetworkStatus';
 import Notification from './components/Common/Notification';
+import FileTransferPanel from './components/FileTransfer/FileTransferPanel';
+import FileTransferIndicator from './components/FileTransfer/FileTransferIndicator';
+import useFileTransferStore from './store/useFileTransferStore';
 
 function App() {
   const { checkAuth, isAuthenticated, isLoading, isOwner, handleForceLogout } = useAuthStore();
@@ -41,6 +44,8 @@ function App() {
       <Notification />
       {isAuthenticated && <IncomingCall />}
       {isAuthenticated && <IncomingGroupCall />}
+      {isAuthenticated && <FileTransferPanel />}
+      {isAuthenticated && <FileTransferIndicator />}
 
       <Routes>
         <Route

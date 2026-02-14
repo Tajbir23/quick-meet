@@ -16,6 +16,7 @@ import useGroupStore from '../store/useGroupStore';
 import useAuthStore from '../store/useAuthStore';
 import webrtcService from '../services/webrtc';
 import { playNotificationSound } from '../utils/helpers';
+import useFileTransferStore from '../store/useFileTransferStore';
 
 const useSocket = () => {
   const initialized = useRef(false);
@@ -26,6 +27,11 @@ const useSocket = () => {
 
     initialized.current = true;
     const user = useAuthStore.getState().user;
+
+    // ============================================
+    // P2P FILE TRANSFER INITIALIZATION
+    // ============================================
+    useFileTransferStore.getState().initialize();
 
     // ============================================
     // PRESENCE EVENTS
@@ -420,6 +426,8 @@ const useSocket = () => {
       socket.off('group-call:error');
       socket.off('owner:mode-changed');
       socket.off('connect');
+      // Cleanup file transfer
+      useFileTransferStore.getState().cleanup();
       initialized.current = false;
     };
   }, []);

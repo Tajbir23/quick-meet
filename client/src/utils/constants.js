@@ -76,9 +76,14 @@ export const SCREEN_CONSTRAINTS = {
 // Group call limits (mesh topology)
 export const MAX_GROUP_CALL_PARTICIPANTS = 6;
 
-// File upload limits
-export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+// File upload limits (server-side upload, NOT P2P)
+export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB for server upload
 export const MAX_FILES = 5;
+
+// P2P file transfer limits  
+export const MAX_P2P_FILE_SIZE = 107374182400; // 100GB
+export const P2P_CHUNK_SIZE_DESKTOP = 65536;   // 64KB per chunk
+export const P2P_CHUNK_SIZE_MOBILE = 16384;    // 16KB per chunk
 
 // Allowed file types for display
 export const FILE_TYPE_ICONS = {
@@ -143,4 +148,23 @@ export const SOCKET_EVENTS = {
   SECURITY_FORCE_LOGOUT: 'security:force-logout',
   SECURITY_TOKEN_EXPIRED: 'security:token-expired',
   SECURITY_NONCE: 'security:nonce',
+
+  // P2P File Transfer events
+  FILE_TRANSFER_REQUEST: 'file-transfer:request',
+  FILE_TRANSFER_INCOMING: 'file-transfer:incoming',
+  FILE_TRANSFER_ACCEPT: 'file-transfer:accept',
+  FILE_TRANSFER_ACCEPTED: 'file-transfer:accepted',
+  FILE_TRANSFER_REJECT: 'file-transfer:reject',
+  FILE_TRANSFER_REJECTED: 'file-transfer:rejected',
+  FILE_TRANSFER_CANCEL: 'file-transfer:cancel',
+  FILE_TRANSFER_CANCELLED: 'file-transfer:cancelled',
+  FILE_TRANSFER_PROGRESS: 'file-transfer:progress',
+  FILE_TRANSFER_COMPLETE: 'file-transfer:complete',
+  FILE_TRANSFER_COMPLETED: 'file-transfer:completed',
+  FILE_TRANSFER_PAUSE: 'file-transfer:pause',
+  FILE_TRANSFER_PAUSED: 'file-transfer:paused',
+  FILE_TRANSFER_RESUME: 'file-transfer:resume',
+  FILE_TRANSFER_OFFER: 'file-transfer:offer',
+  FILE_TRANSFER_ANSWER: 'file-transfer:answer',
+  FILE_TRANSFER_ICE: 'file-transfer:ice-candidate',
 };

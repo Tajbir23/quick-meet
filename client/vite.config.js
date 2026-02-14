@@ -19,5 +19,18 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    // Increase chunk size warning limit for large apps
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          socket: ['socket.io-client'],
+          ui: ['lucide-react', 'react-hot-toast'],
+        },
+      },
+    },
   },
+  // Base path: '/' for web/Electron, might need adjustment for Capacitor
+  base: './',
 });

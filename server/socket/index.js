@@ -25,6 +25,7 @@ const setupPresenceHandlers = require('./presence');
 const setupChatHandlers = require('./chat');
 const setupSignalingHandlers = require('./signaling');
 const setupGroupCallHandlers = require('./groupCall');
+const setupFileTransferHandlers = require('./fileTransfer');
 const socketGuard = require('../security/SocketGuard');
 const securityLogger = require('../security/SecurityEventLogger');
 const { SEVERITY } = require('../security/SecurityEventLogger');
@@ -118,6 +119,7 @@ const registerSocketHandlers = (io) => {
     setupChatHandlers(io, socket, onlineUsers);
     setupSignalingHandlers(io, socket, onlineUsers);
     setupGroupCallHandlers(io, socket, onlineUsers);
+    setupFileTransferHandlers(io, socket, onlineUsers);
 
     // ============================================
     // Security: Request nonce for anti-replay
