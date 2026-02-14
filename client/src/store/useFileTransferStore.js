@@ -13,6 +13,7 @@
 
 import { create } from 'zustand';
 import p2pFileTransfer from '../services/p2pFileTransfer';
+import useAuthStore from './useAuthStore';
 
 const useFileTransferStore = create((set, get) => ({
   // Active transfers: { [transferId]: { ...transferInfo } }
@@ -30,6 +31,12 @@ const useFileTransferStore = create((set, get) => ({
    */
   initialize: () => {
     if (get().initialized) return;
+
+    // Set current user ID so pending-list can distinguish sender vs receiver
+    const user = useAuthStore.getState().user;
+    if (user?._id) {
+      p2pFileTransfer.setCurrentUserId(user._id);
+    }
 
     p2pFileTransfer.bindSocketListeners();
 

@@ -286,10 +286,22 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
    */
   socket.on('file-transfer:check-pending', async () => {
     try {
-      // Find all active transfers involving this user
+      // Auto-expire stale pending/paused transfers older than 24 hours
+      const staleThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      await FileTransfer.updateMany(
+        {
+          status: { $in: ['pending', 'paused'] },
+          updatedAt: { $lt: staleThreshold },
+        },
+        { $set: { status: 'expired', statusReason: 'Auto-expired after 24 hours' } }
+      );
+
+      // Find ONLY transfers where this user is the RECEIVER and status is resumable
+      // Sender-side transfers cannot be resumed from client (file no longer in memory)
       const transfers = await FileTransfer.find({
-        $or: [{ sender: socket.userId }, { receiver: socket.userId }],
-        status: { $in: ['pending', 'accepted', 'transferring', 'paused'] },
+        receiver: socket.userId,
+        status: { $in: ['pending', 'paused'] },
+        updatedAt: { $gte: staleThreshold },
       })
         .populate('sender', 'username avatar')
         .populate('receiver', 'username avatar')
@@ -297,6 +309,20 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
 
       if (transfers.length > 0) {
         socket.emit('file-transfer:pending-list', { transfers });
+      }
+
+      // Auto-cancel any sender-side transfers that are stuck
+      // (sender restarted app — file is no longer in memory)
+      const senderStuck = await FileTransfer.updateMany(
+        {
+          sender: socket.userId,
+          status: { $in: ['accepted', 'transferring'] },
+          updatedAt: { $lt: staleThreshold },
+        },
+        { $set: { status: 'failed', statusReason: 'Sender reconnected without file — auto-cancelled' } }
+      );
+      if (senderStuck.modifiedCount > 0) {
+        console.log(`📁 Auto-cancelled ${senderStuck.modifiedCount} stale sender transfers for ${socket.username}`);
       }
     } catch (err) {
       console.error('file-transfer:check-pending error:', err);
@@ -320,29 +346,48 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
         return;
       }
 
-      transfer.status = 'accepted'; // Reset to accepted so DataChannel re-setup can happen
+      const isSender = transfer.sender.toString() === socket.userId;
+      const isReceiver = transfer.receiver.toString() === socket.userId;
+
+      // ONLY the receiver should emit resume. The sender needs the file
+      // in memory — if sender app restarted, they can't resume.
+      if (isSender) {
+        // Sender is trying to resume — check if they actually have a live
+        // session. Since we can't verify client state from server, just
+        // send resume-info back. Do NOT send resume-request to receiver
+        // (that would cause the accept-loop).
+        socket.emit('file-transfer:resume-info', {
+          transferId,
+          resumeFrom: transfer.lastReceivedChunk + 1,
+          totalChunks: transfer.totalChunks,
+          fileName: transfer.fileName,
+          fileSize: transfer.fileSize,
+          chunkSize: transfer.chunkSize,
+          peerOnline: !!onlineUsers.get(transfer.receiver.toString()),
+          role: 'sender',
+        });
+        console.log(`📁 File transfer resume (sender): ${transferId} from chunk ${transfer.lastReceivedChunk + 1}`);
+        return;
+      }
+
+      // Receiver is resuming
+      transfer.status = 'accepted';
       transfer.pausedAt = null;
       await transfer.save();
 
-      // Determine the other party
-      const isSender = transfer.sender.toString() === socket.userId;
-      const otherUserId = isSender ? transfer.receiver.toString() : transfer.sender.toString();
-      const otherSocketId = onlineUsers.get(otherUserId);
+      const senderSocketId = onlineUsers.get(transfer.sender.toString());
 
-      if (otherSocketId) {
-        // Notify other party about resume
-        io.to(otherSocketId).emit('file-transfer:resume-request', {
+      if (senderSocketId) {
+        // Tell the SENDER that the receiver is ready to resume
+        // Use file-transfer:accepted (NOT resume-request) to trigger
+        // sender-side DataChannel setup without showing a new popup
+        io.to(senderSocketId).emit('file-transfer:accepted', {
           transferId,
-          resumeFrom: transfer.lastReceivedChunk + 1,
-          requestedBy: socket.userId,
-          requestedByName: socket.username,
-          fileName: transfer.fileName,
-          fileSize: transfer.fileSize,
-          totalChunks: transfer.totalChunks,
-          chunkSize: transfer.chunkSize,
+          receiverId: socket.userId,
+          receiverName: socket.username,
+          lastReceivedChunk: transfer.lastReceivedChunk,
         });
 
-        // Tell the requester resume info
         socket.emit('file-transfer:resume-info', {
           transferId,
           resumeFrom: transfer.lastReceivedChunk + 1,
@@ -351,9 +396,9 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
           fileSize: transfer.fileSize,
           chunkSize: transfer.chunkSize,
           peerOnline: true,
+          role: 'receiver',
         });
       } else {
-        // Peer is offline — mark as paused
         transfer.status = 'paused';
         transfer.pausedAt = new Date();
         await transfer.save();
@@ -362,11 +407,12 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
           transferId,
           resumeFrom: transfer.lastReceivedChunk + 1,
           peerOnline: false,
-          message: 'Peer is offline. Transfer will resume when they reconnect.',
+          role: 'receiver',
+          message: 'Sender is offline. Transfer will resume when they reconnect.',
         });
       }
 
-      console.log(`📁 File transfer resume: ${transferId} from chunk ${transfer.lastReceivedChunk + 1}`);
+      console.log(`📁 File transfer resume (receiver): ${transferId} from chunk ${transfer.lastReceivedChunk + 1}`);
     } catch (err) {
       console.error('file-transfer:resume error:', err);
     }

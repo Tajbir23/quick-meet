@@ -204,6 +204,9 @@ class P2PFileTransferService {
     // Active transfer sessions: transferId → TransferSession
     this.sessions = new Map();
     
+    // Current user ID — needed to distinguish sender/receiver in pending-list
+    this.currentUserId = null;
+
     // Global callbacks
     this.onTransferUpdate = null;     // (transferId, session) => {}
     this.onIncomingTransfer = null;   // (transferData) => {}
@@ -212,6 +215,13 @@ class P2PFileTransferService {
     
     // Socket listeners bound flag
     this._socketListenersBound = false;
+  }
+
+  /**
+   * Set the current user ID so pending-list can distinguish sender vs receiver
+   */
+  setCurrentUserId(userId) {
+    this.currentUserId = userId;
   }
 
   /**
@@ -311,25 +321,44 @@ class P2PFileTransferService {
     });
 
     // Pending transfers list (on reconnect)
+    // Server now ONLY returns transfers where current user is the RECEIVER
     socket.on('file-transfer:pending-list', (data) => {
       if (data.transfers && data.transfers.length > 0) {
         data.transfers.forEach(t => {
-          if (!this.sessions.has(t.transferId)) {
-            if (this.onIncomingTransfer) {
-              this.onIncomingTransfer({
-                ...t,
-                isResume: true,
-                senderId: t.sender._id || t.sender,
-                senderName: t.sender.username || 'Unknown',
-              });
-            }
+          // Skip if we already have a session for this transfer
+          if (this.sessions.has(t.transferId)) return;
+
+          // Double-check: only show if current user is the receiver
+          const receiverId = t.receiver?._id || t.receiver;
+          const senderId = t.sender?._id || t.sender;
+          if (this.currentUserId && receiverId !== this.currentUserId && senderId === this.currentUserId) {
+            // We are the sender — cannot resume (file not in memory after restart)
+            console.log(`[P2P] Skipping sender-side pending transfer ${t.transferId} — file not in memory`);
+            // Auto-cancel on server
+            const sock = getSocket();
+            if (sock) sock.emit('file-transfer:cancel', { transferId: t.transferId });
+            return;
+          }
+
+          if (this.onIncomingTransfer) {
+            this.onIncomingTransfer({
+              ...t,
+              isResume: true,
+              senderId: senderId,
+              senderName: t.sender?.username || 'Unknown',
+            });
           }
         });
       }
     });
 
-    // Resume request from peer
+    // Resume request from peer — guard against duplicate popups
     socket.on('file-transfer:resume-request', (data) => {
+      // Don't show if we already have a session for this transfer
+      if (this.sessions.has(data.transferId)) {
+        console.log(`[P2P] Ignoring resume-request for ${data.transferId} — session already exists`);
+        return;
+      }
       if (this.onIncomingTransfer) {
         this.onIncomingTransfer({
           ...data,
