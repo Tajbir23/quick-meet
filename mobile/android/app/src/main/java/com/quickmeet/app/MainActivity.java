@@ -26,6 +26,11 @@ import java.util.Map;
  * - WebRTC camera/microphone permission grants at the WebView level
  * - Runtime permission requests for Android 6.0+
  * - Notification permission for Android 13+
+ * 
+ * IMPORTANT: We do NOT replace the WebChromeClient. Capacitor's built-in
+ * BridgeWebChromeClient handles file chooser (input[type=file]) and other
+ * critical WebView behaviors. Replacing it breaks file selection on mobile.
+ * Instead, we configure WebView settings and let Capacitor handle the rest.
  */
 public class MainActivity extends BridgeActivity {
 
@@ -59,7 +64,13 @@ public class MainActivity extends BridgeActivity {
     public void onStart() {
         super.onStart();
 
-        // Configure WebView for WebRTC
+        // Configure WebView settings for WebRTC — but do NOT replace the WebChromeClient!
+        // Capacitor's BridgeWebChromeClient handles:
+        //   - onShowFileChooser (input[type=file])
+        //   - onPermissionRequest (camera/mic for WebRTC)
+        //   - onGeolocationPermissionsShowPrompt
+        //   - Console messages, etc.
+        // Replacing it with a plain WebChromeClient breaks all of those.
         WebView webView = getBridge().getWebView();
         if (webView != null) {
             webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
@@ -67,15 +78,7 @@ public class MainActivity extends BridgeActivity {
             webView.getSettings().setDomStorageEnabled(true);
             webView.getSettings().setDatabaseEnabled(true);
             webView.getSettings().setAllowFileAccess(true);
-            
-            webView.setWebChromeClient(new WebChromeClient() {
-                @Override
-                public void onPermissionRequest(PermissionRequest request) {
-                    // Auto-grant WebRTC permissions (camera, mic)
-                    // Android runtime permissions are handled separately
-                    runOnUiThread(() -> request.grant(request.getResources()));
-                }
-            });
+            webView.getSettings().setAllowContentAccess(true);
         }
     }
 
