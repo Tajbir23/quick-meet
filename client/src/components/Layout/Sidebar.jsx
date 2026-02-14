@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   MessageCircle, Users, Search, LogOut, Plus, Hash, X,
-  Shield, Eye, EyeOff, Settings
+  Shield, Eye, EyeOff, Settings, HardDrive
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../../store/useAuthStore';
@@ -55,6 +55,7 @@ const Sidebar = () => {
     { id: 'chats', icon: MessageCircle, label: 'Chats' },
     { id: 'groups', icon: Hash, label: 'Groups' },
     { id: 'users', icon: Users, label: 'Users' },
+    { id: 'transfer', icon: HardDrive, label: 'Transfer' },
   ];
 
   return (
@@ -150,7 +151,13 @@ const Sidebar = () => {
         {tabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+              if (tab.id === 'transfer') {
+                navigate('/transfer');
+                return;
+              }
+              setActiveTab(tab.id);
+            }}
             className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-xs font-medium transition-all relative
               ${activeTab === tab.id
                 ? 'text-primary-400'

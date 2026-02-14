@@ -81,7 +81,8 @@ export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB for server upload
 export const MAX_FILES = 5;
 
 // P2P file transfer limits  
-export const MAX_P2P_FILE_SIZE = 107374182400; // 100GB
+export const MAX_P2P_FILE_SIZE = 107374182400; // 100GB (Electron + Chrome/Edge FSAA)
+export const MAX_P2P_FILE_SIZE_BROWSER_MEMORY = 2147483648; // 2GB (Firefox/Safari — memory only)
 export const P2P_CHUNK_SIZE_DESKTOP = 65536;   // 64KB per chunk
 export const P2P_CHUNK_SIZE_MOBILE = 16384;    // 16KB per chunk
 

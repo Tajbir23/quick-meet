@@ -1,12 +1,15 @@
+import { useRef } from 'react';
 import {
-  Phone, Video, ArrowLeft, Users, Info, Shield
+  Phone, Video, ArrowLeft, Users, Info, Shield, FolderUp
 } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useCallStore from '../../store/useCallStore';
 import useGroupStore from '../../store/useGroupStore';
 import useAuthStore from '../../store/useAuthStore';
+import useFileTransferStore from '../../store/useFileTransferStore';
 import { getInitials, stringToColor } from '../../utils/helpers';
-import { SERVER_URL } from '../../utils/constants';
+import { SERVER_URL, MAX_P2P_FILE_SIZE, MAX_P2P_FILE_SIZE_BROWSER_MEMORY } from '../../utils/constants';
+import { canReceiveLargeFiles, getPlatformCapability } from '../../services/p2pFileTransfer';
 import toast from 'react-hot-toast';
 
 const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
@@ -17,6 +20,8 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
   const { startCall, startGroupCall, callStatus } = useCallStore();
   const { activeGroupCalls } = useGroupStore();
   const user = useAuthStore(s => s.user);
+  const sendFile = useFileTransferStore(s => s.sendFile);
+  const fileInputRef = useRef(null);
 
   if (!activeChat) {
     return (
@@ -65,6 +70,50 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
       }
     } catch (err) {
       toast.error(err.message || 'Failed to start call');
+    }
+  };
+
+  const handleP2PFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    if (!activeChat || activeChat.type !== 'user') {
+      toast.error('P2P file transfer only works in 1-to-1 chats');
+      return;
+    }
+
+    // Enforce file size limit based on platform
+    // Note: This is the SENDER side — file.size is what the receiver must handle
+    // The receiver's browser may not support large files, but we can at least
+    // warn the sender about our own platform limits and general limits
+    const capability = getPlatformCapability();
+    const maxSize = canReceiveLargeFiles() ? MAX_P2P_FILE_SIZE : MAX_P2P_FILE_SIZE_BROWSER_MEMORY;
+
+    if (file.size > maxSize) {
+      if (capability === 'browser-memory') {
+        toast.error(`Max file size: 2GB on this browser. Use Chrome, Edge, or Desktop App for larger files.`, { duration: 5000 });
+      } else {
+        toast.error(`Max file size: ${(maxSize / 1073741824).toFixed(0)}GB`, { duration: 4000 });
+      }
+      return;
+    }
+
+    // Warn about large files (>10GB)
+    if (file.size > 10 * 1024 * 1024 * 1024) {
+      toast(`Large file: ${(file.size / (1024 * 1024 * 1024)).toFixed(1)}GB — this may take a while`, { icon: '⚠️', duration: 5000 });
+    }
+
+    // Info about browser memory mode for >500MB files
+    if (capability === 'browser-memory' && file.size > 500 * 1024 * 1024) {
+      toast('Tip: Use Chrome/Edge or Desktop App for better large file performance', { icon: '💡', duration: 4000 });
+    }
+
+    try {
+      await sendFile(file, activeChat.id);
+      toast.success(`Sending "${file.name}" via P2P`, { duration: 3000 });
+    } catch (err) {
+      toast.error('Failed to start P2P transfer');
     }
   };
 
@@ -123,8 +172,29 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
         </div>
       </div>
 
-      {/* Call actions — clearly visible */}
+      {/* Actions — call + file share */}
       <div className="flex items-center gap-1 flex-shrink-0">
+        {/* P2P File Share — only for 1-to-1 chats */}
+        {!isGroup && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              onChange={handleP2PFile}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="btn-icon text-white hover:text-emerald-400 hover:bg-emerald-500/10 relative group"
+              title="Send file via P2P (up to 100GB)"
+            >
+              <FolderUp size={20} />
+              <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-dark-700 text-white text-[9px] px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-dark-600 z-50">
+                Share File (P2P)
+              </span>
+            </button>
+          </>
+        )}
         <button
           onClick={handleAudioCall}
           className="btn-icon text-white hover:text-primary-400 hover:bg-primary-500/10"

@@ -45,6 +45,56 @@ const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/
   navigator.userAgent
 );
 
+// ── Platform capability detection ──────────────────────────────────────
+const isElectron = !!window.electronAPI?.isElectron;
+
+/**
+ * Check if the browser supports File System Access API (showSaveFilePicker)
+ * Available in Chrome 86+, Edge 86+, Opera 72+
+ * NOT available in Firefox, Safari, or mobile browsers
+ */
+const hasFSAccessAPI = (() => {
+  try {
+    return typeof window.showSaveFilePicker === 'function';
+  } catch {
+    return false;
+  }
+})();
+
+/**
+ * Max file size for browsers that must use memory accumulation (no streaming)
+ * Firefox, Safari, older browsers — hard limit 2GB
+ */
+const MAX_BROWSER_MEMORY_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
+
+/**
+ * Determine if the current platform can receive large files (>2GB)
+ * - Electron: yes (Node.js fs streaming)
+ * - Chrome/Edge with FSAA: yes (disk streaming via showSaveFilePicker)
+ * - Others: NO — limited to 2GB in memory
+ */
+export function canReceiveLargeFiles() {
+  return isElectron || hasFSAccessAPI;
+}
+
+/**
+ * Get the maximum receivable file size on this platform
+ */
+export function getMaxReceiveSize() {
+  if (isElectron) return Infinity; // No limit — streams to disk
+  if (hasFSAccessAPI) return Infinity; // Chrome/Edge — streams to disk
+  return MAX_BROWSER_MEMORY_FILE_SIZE; // 2GB for memory-only browsers
+}
+
+/**
+ * Get a human-readable platform capability name
+ */
+export function getPlatformCapability() {
+  if (isElectron) return 'desktop-stream';
+  if (hasFSAccessAPI) return 'browser-fsaa';
+  return 'browser-memory';
+}
+
 // Configuration
 const CONFIG = {
   // Chunk size: smaller on mobile to prevent memory pressure
@@ -127,6 +177,15 @@ class TransferSession {
     if (this.writer) {
       try { this.writer.close(); } catch (e) {}
       this.writer = null;
+    }
+    // Cleanup Electron file stream if active
+    if (this._useElectronStream && this._electronStreamId) {
+      window.electronAPI?.abortFileStream(this._electronStreamId).catch(() => {});
+    }
+    // Cleanup browser FSAA stream if active
+    if (this._useFSAAStream && this._fsaaWriter) {
+      try { this._fsaaWriter.close(); } catch (e) {}
+      this._fsaaWriter = null;
     }
     this.file = null;
     this.receivedChunks = [];
@@ -769,33 +828,104 @@ class P2PFileTransferService {
 
   /**
    * Initialize progressive file writer
-   * Uses StreamSaver API if available, otherwise accumulates in memory
+   * 
+   * THREE PATHS (in priority order):
+   * 1. Electron: Node.js fs.createWriteStream → zero memory (50-100GB ok)
+   * 2. Browser FSAA: showSaveFilePicker → WritableStream → zero memory (Chrome/Edge)
+   * 3. Browser Memory: accumulate chunks in RAM → HARD LIMIT 2GB (Firefox/Safari)
    */
-  _initReceiveWriter(session) {
-    // Try to use Streams API for zero-memory file writing
-    // Works in modern browsers and Electron
-    if (typeof window !== 'undefined' && window.WritableStream) {
+  async _initReceiveWriter(session) {
+    session._receivedCount = 0;
+    session._totalBytesReceived = 0;
+    session._useElectronStream = false;
+    session._useFSAAStream = false;
+
+    // ── PATH 1: Electron native file streaming ──────────────────────────
+    if (isElectron) {
       try {
-        // We'll collect chunks and trigger download on complete
-        session.receivedChunks = new Array(session.totalChunks);
-        session._receivedCount = 0;
-        session._totalBytesReceived = 0;
-        return;
+        const result = await window.electronAPI.showSaveDialog({
+          fileName: session.fileName,
+          fileSize: session.fileSize,
+        });
+
+        if (!result.canceled && result.filePath) {
+          const streamId = session.transferId;
+          const streamResult = await window.electronAPI.createFileStream(streamId, result.filePath);
+          if (streamResult.success) {
+            session._useElectronStream = true;
+            session._electronStreamId = streamId;
+            session._electronFilePath = result.filePath;
+            session.receivedChunks = []; // Not used in streaming mode
+            console.log(`[P2P] Electron stream created: ${result.filePath}`);
+            return;
+          }
+        }
+        // User cancelled save dialog — cancel transfer
+        if (result.canceled) {
+          session.status = 'cancelled';
+          this._notifyUpdate(session.transferId, session);
+          return;
+        }
       } catch (e) {
-        console.warn('WritableStream init failed, using array buffer:', e);
+        console.warn('[P2P] Electron stream init failed, falling back:', e);
       }
     }
 
-    // Fallback: array of chunks
+    // ── PATH 2: Browser File System Access API (Chrome/Edge) ────────────
+    if (hasFSAccessAPI) {
+      try {
+        // Build file type filter from extension
+        const ext = session.fileName.split('.').pop()?.toLowerCase() || '';
+        const mimeType = session.fileMimeType || 'application/octet-stream';
+
+        const fileHandle = await window.showSaveFilePicker({
+          suggestedName: session.fileName,
+          types: [{
+            description: 'File',
+            accept: { [mimeType]: ext ? [`.${ext}`] : [] },
+          }],
+        });
+
+        const writable = await fileHandle.createWritable();
+        session._useFSAAStream = true;
+        session._fsaaWriter = writable;
+        session.receivedChunks = []; // Not used in streaming mode
+        console.log(`[P2P] Browser FSAA stream created for: ${session.fileName}`);
+        return;
+      } catch (e) {
+        // User cancelled picker (DOMException: AbortError) → cancel transfer
+        if (e?.name === 'AbortError') {
+          session.status = 'cancelled';
+          this._notifyUpdate(session.transferId, session);
+          return;
+        }
+        console.warn('[P2P] FSAA stream init failed, falling back to memory:', e);
+      }
+    }
+
+    // ── PATH 3: Browser Memory fallback (Firefox/Safari) ────────────────
+    // SAFETY: Reject files > 2GB for memory-only browsers
+    if (session.fileSize > MAX_BROWSER_MEMORY_FILE_SIZE) {
+      console.error(`[P2P] File ${session.fileName} (${(session.fileSize / 1073741824).toFixed(1)}GB) exceeds 2GB browser memory limit`);
+      session.status = 'failed';
+      session._failReason = 'browser_size_limit';
+      this._notifyUpdate(session.transferId, session);
+      if (this.onTransferError) {
+        this.onTransferError(session.transferId, new Error(
+          `File too large for this browser (${(session.fileSize / 1073741824).toFixed(1)}GB). Max 2GB without Chrome/Edge. Use the desktop app for larger files.`
+        ));
+      }
+      return;
+    }
+
     session.receivedChunks = new Array(session.totalChunks);
-    session._receivedCount = 0;
-    session._totalBytesReceived = 0;
+    console.log(`[P2P] Browser memory mode for: ${session.fileName} (${(session.fileSize / 1048576).toFixed(0)}MB)`);
   }
 
   /**
    * Handle a received chunk
    */
-  _handleReceivedChunk(session, data) {
+  async _handleReceivedChunk(session, data) {
     if (!(data instanceof ArrayBuffer)) return;
 
     // Check for completion marker
@@ -812,30 +942,49 @@ class P2PFileTransferService {
     const chunkIndex = new DataView(data, 0, 4).getUint32(0, true);
     const chunkData = data.slice(4);
 
-    // Store chunk
-    if (chunkIndex < session.totalChunks && !session.receivedChunks[chunkIndex]) {
-      session.receivedChunks[chunkIndex] = chunkData;
-      session._receivedCount = (session._receivedCount || 0) + 1;
-      session._totalBytesReceived = (session._totalBytesReceived || 0) + chunkData.byteLength;
-      session.currentChunk = chunkIndex + 1;
-      session.bytesTransferred = session._totalBytesReceived;
+    session._receivedCount = (session._receivedCount || 0) + 1;
+    session._totalBytesReceived = (session._totalBytesReceived || 0) + chunkData.byteLength;
+    session.currentChunk = chunkIndex + 1;
+    session.bytesTransferred = session._totalBytesReceived;
 
-      // Calculate speed
-      this._calculateSpeed(session);
-
-      // Report progress periodically
-      if (session._receivedCount % CONFIG.PROGRESS_REPORT_INTERVAL === 0) {
-        this._reportProgressToServer(session);
+    // ── Electron: write chunk directly to disk (zero memory) ──────────
+    if (session._useElectronStream) {
+      window.electronAPI.writeFileChunk(session._electronStreamId, chunkData)
+        .catch(err => console.error('[P2P] Electron write error:', err));
+    }
+    // ── Browser FSAA: write chunk directly to disk via WritableStream ──
+    else if (session._useFSAAStream && session._fsaaWriter) {
+      try {
+        // WritableStream.write() handles backpressure automatically
+        await session._fsaaWriter.write(new Uint8Array(chunkData));
+      } catch (err) {
+        console.error('[P2P] FSAA write error:', err);
+        session.status = 'failed';
+        this._notifyUpdate(session.transferId, session);
+        return;
+      }
+    }
+    // ── Browser Memory: accumulate in array (<=2GB only) ─────────────
+    else {
+      if (chunkIndex < session.totalChunks && !session.receivedChunks[chunkIndex]) {
+        session.receivedChunks[chunkIndex] = chunkData;
       }
 
-      // For very large files, periodically flush to reduce memory pressure
-      // Flush every 5000 chunks (~320MB at 64KB chunks)
+      // For files approaching limit, periodically flush to Blob
       if (session._receivedCount % 5000 === 0) {
         this._partialFlush(session);
       }
-
-      this._notifyUpdate(session.transferId, session);
     }
+
+    // Calculate speed
+    this._calculateSpeed(session);
+
+    // Report progress periodically
+    if (session._receivedCount % CONFIG.PROGRESS_REPORT_INTERVAL === 0) {
+      this._reportProgressToServer(session);
+    }
+
+    this._notifyUpdate(session.transferId, session);
   }
 
   /**
@@ -866,34 +1015,50 @@ class P2PFileTransferService {
   }
 
   /**
-   * Finalize received file — combine chunks and trigger download
+   * Finalize received file — Electron: close stream, Browser: combine chunks and download
    */
   async _finalizeReceive(session) {
     try {
       session.status = 'completed';
 
-      // Build final blob from flushed blobs + remaining chunks
-      const parts = [];
-      
-      // Add any flushed blobs first (in order)
-      if (session._flushedBlobs && session._flushedBlobs.length > 0) {
-        parts.push(...session._flushedBlobs);
+      // ── Electron: close the write stream — file is already on disk!
+      if (session._useElectronStream) {
+        const result = await window.electronAPI.closeFileStream(session._electronStreamId);
+        console.log(`[P2P] File saved: ${result.filePath} (${result.bytesWritten} bytes)`);
+        
+        // Show native notification
+        window.electronAPI.showNotification({
+          title: 'File received!',
+          body: `${session.fileName} saved successfully.`,
+        });
       }
-
-      // Add remaining chunks
-      const startIdx = session._lastFlushedIndex || 0;
-      for (let i = startIdx; i < session.totalChunks; i++) {
-        if (session.receivedChunks[i]) {
-          parts.push(session.receivedChunks[i]);
+      // ── Browser FSAA: close writable stream — file is already on disk!
+      else if (session._useFSAAStream && session._fsaaWriter) {
+        try {
+          await session._fsaaWriter.close();
+          console.log(`[P2P] FSAA file saved: ${session.fileName}`);
+        } catch (err) {
+          console.error('[P2P] FSAA close error:', err);
         }
+        session._fsaaWriter = null;
       }
-
-      const fileBlob = new Blob(parts, { 
-        type: session.fileMimeType || 'application/octet-stream' 
-      });
-
-      // Trigger download
-      this._downloadBlob(fileBlob, session.fileName);
+      // ── Browser Memory: build blob and trigger download
+      else {
+        const parts = [];
+        if (session._flushedBlobs && session._flushedBlobs.length > 0) {
+          parts.push(...session._flushedBlobs);
+        }
+        const startIdx = session._lastFlushedIndex || 0;
+        for (let i = startIdx; i < session.totalChunks; i++) {
+          if (session.receivedChunks[i]) {
+            parts.push(session.receivedChunks[i]);
+          }
+        }
+        const fileBlob = new Blob(parts, {
+          type: session.fileMimeType || 'application/octet-stream'
+        });
+        this._downloadBlob(fileBlob, session.fileName);
+      }
 
       // Report complete to server
       const socket = getSocket();

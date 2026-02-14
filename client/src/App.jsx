@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import HomePage from './pages/HomePage';
 import OwnerDashboard from './pages/OwnerDashboard';
+import FileTransferPage from './pages/FileTransferPage';
 import ProtectedRoute from './components/Auth/ProtectedRoute';
 import IncomingCall from './components/Call/IncomingCall';
 import IncomingGroupCall from './components/Call/IncomingGroupCall';
@@ -13,6 +14,7 @@ import NetworkStatus from './components/Common/NetworkStatus';
 import Notification from './components/Common/Notification';
 import FileTransferPanel from './components/FileTransfer/FileTransferPanel';
 import FileTransferIndicator from './components/FileTransfer/FileTransferIndicator';
+import IncomingFileTransfer from './components/FileTransfer/IncomingFileTransfer';
 import useFileTransferStore from './store/useFileTransferStore';
 
 function App() {
@@ -44,6 +46,7 @@ function App() {
       <Notification />
       {isAuthenticated && <IncomingCall />}
       {isAuthenticated && <IncomingGroupCall />}
+      {isAuthenticated && <IncomingFileTransfer />}
       {isAuthenticated && <FileTransferPanel />}
       {isAuthenticated && <FileTransferIndicator />}
 
@@ -61,6 +64,14 @@ function App() {
           element={
             <ProtectedRoute>
               {isOwner ? <OwnerDashboard /> : <Navigate to="/" replace />}
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/transfer"
+          element={
+            <ProtectedRoute>
+              <FileTransferPage />
             </ProtectedRoute>
           }
         />

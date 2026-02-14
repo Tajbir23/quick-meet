@@ -180,51 +180,10 @@ const TransferItem = ({ transfer }) => {
 };
 
 /**
- * Incoming transfer request notification
- */
-const IncomingRequest = ({ request }) => {
-  const { acceptTransfer, rejectTransfer } = useFileTransferStore();
-
-  return (
-    <div className="bg-dark-700/80 rounded-xl p-3 border border-primary-500/30 animate-slide-down">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-          <Download size={20} className="text-blue-400" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm text-white font-medium">
-            {request.isResume ? 'Resume transfer' : 'Incoming file'}
-          </p>
-          <p className="text-xs text-dark-400 truncate">
-            <span className="text-primary-400">{request.senderName}</span> wants to send{' '}
-            <span className="text-white">{request.fileName}</span>{' '}
-            ({formatSize(request.fileSize)})
-          </p>
-        </div>
-      </div>
-      <div className="flex gap-2 mt-3">
-        <button
-          onClick={() => acceptTransfer(request)}
-          className="flex-1 py-2 bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium rounded-lg transition-colors"
-        >
-          Accept
-        </button>
-        <button
-          onClick={() => rejectTransfer(request.transferId)}
-          className="flex-1 py-2 bg-dark-600 hover:bg-dark-500 text-dark-200 text-xs font-medium rounded-lg transition-colors"
-        >
-          Reject
-        </button>
-      </div>
-    </div>
-  );
-};
-
-/**
  * Main File Transfer Panel
  */
 const FileTransferPanel = () => {
-  const { transfers, incomingRequests, showPanel, setShowPanel, clearCompleted } = useFileTransferStore();
+  const { transfers, showPanel, setShowPanel, clearCompleted } = useFileTransferStore();
 
   const transferList = Object.values(transfers);
   const activeCount = transferList.filter(t =>
@@ -272,11 +231,6 @@ const FileTransferPanel = () => {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2 overscroll-contain">
-        {/* Incoming requests */}
-        {incomingRequests.map((req) => (
-          <IncomingRequest key={req.transferId} request={req} />
-        ))}
-
         {/* Active transfers */}
         {transferList.length > 0 ? (
           transferList
@@ -288,13 +242,13 @@ const FileTransferPanel = () => {
             .map((transfer) => (
               <TransferItem key={transfer.transferId} transfer={transfer} />
             ))
-        ) : incomingRequests.length === 0 ? (
+        ) : (
           <div className="py-8 text-center">
             <div className="text-3xl mb-2">📁</div>
             <p className="text-dark-500 text-xs">No active transfers</p>
             <p className="text-dark-600 text-[10px] mt-1">Files are sent directly P2P — never through the server</p>
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );
