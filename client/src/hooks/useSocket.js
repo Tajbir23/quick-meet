@@ -33,6 +33,15 @@ const useSocket = () => {
     // ============================================
     useFileTransferStore.getState().initialize();
 
+    // Also retry on socket 'connect' in case first init was too early
+    socket.on('connect', () => {
+      const ftStore = useFileTransferStore.getState();
+      if (!ftStore.initialized) {
+        console.log('[useSocket] Socket connected/reconnected — retrying file transfer init');
+        ftStore.initialize();
+      }
+    });
+
     // ============================================
     // PRESENCE EVENTS
     // ============================================

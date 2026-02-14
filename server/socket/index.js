@@ -137,9 +137,16 @@ const registerSocketHandlers = (io) => {
     // Handle disconnect
     // ============================================
     socket.on('disconnect', async (reason) => {
-      console.log(`🔌 User disconnected: ${username} (${userId}) — reason: ${reason}`);
+      console.log(`🔌 User disconnected: ${username} (${userId}) — socket: ${socket.id} — reason: ${reason}`);
 
-      onlineUsers.delete(userId);
+      // IMPORTANT: Only remove from onlineUsers if THIS socket is still the current one.
+      // Prevents race condition where a reconnect creates a new socket before
+      // the old socket's disconnect handler fires.
+      if (onlineUsers.get(userId) === socket.id) {
+        onlineUsers.delete(userId);
+      } else {
+        console.log(`🔌 Skipping onlineUsers delete for ${username} — socket ${socket.id} is stale, current: ${onlineUsers.get(userId)}`);
+      }
       socketGuard.cleanup(socket.id);
       intrusionDetector.removeSession(userId, socket.id);
 

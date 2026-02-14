@@ -217,11 +217,25 @@ class P2PFileTransferService {
   /**
    * Initialize socket listeners for file transfer signaling
    */
+  /**
+   * Ensure socket listeners are bound — call before any transfer action
+   */
+  ensureListeners() {
+    if (!this._socketListenersBound) {
+      console.log('[P2P] ensureListeners: listeners not bound, attempting bind...');
+      this.bindSocketListeners();
+    }
+  }
+
   bindSocketListeners() {
     if (this._socketListenersBound) return;
     
     const socket = getSocket();
-    if (!socket) return;
+    if (!socket) {
+      console.warn('[P2P] ⚠️ bindSocketListeners: NO SOCKET AVAILABLE — listeners NOT bound!');
+      return;
+    }
+    console.log(`[P2P] ✅ bindSocketListeners: Binding to socket ${socket.id || '(not connected yet)'}`);
 
     // Incoming transfer request
     socket.on('file-transfer:incoming', (data) => {
@@ -420,6 +434,9 @@ class P2PFileTransferService {
    * @returns {string} transferId
    */
   async sendFile(file, receiverId) {
+    // Ensure socket listeners are bound before sending
+    this.ensureListeners();
+
     const transferId = this._generateTransferId();
     const chunkSize = CONFIG.CHUNK_SIZE;
     const totalChunks = Math.ceil(file.size / chunkSize);
@@ -460,6 +477,9 @@ class P2PFileTransferService {
    * Accept an incoming file transfer (receiver side)
    */
   async acceptTransfer(transferData) {
+    // Ensure socket listeners are bound before accepting
+    this.ensureListeners();
+
     const {
       transferId,
       senderId,

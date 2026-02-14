@@ -107,13 +107,19 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
    */
   socket.on('file-transfer:accept', async ({ transferId }) => {
     try {
+      console.log(`[FT ACCEPT] Received accept | transferId=${transferId} | from=${socket.userId} (${socket.username})`);
+
       const transfer = await FileTransfer.findOne({ transferId, receiver: socket.userId });
       if (!transfer) {
+        console.warn(`[FT ACCEPT] ⚠️ Transfer NOT FOUND in DB | transferId=${transferId} | receiver=${socket.userId}`);
         socket.emit('file-transfer:error', { transferId, message: 'Transfer not found' });
         return;
       }
 
+      console.log(`[FT ACCEPT] Transfer found | sender=${transfer.sender} | receiver=${transfer.receiver} | status=${transfer.status}`);
+
       if (transfer.status !== 'pending' && transfer.status !== 'paused') {
+        console.warn(`[FT ACCEPT] ⚠️ Cannot accept — wrong status: ${transfer.status}`);
         socket.emit('file-transfer:error', { transferId, message: `Cannot accept: status is ${transfer.status}` });
         return;
       }
@@ -123,7 +129,10 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
       await transfer.save();
 
       // Notify sender to start DataChannel setup
-      const senderSocketId = onlineUsers.get(transfer.sender.toString());
+      const senderId = transfer.sender.toString();
+      const senderSocketId = onlineUsers.get(senderId);
+      console.log(`[FT ACCEPT] Looking up sender | senderId=${senderId} | senderSocketId=${senderSocketId || 'NOT FOUND'} | onlineUsers size=${onlineUsers.size}`);
+
       if (senderSocketId) {
         io.to(senderSocketId).emit('file-transfer:accepted', {
           transferId,
@@ -132,6 +141,11 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
           // Send resume info if applicable
           lastReceivedChunk: transfer.lastReceivedChunk,
         });
+        console.log(`[FT ACCEPT] ✅ Emitted file-transfer:accepted to sender | socketId=${senderSocketId}`);
+      } else {
+        console.error(`[FT ACCEPT] ❌ Sender NOT in onlineUsers! senderId=${senderId} | onlineUsers keys:`, [...onlineUsers.keys()]);
+        // Fallback: try to find sender by checking all sockets
+        socket.emit('file-transfer:error', { transferId, message: 'Sender appears to be offline' });
       }
 
       console.log(`📁 File transfer accepted: ${socket.username} accepted ${transferId}`);

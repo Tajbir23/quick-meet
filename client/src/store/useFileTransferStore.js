@@ -33,6 +33,13 @@ const useFileTransferStore = create((set, get) => ({
 
     p2pFileTransfer.bindSocketListeners();
 
+    // If binding failed (socket not ready), don't mark as initialized
+    // so it can retry on next call
+    if (!p2pFileTransfer._socketListenersBound) {
+      console.warn('[FileTransferStore] ⚠️ Socket not ready — will retry initialization later');
+      return;
+    }
+
     // Wire up callbacks
     p2pFileTransfer.onTransferUpdate = (transferId, info) => {
       set((state) => ({
