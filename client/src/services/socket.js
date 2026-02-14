@@ -12,10 +12,12 @@
  */
 
 import { io } from 'socket.io-client';
-import { SERVER_URL } from '../utils/constants';
+import { SERVER_URL, API_URL } from '../utils/constants';
+import { getDeviceFingerprint } from './api';
 
 let socket = null;
 let _onForceLogout = null; // Callback for force logout
+let _isRefreshingToken = false; // Prevent concurrent refresh attempts from socket
 
 /**
  * Register a callback for force-logout events
@@ -38,7 +40,7 @@ export const connectSocket = (token) => {
     auth: { token },
     transports: ['websocket', 'polling'],
     reconnection: true,
-    reconnectionAttempts: 10,
+    reconnectionAttempts: 15,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
     timeout: 20000,
@@ -57,23 +59,57 @@ export const connectSocket = (token) => {
     }
   });
 
-  socket.on('connect_error', (error) => {
+  socket.on('connect_error', async (error) => {
     console.error('Socket connection error:', error.message);
     // If auth error, try using the latest access token from localStorage
     // (the API interceptor may have silently refreshed it)
-    if (error.message?.includes('Authentication') || error.message?.includes('jwt')) {
+    if (error.message?.includes('Authentication') || error.message?.includes('jwt') || error.message?.includes('invalid_token')) {
       const freshToken = localStorage.getItem('accessToken');
       if (freshToken && freshToken !== socket.auth?.token) {
+        // API interceptor already refreshed the token — use it
         console.log('🔄 Socket auth failed — retrying with refreshed token');
         socket.auth = { token: freshToken };
         // Don't disconnect — let the built-in reconnection retry with the new token
-      } else {
-        console.log('Auth error on socket — no fresh token available, stopping');
-        socket.disconnect();
-        if (_onForceLogout) {
-          _onForceLogout('Session expired. Please login again.');
+      } else if (!_isRefreshingToken) {
+        // Token hasn't been refreshed yet — try refreshing ourselves
+        _isRefreshingToken = true;
+        console.log('🔄 Socket auth failed — attempting token refresh');
+        try {
+          const refreshToken = localStorage.getItem('refreshToken');
+          if (!refreshToken) throw new Error('No refresh token available');
+
+          const response = await fetch(`${API_URL}/auth/refresh`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Device-Fingerprint': getDeviceFingerprint(),
+            },
+            body: JSON.stringify({ refreshToken }),
+          });
+
+          if (!response.ok) throw new Error(`Refresh failed: ${response.status}`);
+
+          const result = await response.json();
+          const { accessToken, refreshToken: newRefreshToken } = result.data;
+
+          // Update stored tokens
+          localStorage.setItem('accessToken', accessToken);
+          localStorage.setItem('refreshToken', newRefreshToken);
+
+          // Update socket auth for next reconnection attempt
+          socket.auth = { token: accessToken };
+          console.log('✅ Token refreshed — socket will reconnect with new token');
+        } catch (refreshErr) {
+          console.error('Token refresh failed:', refreshErr.message);
+          socket.disconnect();
+          if (_onForceLogout) {
+            _onForceLogout('Session expired. Please login again.');
+          }
+        } finally {
+          _isRefreshingToken = false;
         }
       }
+      // If _isRefreshingToken is true, another connect_error is already refreshing — just wait
     }
   });
 
