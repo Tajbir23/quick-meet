@@ -395,24 +395,33 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
    * Separate from call signaling to avoid conflicts
    */
   socket.on('file-transfer:offer', ({ transferId, targetUserId, offer }) => {
+    console.log(`[FT SIGNAL] offer received | from=${socket.userId} | target=${targetUserId} | transferId=${transferId}`);
     const targetSocketId = onlineUsers.get(targetUserId);
     if (targetSocketId) {
+      console.log(`[FT SIGNAL] offer relayed | targetSocket=${targetSocketId}`);
       io.to(targetSocketId).emit('file-transfer:offer', {
         transferId,
         senderId: socket.userId,
         offer,
       });
+    } else {
+      console.warn(`[FT SIGNAL] ⚠️ offer DROPPED — target ${targetUserId} NOT in onlineUsers | onlineUsers keys:`, [...onlineUsers.keys()]);
+      socket.emit('file-transfer:error', { transferId, message: 'Receiver is offline' });
     }
   });
 
   socket.on('file-transfer:answer', ({ transferId, targetUserId, answer }) => {
+    console.log(`[FT SIGNAL] answer received | from=${socket.userId} | target=${targetUserId} | transferId=${transferId}`);
     const targetSocketId = onlineUsers.get(targetUserId);
     if (targetSocketId) {
+      console.log(`[FT SIGNAL] answer relayed | targetSocket=${targetSocketId}`);
       io.to(targetSocketId).emit('file-transfer:answer', {
         transferId,
         senderId: socket.userId,
         answer,
       });
+    } else {
+      console.warn(`[FT SIGNAL] ⚠️ answer DROPPED — target ${targetUserId} NOT in onlineUsers`);
     }
   });
 
@@ -424,6 +433,8 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
         senderId: socket.userId,
         candidate,
       });
+    } else {
+      console.warn(`[FT SIGNAL] ⚠️ ICE candidate DROPPED — target ${targetUserId} NOT in onlineUsers | transferId=${transferId}`);
     }
   });
 

@@ -232,12 +232,15 @@ class P2PFileTransferService {
 
     // Transfer accepted by receiver
     socket.on('file-transfer:accepted', async (data) => {
+      console.log(`[P2P DEBUG] 📨 file-transfer:accepted received | transferId=${data.transferId} | receiverId=${data.receiverId} | lastReceivedChunk=${data.lastReceivedChunk}`);
       const session = this.sessions.get(data.transferId);
       if (session && !session.isReceiver) {
         // We are the sender, receiver accepted → setup DataChannel
         session.currentChunk = data.lastReceivedChunk >= 0 ? data.lastReceivedChunk + 1 : 0;
         session.bytesTransferred = session.currentChunk * session.chunkSize;
         await this._setupSenderConnection(session);
+      } else {
+        console.warn(`[P2P DEBUG] ⚠️ file-transfer:accepted — session not found or wrong role | transferId=${data.transferId} | found=${!!session} | isReceiver=${session?.isReceiver}`);
       }
     });
 
@@ -339,22 +342,32 @@ class P2PFileTransferService {
 
     // WebRTC signaling for file transfer
     socket.on('file-transfer:offer', async (data) => {
+      console.log(`[P2P DEBUG] 📨 file-transfer:offer received | transferId=${data.transferId} | senderId=${data.senderId}`);
       const session = this.sessions.get(data.transferId);
       if (session && session.isReceiver) {
         await this._handleReceiverOffer(session, data.offer, data.senderId);
+      } else {
+        console.warn(`[P2P DEBUG] ⚠️ file-transfer:offer — no matching receiver session | transferId=${data.transferId} | found=${!!session} | isReceiver=${session?.isReceiver}`);
       }
     });
 
     socket.on('file-transfer:answer', async (data) => {
+      console.log(`[P2P DEBUG] 📨 file-transfer:answer received | transferId=${data.transferId}`);
       const session = this.sessions.get(data.transferId);
       if (session && !session.isReceiver) {
         await this._handleSenderAnswer(session, data.answer);
+      } else {
+        console.warn(`[P2P DEBUG] ⚠️ file-transfer:answer — no matching sender session | transferId=${data.transferId} | found=${!!session} | isReceiver=${session?.isReceiver}`);
       }
     });
 
     socket.on('file-transfer:ice-candidate', async (data) => {
+      console.log(`[P2P DEBUG] 📨 file-transfer:ice-candidate received | transferId=${data.transferId} | from=${data.senderId}`);
       const session = this.sessions.get(data.transferId);
-      if (!session) return;
+      if (!session) {
+        console.warn(`[P2P DEBUG] ⚠️ ICE candidate — no session found for ${data.transferId}`);
+        return;
+      }
 
       // If PeerConnection exists and remoteDescription is set → add immediately
       if (session.peerConnection && session._remoteDescriptionSet) {
@@ -560,11 +573,16 @@ class P2PFileTransferService {
    * Sender creates PeerConnection + DataChannel and sends offer
    */
   async _setupSenderConnection(session) {
+    console.log(`[P2P DEBUG] _setupSenderConnection called | transferId=${session.transferId} | peerId=${session.peerId}`);
     session.status = 'connecting';
     this._notifyUpdate(session.transferId, session);
 
+    // Start connection timeout (30s)
+    this._startConnectionTimeout(session);
+
     const pc = new RTCPeerConnection(ICE_SERVERS);
     session.peerConnection = pc;
+    console.log(`[P2P DEBUG] RTCPeerConnection created | iceServers:`, JSON.stringify(ICE_SERVERS.iceServers?.map(s => s.urls)));
 
     // Create DataChannel with ordered delivery
     const dc = pc.createDataChannel(`file-${session.transferId}`, {
@@ -573,10 +591,12 @@ class P2PFileTransferService {
     });
     session.dataChannel = dc;
     dc.binaryType = 'arraybuffer';
+    console.log(`[P2P DEBUG] DataChannel created: file-${session.transferId}`);
 
     // DataChannel open → start sending
     dc.onopen = () => {
-      console.log(`📁 DataChannel open for ${session.transferId}, starting send from chunk ${session.currentChunk}`);
+      console.log(`[P2P DEBUG] ✅ DataChannel OPEN for ${session.transferId}, starting send from chunk ${session.currentChunk}`);
+      this._clearConnectionTimeout(session);
       session.status = 'transferring';
       session.startTime = Date.now();
       this._notifyUpdate(session.transferId, session);
@@ -584,6 +604,7 @@ class P2PFileTransferService {
     };
 
     dc.onclose = () => {
+      console.log(`[P2P DEBUG] DataChannel CLOSED for ${session.transferId}, status was: ${session.status}`);
       if (session.status === 'transferring') {
         session.status = 'paused';
         this._notifyUpdate(session.transferId, session);
@@ -591,7 +612,7 @@ class P2PFileTransferService {
     };
 
     dc.onerror = (err) => {
-      console.error(`DataChannel error for ${session.transferId}:`, err);
+      console.error(`[P2P DEBUG] ❌ DataChannel ERROR for ${session.transferId}:`, err);
       session.status = 'failed';
       this._notifyUpdate(session.transferId, session);
     };
@@ -599,6 +620,7 @@ class P2PFileTransferService {
     // ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        console.log(`[P2P DEBUG] Sender ICE candidate: ${event.candidate.candidate.substring(0, 60)}...`);
         const socket = getSocket();
         if (socket) {
           socket.emit('file-transfer:ice-candidate', {
@@ -607,32 +629,59 @@ class P2PFileTransferService {
             candidate: event.candidate,
           });
         }
+      } else {
+        console.log(`[P2P DEBUG] Sender ICE gathering complete for ${session.transferId}`);
       }
     };
 
     pc.oniceconnectionstatechange = () => {
+      console.log(`[P2P DEBUG] Sender ICE connection state: ${pc.iceConnectionState} for ${session.transferId}`);
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        this._clearConnectionTimeout(session);
+      }
       if (pc.iceConnectionState === 'failed') {
+        this._clearConnectionTimeout(session);
+        session.status = 'failed';
+        session._failReason = 'ice_failed';
+        this._notifyUpdate(session.transferId, session);
+        this._reportProgressToServer(session);
+      }
+      if (pc.iceConnectionState === 'disconnected') {
         session.status = 'paused';
         this._notifyUpdate(session.transferId, session);
         this._reportProgressToServer(session);
       }
     };
 
+    pc.onicegatheringstatechange = () => {
+      console.log(`[P2P DEBUG] Sender ICE gathering state: ${pc.iceGatheringState} for ${session.transferId}`);
+    };
+
+    pc.onsignalingstatechange = () => {
+      console.log(`[P2P DEBUG] Sender signaling state: ${pc.signalingState} for ${session.transferId}`);
+    };
+
     // Create and send offer
     try {
       const offer = await pc.createOffer();
+      console.log(`[P2P DEBUG] Offer created | transferId=${session.transferId} | type=${offer.type}`);
       await pc.setLocalDescription(offer);
+      console.log(`[P2P DEBUG] Local description set (offer) | transferId=${session.transferId}`);
 
       const socket = getSocket();
       if (socket) {
+        console.log(`[P2P DEBUG] Emitting file-transfer:offer | transferId=${session.transferId} | targetUserId=${session.peerId}`);
         socket.emit('file-transfer:offer', {
           transferId: session.transferId,
           targetUserId: session.peerId,
           offer: pc.localDescription,
         });
+      } else {
+        console.error(`[P2P DEBUG] ❌ NO SOCKET when emitting offer for ${session.transferId}`);
       }
     } catch (err) {
-      console.error('Failed to create offer for file transfer:', err);
+      console.error(`[P2P DEBUG] ❌ Failed to create offer for ${session.transferId}:`, err);
+      this._clearConnectionTimeout(session);
       session.status = 'failed';
       this._notifyUpdate(session.transferId, session);
     }
@@ -642,12 +691,17 @@ class P2PFileTransferService {
    * Receiver handles incoming offer, creates answer
    */
   async _handleReceiverOffer(session, offer, senderId) {
+    console.log(`[P2P DEBUG] _handleReceiverOffer called | transferId=${session.transferId} | senderId=${senderId}`);
     const pc = new RTCPeerConnection(ICE_SERVERS);
     session.peerConnection = pc;
+
+    // Start connection timeout (30s) for receiver too
+    this._startConnectionTimeout(session);
 
     // ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        console.log(`[P2P DEBUG] Receiver ICE candidate: ${event.candidate.candidate.substring(0, 60)}...`);
         const socket = getSocket();
         if (socket) {
           socket.emit('file-transfer:ice-candidate', {
@@ -656,17 +710,21 @@ class P2PFileTransferService {
             candidate: event.candidate,
           });
         }
+      } else {
+        console.log(`[P2P DEBUG] Receiver ICE gathering complete for ${session.transferId}`);
       }
     };
 
     // Expect DataChannel from sender
     pc.ondatachannel = (event) => {
+      console.log(`[P2P DEBUG] ✅ Receiver got DataChannel for ${session.transferId}`);
       const dc = event.channel;
       session.dataChannel = dc;
       dc.binaryType = 'arraybuffer';
 
       dc.onopen = () => {
-        console.log(`📁 DataChannel open for receiving ${session.transferId}`);
+        console.log(`[P2P DEBUG] ✅ Receiver DataChannel OPEN for ${session.transferId}`);
+        this._clearConnectionTimeout(session);
         session.status = 'transferring';
         session.startTime = Date.now();
         this._notifyUpdate(session.transferId, session);
@@ -679,6 +737,7 @@ class P2PFileTransferService {
       };
 
       dc.onclose = () => {
+        console.log(`[P2P DEBUG] Receiver DataChannel CLOSED for ${session.transferId}, status was: ${session.status}`);
         if (session.status === 'transferring') {
           session.status = 'paused';
           this._notifyUpdate(session.transferId, session);
@@ -687,39 +746,66 @@ class P2PFileTransferService {
       };
 
       dc.onerror = (err) => {
-        console.error(`DataChannel error receiving ${session.transferId}:`, err);
+        console.error(`[P2P DEBUG] ❌ Receiver DataChannel ERROR for ${session.transferId}:`, err);
       };
     };
 
     pc.oniceconnectionstatechange = () => {
+      console.log(`[P2P DEBUG] Receiver ICE connection state: ${pc.iceConnectionState} for ${session.transferId}`);
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        this._clearConnectionTimeout(session);
+      }
       if (pc.iceConnectionState === 'failed') {
+        this._clearConnectionTimeout(session);
+        session.status = 'failed';
+        session._failReason = 'ice_failed';
+        this._notifyUpdate(session.transferId, session);
+        this._reportProgressToServer(session);
+      }
+      if (pc.iceConnectionState === 'disconnected') {
         session.status = 'paused';
         this._notifyUpdate(session.transferId, session);
         this._reportProgressToServer(session);
       }
     };
 
+    pc.onicegatheringstatechange = () => {
+      console.log(`[P2P DEBUG] Receiver ICE gathering state: ${pc.iceGatheringState} for ${session.transferId}`);
+    };
+
+    pc.onsignalingstatechange = () => {
+      console.log(`[P2P DEBUG] Receiver signaling state: ${pc.signalingState} for ${session.transferId}`);
+    };
+
     // Set remote offer and create answer
     try {
+      console.log(`[P2P DEBUG] Setting remote description (offer) | transferId=${session.transferId}`);
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      console.log(`[P2P DEBUG] Remote description set (offer) | transferId=${session.transferId}`);
       session._remoteDescriptionSet = true;
 
       // Flush any ICE candidates that arrived before remoteDescription was set
       await this._flushPendingIceCandidates(session);
 
       const answer = await pc.createAnswer();
+      console.log(`[P2P DEBUG] Answer created | transferId=${session.transferId} | type=${answer.type}`);
       await pc.setLocalDescription(answer);
+      console.log(`[P2P DEBUG] Local description set (answer) | transferId=${session.transferId}`);
 
       const socket = getSocket();
       if (socket) {
+        console.log(`[P2P DEBUG] Emitting file-transfer:answer | transferId=${session.transferId} | targetUserId=${senderId}`);
         socket.emit('file-transfer:answer', {
           transferId: session.transferId,
           targetUserId: senderId,
           answer: pc.localDescription,
         });
+      } else {
+        console.error(`[P2P DEBUG] ❌ NO SOCKET when emitting answer for ${session.transferId}`);
       }
     } catch (err) {
-      console.error('Failed to handle offer for file transfer:', err);
+      console.error(`[P2P DEBUG] ❌ Failed to handle offer for ${session.transferId}:`, err);
+      this._clearConnectionTimeout(session);
       session.status = 'failed';
       this._notifyUpdate(session.transferId, session);
     }
@@ -730,15 +816,19 @@ class P2PFileTransferService {
    */
   async _handleSenderAnswer(session, answer) {
     try {
+      console.log(`[P2P DEBUG] _handleSenderAnswer called | transferId=${session.transferId} | signalingState=${session.peerConnection?.signalingState}`);
       if (session.peerConnection && session.peerConnection.signalingState === 'have-local-offer') {
         await session.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        console.log(`[P2P DEBUG] Remote description set (answer) | transferId=${session.transferId}`);
         session._remoteDescriptionSet = true;
 
         // Flush any ICE candidates that arrived before remoteDescription was set
         await this._flushPendingIceCandidates(session);
+      } else {
+        console.warn(`[P2P DEBUG] ⚠️ Cannot set answer — signalingState=${session.peerConnection?.signalingState} | transferId=${session.transferId}`);
       }
     } catch (err) {
-      console.error('Failed to set answer for file transfer:', err);
+      console.error(`[P2P DEBUG] ❌ Failed to set answer for ${session.transferId}:`, err);
     }
   }
 
@@ -1188,6 +1278,39 @@ class P2PFileTransferService {
         peerId: session.peerId,
         isPaused: session.isPaused,
       });
+    }
+  }
+
+  /**
+   * Start a connection timeout — if still "connecting" after timeoutMs, mark as failed
+   */
+  _startConnectionTimeout(session, timeoutMs = 30000) {
+    this._clearConnectionTimeout(session);
+    session._connectionTimer = setTimeout(() => {
+      if (session.status === 'connecting') {
+        const iceState = session.peerConnection?.iceConnectionState || 'unknown';
+        const sigState = session.peerConnection?.signalingState || 'unknown';
+        console.error(`[P2P DEBUG] ⏰ Connection TIMEOUT for ${session.transferId} after ${timeoutMs / 1000}s | ICE=${iceState} | signaling=${sigState}`);
+        session.status = 'failed';
+        session._failReason = 'connection_timeout';
+        this._notifyUpdate(session.transferId, session);
+        if (this.onTransferError) {
+          this.onTransferError(session.transferId, new Error(
+            `Connection timeout (${timeoutMs / 1000}s). ICE state: ${iceState}. ` +
+            'Both devices may need to be on the same network, or a TURN server is required.'
+          ));
+        }
+      }
+    }, timeoutMs);
+  }
+
+  /**
+   * Clear the connection timeout
+   */
+  _clearConnectionTimeout(session) {
+    if (session._connectionTimer) {
+      clearTimeout(session._connectionTimer);
+      session._connectionTimer = null;
     }
   }
 

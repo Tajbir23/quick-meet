@@ -24,15 +24,23 @@ export const ICE_SERVERS = {
     // STUN servers (minimal set — reduce fingerprinting surface)
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    // TURN server (for relaying media when P2P fails)
+    // Self-hosted TURN server (coturn on VPS) — required for NAT traversal
+    {
+      urls: [
+        'turn:quickmeet.genuinesoftmart.store:3478',
+        'turn:quickmeet.genuinesoftmart.store:3478?transport=tcp',
+      ],
+      username: 'quickmeet',
+      credential: 'QuickMeet@Turn2026Secure',
+    },
+    {
+      urls: 'turns:quickmeet.genuinesoftmart.store:5349?transport=tcp',
+      username: 'quickmeet',
+      credential: 'QuickMeet@Turn2026Secure',
+    },
+    // Additional TURN from env vars (optional override)
     ...(import.meta.env.VITE_TURN_URL ? [{
       urls: import.meta.env.VITE_TURN_URL,
-      username: import.meta.env.VITE_TURN_USERNAME || '',
-      credential: import.meta.env.VITE_TURN_CREDENTIAL || '',
-    }] : []),
-    // TURNS (TLS) variant — encrypted relay
-    ...(import.meta.env.VITE_TURN_URL ? [{
-      urls: import.meta.env.VITE_TURN_URL.replace('turn:', 'turns:').replace(':3478', ':5349'),
       username: import.meta.env.VITE_TURN_USERNAME || '',
       credential: import.meta.env.VITE_TURN_CREDENTIAL || '',
     }] : []),
