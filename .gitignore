@@ -44,3 +44,18 @@ desktop.ini
 # Security audit logs (sensitive — never commit)
 server/logs/
 logs/security/
+
+# Desktop (Electron) build output
+desktop/dist/
+
+# Mobile (Capacitor) Android build output
+mobile/android/app/build/
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/capacitor-cordova-android-plugins/build/
+mobile/android/.idea/
+mobile/android/local.properties
+
+# Icons (generated)
+desktop/icon.png
+desktop/icon.ico

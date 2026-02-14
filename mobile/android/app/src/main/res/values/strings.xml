@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Quick Meet</string>
+    <string name="title_activity_main">Quick Meet</string>
+    <string name="package_name">com.quickmeet.app</string>
+    <string name="custom_url_scheme">com.quickmeet.app</string>
+</resources>

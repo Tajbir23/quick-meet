@@ -2,11 +2,10 @@
   "appId": "com.quickmeet.app",
   "appName": "Quick Meet",
   "webDir": "../client/dist",
-  "bundledWebRuntime": false,
   "server": {
-    "androidScheme": "https",
+    "url": "https://quickmeet.genuinesoftmart.store",
     "cleartext": false,
-    "allowNavigation": ["*"]
+    "allowNavigation": ["quickmeet.genuinesoftmart.store"]
   },
   "plugins": {
     "SplashScreen": {
