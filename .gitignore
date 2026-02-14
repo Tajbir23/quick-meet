@@ -55,7 +55,3 @@ mobile/android/build/
 mobile/android/capacitor-cordova-android-plugins/build/
 mobile/android/.idea/
 mobile/android/local.properties
-
-# Icons (generated)
-desktop/icon.png
-desktop/icon.ico
