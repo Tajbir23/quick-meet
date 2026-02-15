@@ -1,5 +1,12 @@
 apply plugin: 'com.android.application'
 
+// Read version from mobile/package.json
+def packageJson = new groovy.json.JsonSlurper().parse(file("../../package.json"))
+def appVersionName = packageJson.version ?: "1.0.0"
+// Auto-generate versionCode from version string (e.g. 1.2.3 -> 10203)
+def (major, minor, patch) = appVersionName.tokenize('.').collect { it.toInteger() }
+def appVersionCode = major * 10000 + minor * 100 + patch
+
 android {
     namespace "com.quickmeet.app"
     compileSdkVersion rootProject.ext.compileSdkVersion
@@ -7,8 +14,8 @@ android {
         applicationId "com.quickmeet.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode appVersionCode
+        versionName appVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -20,6 +27,14 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    // Rename APK output to quick-meet-v{version}.apk
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            def buildType = variant.buildType.name // debug or release
+            outputFileName = "quick-meet-v${appVersionName}-${buildType}.apk"
         }
     }
     compileOptions {
