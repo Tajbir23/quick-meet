@@ -1558,20 +1558,27 @@ class P2PFileTransferService {
     }
 
     // ── PATH 3: Capacitor native (Android/iOS) ────────────────────────
-    // Uses memory accumulation but saves to disk via Filesystem plugin.
-    // Capacitor can handle large files since final save goes to native FS.
+    // Progressive disk writing: batch chunks → base64 → Filesystem.appendFile
+    // Zero memory accumulation — file is written to disk during transfer.
     if (isCapacitorNative) {
-      session.receivedChunks = new Array(session.totalChunks);
-      session._useCapacitorSave = true;
-      // For very large files (>2GB), use progressive flushing to avoid OOM
-      if (session.fileSize > MAX_BROWSER_MEMORY_FILE_SIZE) {
-        session._flushThreshold = 500; // Flush to disk every 500 chunks
-        session._flushedParts = [];
-        session._lastFlushedIndex = 0;
+      const FilesystemPlugin = window.Capacitor?.Plugins?.Filesystem;
+      if (FilesystemPlugin) {
+        session._useCapacitorStream = true;
+        session._capacitorFS = FilesystemPlugin;
+        session._capacitorPath = `Download/${session.fileName}`;
+        session._capacitorDir = 'EXTERNAL_STORAGE';
+        session._chunkBatch = [];
+        session._batchSize = 0;
+        session._batchFlushThreshold = 2 * 1024 * 1024; // 2MB per flush
+        session._capacitorFirstWrite = true;
+        session._capacitorFlushPromise = null;
+        session.receivedChunks = []; // Not used in streaming mode
+        console.log(`[P2P] Capacitor streaming mode: ${session._capacitorPath} (${(session.fileSize / 1048576).toFixed(0)}MB)`);
+        this._emitDiag(session, 'writer_init_done', { mode: 'capacitor-stream', totalChunks: session.totalChunks });
+        return;
       }
-      console.log(`[P2P] Capacitor native mode for: ${session.fileName} (${(session.fileSize / 1048576).toFixed(0)}MB)`);
-      this._emitDiag(session, 'writer_init_done', { mode: 'capacitor', totalChunks: session.totalChunks });
-      return;
+      // Filesystem plugin not available — fall through to memory mode
+      console.warn('[P2P] Capacitor Filesystem plugin not available, falling back to memory mode');
     }
 
     // ── PATH 4: Browser Memory fallback (Firefox/Safari) ────────────────
@@ -1652,6 +1659,21 @@ class P2PFileTransferService {
         session.status = 'failed';
         this._notifyUpdate(session.transferId, session);
         return;
+      }
+    }
+    // ── Capacitor: batch chunks and flush progressively to disk ──────
+    else if (session._useCapacitorStream) {
+      session._chunkBatch.push(new Uint8Array(chunkData));
+      session._batchSize += chunkData.byteLength;
+
+      if (session._batchSize >= session._batchFlushThreshold) {
+        // Wait for previous flush to complete before starting new one
+        if (session._capacitorFlushPromise) {
+          await session._capacitorFlushPromise;
+        }
+        session._capacitorFlushPromise = this._flushCapacitorBatch(session);
+        await session._capacitorFlushPromise;
+        session._capacitorFlushPromise = null;
       }
     }
     // ── Browser Memory: accumulate in array (<=2GB only) ─────────────
@@ -1738,7 +1760,38 @@ class P2PFileTransferService {
         }
         session._fsaaWriter = null;
       }
-      // ── Browser Memory: build blob and save (platform-aware)
+      // ── Capacitor stream: flush remaining batch — file is already on disk!
+      else if (session._useCapacitorStream) {
+        // Wait for any pending flush
+        if (session._capacitorFlushPromise) {
+          await session._capacitorFlushPromise;
+        }
+        // Flush remaining chunks in batch
+        await this._flushCapacitorBatch(session);
+        savePath = session._capacitorPath;
+        console.log(`[P2P] Capacitor file saved: ${savePath} (${(session._totalBytesReceived / 1048576).toFixed(1)}MB)`);
+
+        // Try to open the file after save
+        try {
+          const fileUri = await session._capacitorFS.getUri({
+            path: session._capacitorPath,
+            directory: session._capacitorDir,
+          });
+          if (fileUri?.uri) {
+            const FileOpener = window.Capacitor?.Plugins?.FileOpener;
+            if (FileOpener?.open) {
+              FileOpener.open({
+                filePath: fileUri.uri,
+                contentType: session.fileMimeType || 'application/octet-stream',
+                openWithDefault: true,
+              }).catch(() => {});
+            }
+          }
+        } catch (e) {
+          console.warn('[P2P] Auto-open skipped:', e.message);
+        }
+      }
+      // ── Browser Memory: build blob and download ──────────────────────
       else {
         const parts = [];
         if (session._flushedBlobs && session._flushedBlobs.length > 0) {
@@ -1754,29 +1807,9 @@ class P2PFileTransferService {
           type: session.fileMimeType || 'application/octet-stream'
         });
 
-        // Use platform-aware save for Capacitor (Android/iOS)
-        const platform = getPlatform();
-        if (platform === 'android' || platform === 'ios') {
-          try {
-            const saved = await saveFileToDevice(fileBlob, session.fileName);
-            if (saved) {
-              savePath = `Downloads/${session.fileName}`;
-              console.log(`[P2P] File saved via Capacitor: Downloads/${session.fileName}`);
-            } else {
-              console.warn('[P2P] Capacitor save returned false, trying browser fallback');
-              this._downloadBlob(fileBlob, session.fileName);
-              savePath = 'Downloads';
-            }
-          } catch (err) {
-            console.error('[P2P] Capacitor save failed, using browser fallback:', err);
-            this._downloadBlob(fileBlob, session.fileName);
-            savePath = 'Downloads';
-          }
-        } else {
-          // Web browser: standard download
-          this._downloadBlob(fileBlob, session.fileName);
-          savePath = 'Downloads';
-        }
+        // Web browser: standard download
+        this._downloadBlob(fileBlob, session.fileName);
+        savePath = 'Downloads';
       }
 
       // Store save path in session for UI display
@@ -1892,6 +1925,84 @@ class P2PFileTransferService {
       session._finalizing = false;
       this._notifyUpdate(session.transferId, session);
     }
+  }
+
+  /**
+   * Flush batched chunks to disk via Capacitor Filesystem
+   * Combines batch → base64 → writeFile/appendFile
+   */
+  async _flushCapacitorBatch(session) {
+    if (!session._chunkBatch || !session._chunkBatch.length) return;
+
+    // Combine batch into one Uint8Array
+    const totalLen = session._chunkBatch.reduce((s, c) => s + c.byteLength, 0);
+    const combined = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const chunk of session._chunkBatch) {
+      combined.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+
+    // Clear batch immediately to free memory
+    session._chunkBatch = [];
+    session._batchSize = 0;
+
+    // Convert to base64 using Blob + FileReader (handles large data efficiently)
+    const base64 = await this._uint8ToBase64(combined);
+
+    try {
+      if (session._capacitorFirstWrite) {
+        await session._capacitorFS.writeFile({
+          path: session._capacitorPath,
+          data: base64,
+          directory: session._capacitorDir,
+          recursive: true,
+        });
+        session._capacitorFirstWrite = false;
+      } else {
+        await session._capacitorFS.appendFile({
+          path: session._capacitorPath,
+          data: base64,
+          directory: session._capacitorDir,
+        });
+      }
+    } catch (err) {
+      console.error('[P2P] Capacitor batch flush error:', err);
+      // Try DOCUMENTS fallback if EXTERNAL_STORAGE fails
+      if (session._capacitorDir === 'EXTERNAL_STORAGE') {
+        console.warn('[P2P] Retrying with DOCUMENTS directory...');
+        session._capacitorDir = 'DOCUMENTS';
+        session._capacitorPath = `Downloads/${session.fileName}`;
+        session._capacitorFirstWrite = true;
+        try {
+          await session._capacitorFS.writeFile({
+            path: session._capacitorPath,
+            data: base64,
+            directory: session._capacitorDir,
+            recursive: true,
+          });
+          session._capacitorFirstWrite = false;
+        } catch (err2) {
+          console.error('[P2P] DOCUMENTS fallback also failed:', err2);
+          session.status = 'failed';
+          session._failReason = 'capacitor_write_failed';
+          this._notifyUpdate(session.transferId, session);
+        }
+      }
+    }
+  }
+
+  /**
+   * Convert Uint8Array to base64 string (efficient for large data)
+   */
+  _uint8ToBase64(uint8arr) {
+    return new Promise((resolve, reject) => {
+      const blob = new Blob([uint8arr]);
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
   }
 
   /**
