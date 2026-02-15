@@ -1,25 +1,25 @@
 {
   "desktop": {
-    "version": "1.0.8",
+    "version": "1.0.9",
     "minVersion": "1.0.0",
     "releaseNotes": "About section, force update, auto-build on push",
     "forceUpdate": true,
     "downloadUrl": "https://quickmeet.genuinesoftmart.store/api/updates/download/desktop",
-    "lastUpdated": "2026-02-15T11:34:56.342Z"
+    "lastUpdated": "2026-02-15T11:48:07.196Z"
   },
   "android": {
-    "version": "1.0.8",
+    "version": "1.0.9",
     "minVersion": "1.0.0",
     "releaseNotes": "About section, force update, auto-build on push",
     "forceUpdate": true,
     "downloadUrl": "https://quickmeet.genuinesoftmart.store/api/updates/download/android",
-    "lastUpdated": "2026-02-15T11:34:56.342Z"
+    "lastUpdated": "2026-02-15T11:48:07.196Z"
   },
   "web": {
-    "version": "1.0.8",
+    "version": "1.0.9",
     "minVersion": "1.0.0",
     "releaseNotes": "About section, force update, auto-build on push",
     "forceUpdate": false,
-    "lastUpdated": "2026-02-15T11:34:56.342Z"
+    "lastUpdated": "2026-02-15T11:48:07.196Z"
   }
 }
