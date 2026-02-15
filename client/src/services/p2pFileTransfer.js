@@ -1563,18 +1563,53 @@ class P2PFileTransferService {
     if (isCapacitorNative) {
       const FilesystemPlugin = window.Capacitor?.Plugins?.Filesystem;
       if (FilesystemPlugin) {
+        // Request filesystem permissions BEFORE writing
+        // On Android 11+, MANAGE_EXTERNAL_STORAGE needs explicit user grant
+        let hasExternalAccess = false;
+        try {
+          const perms = await FilesystemPlugin.checkPermissions();
+          console.log(`[P2P] Filesystem permissions:`, JSON.stringify(perms));
+          if (perms?.publicStorage === 'granted') {
+            hasExternalAccess = true;
+          } else {
+            // Request permission — on Android 11+ this opens Settings > All Files Access
+            const reqResult = await FilesystemPlugin.requestPermissions();
+            console.log(`[P2P] Permission request result:`, JSON.stringify(reqResult));
+            hasExternalAccess = reqResult?.publicStorage === 'granted';
+          }
+        } catch (permErr) {
+          console.warn('[P2P] Permission check failed:', permErr.message);
+        }
+
+        // Determine save directory based on permission
+        let saveDir, savePath;
+        if (hasExternalAccess) {
+          saveDir = 'EXTERNAL_STORAGE';
+          savePath = `Download/${session.fileName}`;
+        } else {
+          // Fallback: EXTERNAL (app-specific external) — more accessible than DOCUMENTS
+          saveDir = 'EXTERNAL';
+          savePath = `Download/${session.fileName}`;
+          console.warn('[P2P] No EXTERNAL_STORAGE permission, using EXTERNAL directory');
+        }
+
         session._useCapacitorStream = true;
         session._capacitorFS = FilesystemPlugin;
-        session._capacitorPath = `Download/${session.fileName}`;
-        session._capacitorDir = 'EXTERNAL_STORAGE';
+        session._capacitorPath = savePath;
+        session._capacitorDir = saveDir;
         session._chunkBatch = [];
         session._batchSize = 0;
         session._batchFlushThreshold = 2 * 1024 * 1024; // 2MB per flush
         session._capacitorFirstWrite = true;
         session._capacitorFlushPromise = null;
         session.receivedChunks = []; // Not used in streaming mode
-        console.log(`[P2P] Capacitor streaming mode: ${session._capacitorPath} (${(session.fileSize / 1048576).toFixed(0)}MB)`);
-        this._emitDiag(session, 'writer_init_done', { mode: 'capacitor-stream', totalChunks: session.totalChunks });
+        console.log(`[P2P] Capacitor streaming mode: dir=${saveDir} path=${savePath} (${(session.fileSize / 1048576).toFixed(0)}MB)`);
+        this._emitDiag(session, 'writer_init_done', {
+          mode: 'capacitor-stream',
+          totalChunks: session.totalChunks,
+          directory: saveDir,
+          hasExternalAccess,
+        });
         return;
       }
       // Filesystem plugin not available — fall through to memory mode
@@ -1771,20 +1806,47 @@ class P2PFileTransferService {
         savePath = session._capacitorPath;
         console.log(`[P2P] Capacitor file saved: ${savePath} (${(session._totalBytesReceived / 1048576).toFixed(1)}MB)`);
 
-        // Try to open the file after save
+        // Try to open/show the file after save
         try {
           const fileUri = await session._capacitorFS.getUri({
             path: session._capacitorPath,
             directory: session._capacitorDir,
           });
+          console.log(`[P2P] Saved file URI: ${fileUri?.uri}`);
           if (fileUri?.uri) {
             const FileOpener = window.Capacitor?.Plugins?.FileOpener;
             if (FileOpener?.open) {
-              FileOpener.open({
-                filePath: fileUri.uri,
-                contentType: session.fileMimeType || 'application/octet-stream',
-                openWithDefault: true,
-              }).catch(() => {});
+              try {
+                // openWithDefault: false → shows Android chooser dialog
+                // so user can pick file manager, media player, etc.
+                await FileOpener.open({
+                  filePath: fileUri.uri,
+                  contentType: session.fileMimeType || 'application/octet-stream',
+                  openWithDefault: false,
+                });
+                console.log(`[P2P] FileOpener chooser shown`);
+              } catch (openErr) {
+                console.warn(`[P2P] FileOpener chooser failed: ${openErr.message}`);
+                // Fallback: try to open the Download directory in file manager
+                try {
+                  const parentDir = session._capacitorDir === 'EXTERNAL_STORAGE' ? 'Download' : 'Download';
+                  const parentUri = await session._capacitorFS.getUri({
+                    path: parentDir,
+                    directory: session._capacitorDir,
+                  });
+                  if (parentUri?.uri) {
+                    await FileOpener.open({
+                      filePath: parentUri.uri,
+                      contentType: 'resource/folder',
+                      openWithDefault: false,
+                    });
+                  }
+                } catch (dirErr) {
+                  console.warn(`[P2P] Directory open also failed: ${dirErr.message}`);
+                }
+              }
+            } else {
+              console.warn('[P2P] FileOpener plugin not available');
             }
           }
         } catch (e) {
@@ -1889,9 +1951,12 @@ class P2PFileTransferService {
           const verifyMsg = hashVerified === true ? ' (Verified ✓)' 
             : hashVerified === false ? ' (Integrity check FAILED!)' 
             : '';
+          const dirLabel = session._capacitorDir === 'EXTERNAL_STORAGE' ? 'Downloads'
+            : session._capacitorDir === 'EXTERNAL' ? 'App Downloads'
+            : 'App Storage';
           showNativeNotification(
             'File received!',
-            `${session.fileName} saved to Downloads${verifyMsg}`
+            `${session.fileName} saved to ${dirLabel}${verifyMsg}`
           );
         }
       }
@@ -1967,12 +2032,23 @@ class P2PFileTransferService {
         });
       }
     } catch (err) {
-      console.error('[P2P] Capacitor batch flush error:', err);
-      // Try DOCUMENTS fallback if EXTERNAL_STORAGE fails
-      if (session._capacitorDir === 'EXTERNAL_STORAGE') {
-        console.warn('[P2P] Retrying with DOCUMENTS directory...');
-        session._capacitorDir = 'DOCUMENTS';
-        session._capacitorPath = `Downloads/${session.fileName}`;
+      console.error(`[P2P] Capacitor batch flush error (dir=${session._capacitorDir}):`, err.message);
+      this._emitDiag(session, 'capacitor_write_error', {
+        dir: session._capacitorDir,
+        path: session._capacitorPath,
+        error: err.message,
+      });
+
+      // Fallback chain: EXTERNAL_STORAGE → EXTERNAL → DOCUMENTS → DATA
+      const fallbackChain = ['EXTERNAL', 'DOCUMENTS', 'DATA'];
+      const currentIdx = fallbackChain.indexOf(session._capacitorDir);
+      const nextDirs = currentIdx === -1 ? fallbackChain : fallbackChain.slice(currentIdx + 1);
+
+      let saved = false;
+      for (const dir of nextDirs) {
+        console.warn(`[P2P] Retrying with ${dir} directory...`);
+        session._capacitorDir = dir;
+        session._capacitorPath = `Download/${session.fileName}`;
         session._capacitorFirstWrite = true;
         try {
           await session._capacitorFS.writeFile({
@@ -1982,12 +2058,21 @@ class P2PFileTransferService {
             recursive: true,
           });
           session._capacitorFirstWrite = false;
-        } catch (err2) {
-          console.error('[P2P] DOCUMENTS fallback also failed:', err2);
-          session.status = 'failed';
-          session._failReason = 'capacitor_write_failed';
-          this._notifyUpdate(session.transferId, session);
+          saved = true;
+          console.log(`[P2P] Fallback to ${dir} succeeded`);
+          this._emitDiag(session, 'capacitor_fallback_ok', { dir });
+          break;
+        } catch (fallbackErr) {
+          console.warn(`[P2P] ${dir} fallback failed:`, fallbackErr.message);
         }
+      }
+
+      if (!saved) {
+        console.error('[P2P] All Capacitor write fallbacks failed');
+        session.status = 'failed';
+        session._failReason = 'capacitor_write_failed';
+        this._notifyUpdate(session.transferId, session);
+        this._emitDiag(session, 'capacitor_write_all_failed', {});
       }
     }
   }
