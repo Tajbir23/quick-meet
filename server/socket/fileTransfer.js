@@ -24,10 +24,29 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
    * DIAGNOSTIC EVENT — logs client-side P2P state for debugging
    */
   socket.on('file-transfer:diag', (data) => {
-    console.log(
-      `[FT DIAG] ${data.event} | transfer=${data.transferId} | status=${data.status} | dc=${data.dc} | ice=${data.ice}`,
-      JSON.stringify(data)
-    );
+    // Build a human-readable summary based on event type
+    const evt = data.event || '?';
+    const side = data.side || '?';
+    const tid = (data.transferId || '').slice(-12); // last 12 chars for readability
+    let extra = '';
+    if (evt === 'dc_open') {
+      extra = ` | maxMsg=${data.maxMessageSize} | chunkSize=${data.chunkSize} | totalChunks=${data.totalChunks}`;
+    } else if (evt === 'dc_close') {
+      extra = ` | prevStatus=${data.prevStatus} | buffered=${data.buffered} | sigState=${data.signalingState}`;
+    } else if (evt === 'dc_error' || evt === 'send_error') {
+      extra = ` | error=${data.error} | buffered=${data.buffered}`;
+    } else if (evt === 'chunk_sent') {
+      extra = ` | chunk=${data.chunk}/${data.total} | buffered=${data.buffered} | bytes=${data.bytes}`;
+    } else if (evt === 'chunk_send_failed' || evt === 'packet_too_large') {
+      extra = ` | chunk=${data.chunk} | dcState=${data.dcState} | buffered=${data.buffered} | maxMsg=${data.maxMessageSize}`;
+    } else if (evt === 'writer_init_start') {
+      extra = ` | isElectron=${data.isElectron} | hasFSAAP=${data.hasFSAccessAPI} | isMobile=${data.isMobile}`;
+    } else if (evt === 'writer_init_done') {
+      extra = ` | mode=${data.mode} | totalChunks=${data.totalChunks}`;
+    } else if (evt === 'first_chunk_received') {
+      extra = ` | chunkIdx=${data.chunkIndex} | size=${data.chunkSize}`;
+    }
+    console.log(`[FT DIAG] ${evt} | ${side} | ...${tid} | status=${data.status} | dc=${data.dc} | ice=${data.ice}${extra}`);
   });
 
   /**

@@ -101,11 +101,12 @@ export function getPlatformCapability() {
 
 // Configuration
 const CONFIG = {
-  // Chunk size: larger = faster throughput, smaller = less memory pressure
-  // WebRTC DataChannel supports up to ~256KB messages reliably across browsers
-  CHUNK_SIZE: isMobile ? 65536 : 262144,  // 64KB mobile, 256KB desktop
+  // Chunk size: MUST be under SCTP maxMessageSize (65535 default between mixed Chrome versions)
+  // packet = HEADER(4 bytes) + chunk, so chunk must be <= maxMessageSize - 4
+  // Using 16KB universally for maximum compatibility across all browsers/platforms
+  CHUNK_SIZE: 16384,  // 16KB — safely under 65535 SCTP limit with 4-byte header = 16388
   // DataChannel buffer threshold for backpressure
-  BUFFER_THRESHOLD: isMobile ? 2 * 1024 * 1024 : 8 * 1024 * 1024, // 2MB mobile, 8MB desktop
+  BUFFER_THRESHOLD: isMobile ? 1 * 1024 * 1024 : 4 * 1024 * 1024, // 1MB mobile, 4MB desktop
   // How often to report progress to server (every N chunks)
   PROGRESS_REPORT_INTERVAL: 200,
   // Max concurrent transfers
@@ -844,14 +845,38 @@ class P2PFileTransferService {
       this._clearConnectionTimeout(session);
       session.status = 'transferring';
       session.startTime = Date.now();
+
+      // Check SCTP maxMessageSize and adapt chunk size if needed
+      const sctp = pc.sctp;
+      const maxMsg = sctp?.maxMessageSize || 65535;
+      console.log(`[P2P DEBUG] SCTP maxMessageSize=${maxMsg} | current chunkSize=${session.chunkSize}`);
+      // Ensure chunk + 4-byte header fits within maxMessageSize
+      if (session.chunkSize + 4 > maxMsg) {
+        const oldSize = session.chunkSize;
+        session.chunkSize = Math.max(1024, maxMsg - 64); // leave 64 bytes margin
+        session.totalChunks = Math.ceil(session.fileSize / session.chunkSize);
+        console.log(`[P2P DEBUG] ⚠️ Chunk size reduced: ${oldSize} → ${session.chunkSize} (maxMsg=${maxMsg})`);
+      }
+
       this._notifyUpdate(session.transferId, session);
-      this._emitDiag(session, 'dc_open', { side: 'sender' });
+      this._emitDiag(session, 'dc_open', {
+        side: 'sender',
+        maxMessageSize: maxMsg,
+        chunkSize: session.chunkSize,
+        totalChunks: session.totalChunks,
+      });
       this._sendChunks(session);
     };
 
-    dc.onclose = () => {
+    dc.onclose = (ev) => {
       console.log(`[P2P DEBUG] DataChannel CLOSED for ${session.transferId}, status was: ${session.status}`);
-      this._emitDiag(session, 'dc_close', { side: 'sender', prevStatus: session.status });
+      this._emitDiag(session, 'dc_close', {
+        side: 'sender',
+        prevStatus: session.status,
+        iceState: pc?.iceConnectionState,
+        signalingState: pc?.signalingState,
+        buffered: dc.bufferedAmount,
+      });
       if (session.status === 'transferring') {
         session.status = 'paused';
         this._notifyUpdate(session.transferId, session);
@@ -860,6 +885,12 @@ class P2PFileTransferService {
 
     dc.onerror = (err) => {
       console.error(`[P2P DEBUG] ❌ DataChannel ERROR for ${session.transferId}:`, err);
+      this._emitDiag(session, 'dc_error', {
+        side: 'sender',
+        error: err?.error?.message || err?.message || String(err),
+        iceState: pc?.iceConnectionState,
+        buffered: dc.bufferedAmount,
+      });
       // Don't immediately fail during active transfer — chunk sending has its own retry logic.
       // Only fail if we're still in connecting phase (DataChannel never opened).
       if (session.status === 'connecting') {
@@ -1028,8 +1059,17 @@ class P2PFileTransferService {
         session.status = 'transferring';
         session.startTime = Date.now();
         session._writerReady = false;
+
+        // Log SCTP info
+        const sctp = pc.sctp;
+        const maxMsg = sctp?.maxMessageSize || 'unknown';
+        console.log(`[P2P DEBUG] Receiver SCTP maxMessageSize=${maxMsg}`);
+
         this._notifyUpdate(session.transferId, session);
-        this._emitDiag(session, 'dc_open', { side: 'receiver' });
+        this._emitDiag(session, 'dc_open', {
+          side: 'receiver',
+          maxMessageSize: maxMsg,
+        });
         // Initialize progressive writer — MUST complete before processing chunks
         await this._initReceiveWriter(session);
         // If writer init cancelled the transfer, don't proceed
@@ -1077,6 +1117,12 @@ class P2PFileTransferService {
 
       dc.onerror = (err) => {
         console.error(`[P2P DEBUG] ❌ Receiver DataChannel ERROR for ${session.transferId}:`, err);
+        this._emitDiag(session, 'dc_error', {
+          side: 'receiver',
+          error: err?.error?.message || err?.message || String(err),
+          iceState: pc?.iceConnectionState,
+          chunksReceived: session.chunksReceived || 0,
+        });
       };
     };
 
@@ -1253,18 +1299,19 @@ class P2PFileTransferService {
    * Send file chunks through DataChannel with backpressure management
    */
   async _sendChunks(session) {
-    const { file, dataChannel, chunkSize, totalChunks } = session;
+    const { file, dataChannel } = session;
     if (!file || !dataChannel) return;
 
-    while (session.currentChunk < totalChunks && !session.isPaused && session.status === 'transferring') {
+    // Read chunkSize/totalChunks from session LIVE (may have been adapted by SCTP maxMessageSize)
+    while (session.currentChunk < session.totalChunks && !session.isPaused && session.status === 'transferring') {
       // Backpressure: wait if buffer is too full
       if (dataChannel.bufferedAmount > CONFIG.BUFFER_THRESHOLD) {
         await this._waitForBufferDrain(dataChannel);
         continue;
       }
 
-      const start = session.currentChunk * chunkSize;
-      const end = Math.min(start + chunkSize, file.size);
+      const start = session.currentChunk * session.chunkSize;
+      const end = Math.min(start + session.chunkSize, file.size);
       const slice = file.slice(start, end);
 
       try {
@@ -1279,6 +1326,21 @@ class P2PFileTransferService {
         packet.set(new Uint8Array(header), 0);
         packet.set(new Uint8Array(arrayBuffer), 4);
         
+        // Safety check: verify packet fits within SCTP maxMessageSize
+        const maxMsg = session.peerConnection?.sctp?.maxMessageSize || 65535;
+        if (packet.byteLength > maxMsg) {
+          console.error(`[P2P] ❌ Packet ${packet.byteLength} exceeds maxMessageSize ${maxMsg}! Aborting.`);
+          this._emitDiag(session, 'packet_too_large', {
+            packetSize: packet.byteLength,
+            maxMessageSize: maxMsg,
+            chunk: session.currentChunk,
+          });
+          session.status = 'failed';
+          session._failReason = 'packet_too_large';
+          this._notifyUpdate(session.transferId, session);
+          return;
+        }
+
         // Retry send up to 3 times with brief delay
         let sent = false;
         for (let retry = 0; retry < 3; retry++) {
@@ -1293,6 +1355,13 @@ class P2PFileTransferService {
             break;
           } catch (sendErr) {
             console.warn(`[P2P] Chunk ${session.currentChunk} send retry ${retry + 1}/3:`, sendErr.message);
+            this._emitDiag(session, 'send_error', {
+              chunk: session.currentChunk,
+              retry: retry + 1,
+              error: sendErr.message,
+              dcState: dataChannel.readyState,
+              buffered: dataChannel.bufferedAmount,
+            });
             if (retry < 2) await new Promise(r => setTimeout(r, 500));
           }
         }
@@ -1312,7 +1381,18 @@ class P2PFileTransferService {
         }
         
         session.currentChunk++;
-        session.bytesTransferred = Math.min(session.currentChunk * chunkSize, file.size);
+        session.bytesTransferred = Math.min(session.currentChunk * session.chunkSize, file.size);
+
+        // Emit diagnostic for first chunk and every 50th chunk
+        if (session.currentChunk === 1 || session.currentChunk % 50 === 0) {
+          this._emitDiag(session, 'chunk_sent', {
+            chunk: session.currentChunk,
+            total: session.totalChunks,
+            dcState: dataChannel.readyState,
+            buffered: dataChannel.bufferedAmount,
+            bytes: session.bytesTransferred,
+          });
+        }
         
         // Calculate speed every 500ms
         this._calculateSpeed(session);
