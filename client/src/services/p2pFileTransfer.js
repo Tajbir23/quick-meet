@@ -75,10 +75,11 @@ const MAX_BROWSER_MEMORY_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
  * Determine if the current platform can receive large files (>2GB)
  * - Electron: yes (Node.js fs streaming)
  * - Chrome/Edge with FSAA: yes (disk streaming via showSaveFilePicker)
+ * - Capacitor native (Android/iOS): yes (Filesystem plugin writes to disk)
  * - Others: NO — limited to 2GB in memory
  */
 export function canReceiveLargeFiles() {
-  return isElectron || hasFSAccessAPI;
+  return isElectron || hasFSAccessAPI || isCapacitorNative;
 }
 
 /**
@@ -87,6 +88,7 @@ export function canReceiveLargeFiles() {
 export function getMaxReceiveSize() {
   if (isElectron) return Infinity; // No limit — streams to disk
   if (hasFSAccessAPI) return Infinity; // Chrome/Edge — streams to disk
+  if (isCapacitorNative) return 100 * 1024 * 1024 * 1024; // 100GB — Capacitor Filesystem writes to disk
   return MAX_BROWSER_MEMORY_FILE_SIZE; // 2GB for memory-only browsers
 }
 
@@ -96,6 +98,7 @@ export function getMaxReceiveSize() {
 export function getPlatformCapability() {
   if (isElectron) return 'desktop-stream';
   if (hasFSAccessAPI) return 'browser-fsaa';
+  if (isCapacitorNative) return 'capacitor-native';
   return 'browser-memory';
 }
 
@@ -1486,8 +1489,8 @@ class P2PFileTransferService {
     session._useElectronStream = false;
     session._useFSAAStream = false;
 
-    console.log(`[P2P DEBUG] _initReceiveWriter | isElectron=${isElectron} | hasFSAccessAPI=${hasFSAccessAPI} | isMobile=${isMobile} | fileSize=${session.fileSize}`);
-    this._emitDiag(session, 'writer_init_start', { isElectron, hasFSAccessAPI, isMobile });
+    console.log(`[P2P DEBUG] _initReceiveWriter | isElectron=${isElectron} | hasFSAccessAPI=${hasFSAccessAPI} | isMobile=${isMobile} | isCapacitor=${isCapacitorNative} | fileSize=${session.fileSize}`);
+    this._emitDiag(session, 'writer_init_start', { isElectron, hasFSAccessAPI, isMobile, isCapacitorNative });
 
     // ── PATH 1: Electron native file streaming ──────────────────────────
     if (isElectron) {
@@ -1548,7 +1551,24 @@ class P2PFileTransferService {
       }
     }
 
-    // ── PATH 3: Browser Memory fallback (Firefox/Safari) ────────────────
+    // ── PATH 3: Capacitor native (Android/iOS) ────────────────────────
+    // Uses memory accumulation but saves to disk via Filesystem plugin.
+    // Capacitor can handle large files since final save goes to native FS.
+    if (isCapacitorNative) {
+      session.receivedChunks = new Array(session.totalChunks);
+      session._useCapacitorSave = true;
+      // For very large files (>2GB), use progressive flushing to avoid OOM
+      if (session.fileSize > MAX_BROWSER_MEMORY_FILE_SIZE) {
+        session._flushThreshold = 500; // Flush to disk every 500 chunks
+        session._flushedParts = [];
+        session._lastFlushedIndex = 0;
+      }
+      console.log(`[P2P] Capacitor native mode for: ${session.fileName} (${(session.fileSize / 1048576).toFixed(0)}MB)`);
+      this._emitDiag(session, 'writer_init_done', { mode: 'capacitor', totalChunks: session.totalChunks });
+      return;
+    }
+
+    // ── PATH 4: Browser Memory fallback (Firefox/Safari) ────────────────
     // SAFETY: Reject files > 2GB for memory-only browsers
     if (session.fileSize > MAX_BROWSER_MEMORY_FILE_SIZE) {
       console.error(`[P2P] File ${session.fileName} (${(session.fileSize / 1073741824).toFixed(1)}GB) exceeds 2GB browser memory limit`);
