@@ -616,17 +616,37 @@ const AboutTab = () => {
               {updateResult.notes && (
                 <p className="text-xs text-dark-300 mb-3">{updateResult.notes}</p>
               )}
-              {updateResult.url && (
-                <a
-                  href={updateResult.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium rounded-lg transition-colors"
-                >
-                  <Download size={12} />
-                  Download Update
-                </a>
-              )}
+              <button
+                onClick={() => {
+                  // Platform-specific install action
+                  const platformKey = window.electronAPI?.isElectron ? 'desktop'
+                    : window.Capacitor?.isNativePlatform?.() ? 'android' : 'web';
+                  
+                  if (platformKey === 'web') {
+                    // Clear caches and reload
+                    if ('caches' in window) {
+                      caches.keys().then(names => names.forEach(name => caches.delete(name)));
+                    }
+                    window.location.reload(true);
+                  } else if (platformKey === 'desktop') {
+                    // Trigger electron-updater download
+                    if (window.electronAPI?.checkForUpdate) {
+                      window.electronAPI.checkForUpdate();
+                    } else if (updateResult.url) {
+                      window.open(updateResult.url, '_blank');
+                    }
+                  } else if (platformKey === 'android' && updateResult.url) {
+                    // Open download URL — UpdateNotification handles proper APK install
+                    window.open(updateResult.url, '_system');
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium rounded-lg transition-colors"
+              >
+                <Download size={12} />
+                {window.electronAPI?.isElectron ? 'Download & Install'
+                  : window.Capacitor?.isNativePlatform?.() ? 'Download & Install'
+                  : 'Reload to Update'}
+              </button>
             </div>
           )}
           {updateResult.type === 'error' && (
