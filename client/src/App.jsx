@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
+import { RefreshCw } from 'lucide-react';
 import useAuthStore from './store/useAuthStore';
 import { onForceLogout } from './services/socket';
 import LoginPage from './pages/LoginPage';
@@ -21,6 +22,17 @@ import useFileTransferStore from './store/useFileTransferStore';
 
 function App() {
   const { checkAuth, isAuthenticated, isLoading, isOwner, handleForceLogout } = useAuthStore();
+
+  const handleForceReload = useCallback(() => {
+    // Clear all caches and hard reload
+    if ('caches' in window) {
+      caches.keys().then(names => names.forEach(name => caches.delete(name)));
+    }
+    // Clear session storage
+    try { sessionStorage.clear(); } catch (e) {}
+    // Hard reload bypassing cache
+    window.location.reload(true);
+  }, []);
 
   useEffect(() => {
     checkAuth();
@@ -53,6 +65,15 @@ function App() {
       {isAuthenticated && <IncomingFileTransfer />}
       {isAuthenticated && <FileTransferPanel />}
       {isAuthenticated && <FileTransferIndicator />}
+
+      {/* Force Reload Button — always visible, works even when socket disconnected */}
+      <button
+        onClick={handleForceReload}
+        title="Force Reload"
+        className="fixed bottom-4 left-4 z-[9997] w-10 h-10 rounded-full bg-dark-800/80 hover:bg-dark-700 border border-dark-600 hover:border-primary-500/50 text-dark-400 hover:text-primary-400 flex items-center justify-center transition-all duration-200 shadow-lg backdrop-blur-sm active:scale-90"
+      >
+        <RefreshCw size={16} />
+      </button>
 
       <div className="flex-1 overflow-hidden">
       <Routes>
