@@ -22,6 +22,15 @@ export default defineConfig({
     // Increase chunk size warning limit for large apps
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
+      // Capacitor plugins are mobile-only — exclude from web build
+      external: [
+        '@capacitor/filesystem',
+        '@capacitor/core',
+        '@capacitor/app',
+        '@capacitor/haptics',
+        '@capacitor/keyboard',
+        '@capacitor/status-bar',
+      ],
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
