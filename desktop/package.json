@@ -1,6 +1,6 @@
 {
   "name": "quick-meet-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Quick Meet — Desktop App (Electron)",
   "main": "main.js",
   "scripts": {
@@ -36,7 +36,10 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64", "ia32"]
+          "arch": [
+            "x64",
+            "ia32"
+          ]
         }
       ],
       "icon": "icon.ico"
@@ -49,12 +52,17 @@
       "installerIcon": "icon.ico"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "icon.png",
       "category": "Network"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "icon.icns",
       "category": "public.app-category.social-networking"
     }
