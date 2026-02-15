@@ -37,7 +37,7 @@
  * - Receiver skips already-received chunks
  */
 
-import { ICE_SERVERS } from '../utils/constants';
+import { ICE_SERVERS, SERVER_URL } from '../utils/constants';
 import { getSocket } from '../services/socket';
 import { saveFileToDevice, showNativeNotification, isNative, getPlatform } from '../utils/platform';
 
@@ -726,49 +726,86 @@ class P2PFileTransferService {
    * Each TURN URL gets its own iceServers entry so browsers try all transports
    * simultaneously (UDP, TCP, TLS) instead of sequentially.
    */
+  /**
+   * Helper: extract STUN-only entries from ICE_SERVERS (no static TURN)
+   */
+  _getStunOnlyConfig() {
+    const stunOnly = ICE_SERVERS.iceServers.filter(s => {
+      const url = Array.isArray(s.urls) ? s.urls[0] : s.urls;
+      return url && url.startsWith('stun:');
+    });
+    return {
+      iceTransportPolicy: ICE_SERVERS.iceTransportPolicy || 'all',
+      bundlePolicy: ICE_SERVERS.bundlePolicy || 'max-bundle',
+      rtcpMuxPolicy: ICE_SERVERS.rtcpMuxPolicy || 'require',
+      iceServers: [...stunOnly],
+    };
+  }
+
   async _getIceConfig() {
-    try {
-      const token = localStorage.getItem('token');
-      const baseUrl = import.meta.env.VITE_SERVER_URL || 'https://localhost:5000';
-      const resp = await fetch(`${baseUrl}/api/transfers/turn-credentials`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      
-      if (!resp.ok) {
-        console.warn(`[P2P] Failed to fetch TURN credentials (${resp.status}), using STUN-only config`);
-        return { ...ICE_SERVERS };
+    // Retry once on failure (network hiccup, transient 500, etc.)
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          console.warn('[P2P] No auth token for TURN credential fetch, using STUN-only');
+          return this._getStunOnlyConfig();
+        }
+
+        // Use the imported SERVER_URL constant (same as login/chat/socket)
+        const url = `${SERVER_URL}/api/transfers/turn-credentials`;
+        console.log(`[P2P DEBUG] Fetching TURN credentials (attempt ${attempt}) | url=${url}`);
+        
+        const resp = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${token}` },
+          signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+        });
+        
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => '');
+          console.warn(`[P2P] TURN credential fetch failed (attempt ${attempt}) | status=${resp.status} | body=${body.substring(0, 200)}`);
+          if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+          }
+          console.warn('[P2P] All TURN credential attempts failed, using STUN-only');
+          return this._getStunOnlyConfig();
+        }
+        
+        const turnData = await resp.json();
+        console.log(`[P2P DEBUG] ✅ Got dynamic TURN credentials | username=${turnData.username} | uris=${turnData.uris?.length} | ttl=${turnData.ttl}s`);
+        
+        if (!turnData.uris || turnData.uris.length === 0 || !turnData.credential) {
+          console.warn('[P2P] TURN response missing uris/credential, using STUN-only');
+          return this._getStunOnlyConfig();
+        }
+        
+        // Build ICE config with dynamic TURN credentials
+        // Each URI gets its own entry for maximum browser compatibility
+        const turnServers = turnData.uris.map(uri => ({
+          urls: uri,
+          username: turnData.username,
+          credential: turnData.credential,
+        }));
+        
+        // Only STUN from static config + dynamic TURN
+        // NEVER include static TURN — causes coturn error 437 (wrong transaction ID)
+        const config = this._getStunOnlyConfig();
+        config.iceServers = [...config.iceServers, ...turnServers];
+        
+        return config;
+      } catch (err) {
+        console.warn(`[P2P] TURN credential fetch error (attempt ${attempt}):`, err.message);
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 1000));
+          continue;
+        }
       }
-      
-      const turnData = await resp.json();
-      console.log(`[P2P DEBUG] Got dynamic TURN credentials | username=${turnData.username} | uris=${turnData.uris?.length} | ttl=${turnData.ttl}s`);
-      
-      // Build ICE config with dynamic TURN credentials
-      // Each URI gets its own entry for maximum browser compatibility
-      const turnServers = (turnData.uris || []).map(uri => ({
-        urls: uri,
-        username: turnData.username,
-        credential: turnData.credential,
-      }));
-      
-      // IMPORTANT: Only include STUN from static config, NOT static TURN servers.
-      // Having both static + dynamic TURN credentials for the SAME TURN server
-      // causes coturn error 437 (wrong transaction ID) due to conflicting allocations.
-      const stunOnly = ICE_SERVERS.iceServers.filter(s => {
-        const url = Array.isArray(s.urls) ? s.urls[0] : s.urls;
-        return url && url.startsWith('stun:');
-      });
-      
-      return {
-        ...ICE_SERVERS,
-        iceServers: [
-          ...stunOnly,
-          ...turnServers,
-        ],
-      };
-    } catch (err) {
-      console.warn('[P2P] Error fetching TURN credentials, using STUN-only config:', err.message);
-      return { ...ICE_SERVERS };
     }
+    
+    // All retries exhausted — STUN-only (no static TURN to avoid error 437)
+    console.warn('[P2P] All TURN credential fetches failed, using STUN-only config');
+    return this._getStunOnlyConfig();
   }
 
   /**
@@ -904,8 +941,8 @@ class P2PFileTransferService {
       await pc.setLocalDescription(offer);
       console.log(`[P2P DEBUG] Local description set (offer) | transferId=${session.transferId} | gathering=${pc.iceGatheringState}`);
 
-      // Wait for ICE gathering to complete (all candidates embedded in SDP)
-      await this._waitForIceGathering(pc, 10000);
+      // Wait for ICE gathering (15s to allow TURN allocation on slow mobile data)
+      await this._waitForIceGathering(pc, 15000);
       
       // Count candidates in SDP for diagnostics
       const sdpText = pc.localDescription?.sdp || '';
@@ -1068,8 +1105,8 @@ class P2PFileTransferService {
       await pc.setLocalDescription(answer);
       console.log(`[P2P DEBUG] Local description set (answer) | transferId=${session.transferId} | gathering=${pc.iceGatheringState}`);
 
-      // Wait for ICE gathering to complete (all candidates embedded in SDP)
-      await this._waitForIceGathering(pc, 10000);
+      // Wait for ICE gathering (15s to allow TURN allocation on slow mobile data)
+      await this._waitForIceGathering(pc, 15000);
       
       // Count candidates in SDP for diagnostics
       const sdpText = pc.localDescription?.sdp || '';

@@ -41,18 +41,19 @@ router.get('/turn-credentials', (req, res) => {
     hmac.update(username);
     const credential = hmac.digest('base64');
 
+    console.log(`[TURN] Generated credentials | user=${req.user.username} | turnUsername=${username} | uris=6`);
     res.json({
       username,
       credential,
       ttl: TTL,
       uris: [
-        // UDP (primary)
+        // UDP (primary — fastest, most networks)
         `turn:${TURN_SERVER_IP}:3478`,
         `turn:${TURN_DOMAIN}:3478`,
         // TCP fallback (for restrictive networks / Android WebView)
         `turn:${TURN_SERVER_IP}:3478?transport=tcp`,
         `turn:${TURN_DOMAIN}:3478?transport=tcp`,
-        // TLS/TCP (most restrictive networks)
+        // TLS/TCP on 5349 (encrypted TURN, for very restrictive networks)
         `turns:${TURN_DOMAIN}:5349?transport=tcp`,
         `turns:${TURN_SERVER_IP}:5349?transport=tcp`,
       ],
