@@ -1806,51 +1806,42 @@ class P2PFileTransferService {
         savePath = session._capacitorPath;
         console.log(`[P2P] Capacitor file saved: ${savePath} (${(session._totalBytesReceived / 1048576).toFixed(1)}MB)`);
 
-        // Try to open/show the file after save
+        // Verify file was actually saved using stat()
         try {
-          const fileUri = await session._capacitorFS.getUri({
+          const statResult = await session._capacitorFS.stat({
             path: session._capacitorPath,
             directory: session._capacitorDir,
           });
-          console.log(`[P2P] Saved file URI: ${fileUri?.uri}`);
-          if (fileUri?.uri) {
-            const FileOpener = window.Capacitor?.Plugins?.FileOpener;
-            if (FileOpener?.open) {
-              try {
-                // openWithDefault: false → shows Android chooser dialog
-                // so user can pick file manager, media player, etc.
-                await FileOpener.open({
-                  filePath: fileUri.uri,
-                  contentType: session.fileMimeType || 'application/octet-stream',
-                  openWithDefault: false,
-                });
-                console.log(`[P2P] FileOpener chooser shown`);
-              } catch (openErr) {
-                console.warn(`[P2P] FileOpener chooser failed: ${openErr.message}`);
-                // Fallback: try to open the Download directory in file manager
-                try {
-                  const parentDir = session._capacitorDir === 'EXTERNAL_STORAGE' ? 'Download' : 'Download';
-                  const parentUri = await session._capacitorFS.getUri({
-                    path: parentDir,
-                    directory: session._capacitorDir,
-                  });
-                  if (parentUri?.uri) {
-                    await FileOpener.open({
-                      filePath: parentUri.uri,
-                      contentType: 'resource/folder',
-                      openWithDefault: false,
-                    });
-                  }
-                } catch (dirErr) {
-                  console.warn(`[P2P] Directory open also failed: ${dirErr.message}`);
-                }
-              }
-            } else {
-              console.warn('[P2P] FileOpener plugin not available');
-            }
+          const savedSize = statResult?.size || 0;
+          const expectedSize = session.fileSize || 0;
+          const sizeMatch = expectedSize > 0
+            ? Math.abs(savedSize - expectedSize) <= 1024 // allow 1KB tolerance
+            : savedSize > 0;
+          console.log(`[P2P] ✅ File verified on disk: ${savePath} | size=${savedSize} | expected=${expectedSize} | match=${sizeMatch}`);
+          this._emitDiag(session, 'capacitor_save_verified', {
+            path: savePath,
+            dir: session._capacitorDir,
+            savedSize,
+            expectedSize,
+            sizeMatch,
+            uri: statResult?.uri || 'unknown',
+          });
+          if (!sizeMatch && expectedSize > 0) {
+            console.warn(`[P2P] ⚠️ File size mismatch! saved=${savedSize} expected=${expectedSize}`);
           }
-        } catch (e) {
-          console.warn('[P2P] Auto-open skipped:', e.message);
+        } catch (statErr) {
+          console.error(`[P2P] ❌ File NOT found on disk: ${savePath} | error=${statErr.message}`);
+          this._emitDiag(session, 'capacitor_save_missing', {
+            path: savePath,
+            dir: session._capacitorDir,
+            error: statErr.message,
+          });
+          // File didn't save — mark as failed
+          session.status = 'failed';
+          session._failReason = 'file_not_saved';
+          session._finalizing = false;
+          this._notifyUpdate(session.transferId, session);
+          return;
         }
       }
       // ── Browser Memory: build blob and download ──────────────────────
