@@ -205,16 +205,20 @@ const openFileOnMobile = async (fileUri, filePath, fileName, directory) => {
   
   // Method 1: Try Capacitor FileOpener plugin (if installed)
   try {
-    const { FileOpener } = await import('@capacitor-community/file-opener');
-    await FileOpener.open({
-      filePath: fileUri,
-      contentType: mimeType,
-    });
-    console.log(`[Platform] File opened via FileOpener: ${fileName}`);
-    return;
+    const fileOpenerModule = await import('@capacitor-community/file-opener');
+    const FileOpener = fileOpenerModule.FileOpener || fileOpenerModule.FileOpener2 || fileOpenerModule.default;
+    if (FileOpener?.open) {
+      await FileOpener.open({
+        filePath: fileUri,
+        contentType: mimeType,
+        openWithDefault: true,
+      });
+      console.log(`[Platform] File opened via FileOpener: ${fileName}`);
+      return;
+    }
   } catch (e) {
     // FileOpener plugin not installed — try alternative methods
-    console.log('[Platform] FileOpener plugin not available, trying alternative...');
+    console.log('[Platform] FileOpener plugin not available, trying alternative...', e.message);
   }
 
   // Method 2: Use Capacitor's App.openUrl for content:// URIs
