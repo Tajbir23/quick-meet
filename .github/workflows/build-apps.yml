@@ -17,6 +17,8 @@ jobs:
   version:
     name: Bump & Get Version
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       desktop_version: ${{ steps.versions.outputs.desktop }}
       android_version: ${{ steps.versions.outputs.android }}
