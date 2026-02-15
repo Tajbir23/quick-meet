@@ -285,23 +285,9 @@ class WebRTCService {
         this.onIceStateChange(peerId, state);
       }
 
-      // Handle failure — attempt ICE restart
-      if (state === 'failed') {
-        console.log(`⚠️ ICE failed for ${peerId}, attempting restart...`);
-        this.restartIce(peerId);
-      }
-
-      // Clean up on close
-      if (state === 'closed' || state === 'disconnected') {
-        // Give it a moment — disconnected can recover
-        if (state === 'disconnected') {
-          setTimeout(() => {
-            if (pc.iceConnectionState === 'disconnected') {
-              console.log(`⚠️ Connection to ${peerId} still disconnected, may need restart`);
-            }
-          }, 5000);
-        }
-      }
+      // NOTE: ICE restart on 'failed' / 'disconnected' is handled
+      // by setupWebRTCCallbacks in useCallStore.js (with proper timeouts).
+      // Do NOT restart here to avoid double-restart SDP conflicts.
     };
 
     /**
@@ -875,6 +861,14 @@ class WebRTCService {
     this.peerConnections.clear();
     this.remoteStreams.clear();
     this.iceCandidateQueues.clear();
+
+    // Clear event callbacks to prevent stale handlers firing
+    // on accidentally-created PeerConnections after call ends
+    this.onIceCandidate = null;
+    this.onIceStateChange = null;
+    this.onRemoteStream = null;
+    this.onRemoteStreamRemoved = null;
+    this.onNegotiationNeeded = null;
 
     console.log('🔒 All connections closed and streams stopped');
   }

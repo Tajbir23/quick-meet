@@ -731,11 +731,16 @@ const useCallStore = create((set, get) => ({
 
       if (state === 'failed') {
         console.log('⚠️ ICE failed — attempting ICE restart...');
+        // Guard: if call already ended (e.g. call:ended arrived), skip
+        if (get().callStatus === CALL_STATUS.IDLE) return;
+
         set({ callStatus: CALL_STATUS.RECONNECTING });
 
         // Attempt ICE restart
         webrtcService.restartIce(remotePeerId)
           .then((offer) => {
+            // Re-check: call might have ended while ICE restart was in progress
+            if (get().callStatus === CALL_STATUS.IDLE) return;
             if (offer) {
               const socket = getSocket();
               if (socket) {
@@ -756,7 +761,9 @@ const useCallStore = create((set, get) => ({
           })
           .catch((err) => {
             console.error('ICE restart failed:', err);
-            set({ callStatus: CALL_STATUS.FAILED });
+            if (get().callStatus !== CALL_STATUS.IDLE) {
+              set({ callStatus: CALL_STATUS.FAILED });
+            }
           });
 
         // Fallback: if ICE stays failed for 10s after restart attempt, end the call
@@ -770,14 +777,22 @@ const useCallStore = create((set, get) => ({
       }
 
       if (state === 'disconnected') {
+        // Guard: if call already ended, skip reconnection attempt
+        if (get().callStatus === CALL_STATUS.IDLE) return;
+
         // Disconnected can recover — wait 5 seconds, then try ICE restart
         set({ callStatus: CALL_STATUS.RECONNECTING });
         setTimeout(() => {
           const currentIce = get().iceState;
+          const currentStatus = get().callStatus;
+          // Skip if call has already ended or ICE recovered
+          if (currentStatus === CALL_STATUS.IDLE) return;
           if (currentIce === 'disconnected') {
             console.log('⚠️ Still disconnected after 5s, attempting ICE restart');
             webrtcService.restartIce(remotePeerId)
               .then((offer) => {
+                // Re-check: call might have ended while ICE restart was in progress
+                if (get().callStatus === CALL_STATUS.IDLE) return;
                 if (offer) {
                   const socket = getSocket();
                   if (socket) {

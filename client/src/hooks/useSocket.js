@@ -232,6 +232,12 @@ const useSocket = () => {
 
     // Renegotiation (for screen share, ICE restart, etc.)
     socket.on('call:renegotiate', async ({ userId, offer }) => {
+      // Guard: only process renegotiation if we're actually in a call with this user
+      const { callStatus, remoteUser } = useCallStore.getState();
+      if (callStatus === 'idle' || (remoteUser && remoteUser.userId !== userId)) {
+        console.log(`🚫 Ignoring renegotiate from ${userId} — not in active call (status: ${callStatus})`);
+        return;
+      }
       try {
         console.log('🔄 Renegotiation offer received from:', userId);
         const answer = await webrtcService.handleOffer(userId, offer);
@@ -245,6 +251,12 @@ const useSocket = () => {
     });
 
     socket.on('call:renegotiate-answer', async ({ userId, answer }) => {
+      // Guard: only process if we're in an active call
+      const { callStatus } = useCallStore.getState();
+      if (callStatus === 'idle') {
+        console.log(`🚫 Ignoring renegotiate-answer from ${userId} — call already ended`);
+        return;
+      }
       try {
         await webrtcService.handleAnswer(userId, answer);
       } catch (err) {
