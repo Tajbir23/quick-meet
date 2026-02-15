@@ -50,6 +50,12 @@ const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/
 const isElectron = !!window.electronAPI?.isElectron;
 
 /**
+ * Detect Capacitor native platform (Android/iOS WebView via Capacitor)
+ * window.Capacitor is injected by the Capacitor runtime.
+ */
+const isCapacitorNative = !!(window.Capacitor?.isNativePlatform?.());
+
+/**
  * Check if the browser supports File System Access API (showSaveFilePicker)
  * Available in Chrome 86+, Edge 86+, Opera 72+
  * NOT available in Firefox, Safari, or mobile browsers.
