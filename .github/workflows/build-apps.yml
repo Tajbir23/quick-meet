@@ -272,5 +272,5 @@ jobs:
             console.log('versions.json updated: ' + '$CLIENT_VERSION');
             "
             
-            pm2 restart quick-meet
+            pm2 restart quickmeet
             echo "Deploy complete: $(date)"

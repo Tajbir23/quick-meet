@@ -110,7 +110,7 @@ fi
 # ─── 7. Restart PM2 ──────────────────────────
 echo ""
 echo "♻️  Restarting PM2..."
-pm2 restart quick-meet
+pm2 restart quickmeet
 
 # ─── 8. Done ─────────────────────────────────
 echo ""

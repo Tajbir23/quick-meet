@@ -175,7 +175,7 @@ router.post('/', express.raw({ type: 'application/json' }), (req, res) => {
     }
     
     // Restart PM2
-    exec('pm2 restart quick-meet', (pmError, pmOut) => {
+    exec('pm2 restart quickmeet', (pmError, pmOut) => {
       if (pmError) {
         logDeploy(`⚠️ PM2 restart failed: ${pmError.message}. Try manual restart.`);
       } else {
