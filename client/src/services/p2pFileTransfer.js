@@ -750,12 +750,13 @@ class P2PFileTransferService {
         credential: turnData.credential,
       }));
       
+      // Use ONLY dynamic TURN servers (no STUN) + force relay mode
+      // This ensures no local/host IPs are used, consistent across all networks
       return {
-        ...ICE_SERVERS,
-        iceServers: [
-          ...ICE_SERVERS.iceServers,
-          ...turnServers,
-        ],
+        iceServers: turnServers,
+        iceTransportPolicy: 'relay',
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
       };
     } catch (err) {
       console.warn('[P2P] Error fetching TURN credentials, using STUN-only config:', err.message);

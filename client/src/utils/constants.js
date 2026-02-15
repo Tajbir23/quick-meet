@@ -25,14 +25,10 @@ export const API_URL = `${SERVER_URL}/api`;
 // - No static TURN credentials in client code
 export const ICE_SERVERS = {
   iceServers: [
-    // STUN servers — multiple for reliability (especially Android WebView)
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    // TURN servers — static long-lived credentials (use-auth-secret / TURN REST API)
+    // TURN servers ONLY — relay mode forces all traffic through TURN.
+    // No STUN servers needed (relay mode ignores srflx/host candidates).
+    // Static long-lived credentials (use-auth-secret / TURN REST API).
     // Valid for 1 year. P2P file transfer fetches fresh credentials dynamically.
-    // Audio/video calls use these static credentials.
     {
       urls: 'turn:167.71.235.56:3478',
       username: '1802712048:quickmeet-static',
@@ -71,14 +67,12 @@ export const ICE_SERVERS = {
     }] : []),
   ].filter(s => s.urls),
 
-  // NOTE: iceCandidatePoolSize removed — pre-allocating pools causes
-  // simultaneous TURN allocations from same NAT, leading to stale session
-  // and wrong transaction ID errors on coturn
-
-  // SECURITY POLICIES:
-  // 'all' = allow P2P + relay (default, good for performance)
-  // 'relay' = force TURN relay only (hides user IPs but higher latency)
-  iceTransportPolicy: import.meta.env.VITE_ICE_TRANSPORT_POLICY || 'all',
+  // RELAY-ONLY MODE:
+  // Forces ALL WebRTC traffic through the TURN server.
+  // - No local/host IP candidates are generated (privacy + consistency)
+  // - Works identically on local network and internet
+  // - Slightly higher latency but guaranteed connectivity
+  iceTransportPolicy: 'relay',
   bundlePolicy: 'max-bundle',       // Multiplex all media on one transport
   rtcpMuxPolicy: 'require',         // Force RTCP multiplexing
 };
