@@ -46,6 +46,10 @@ const securityLogger = require('../security/SecurityEventLogger');
 const { SEVERITY } = require('../security/SecurityEventLogger');
 const Message = require('../models/Message');
 
+// Track active 1-to-1 calls: userId → targetUserId
+// Used to notify the other party when a user disconnects mid-call
+const activeCalls = new Map();
+
 /**
  * Helper: Create a call log message in DB and emit to both users in real-time.
  * The CALLER is always the message sender so the UI shows correct direction.
@@ -195,6 +199,10 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
     if (callerSocketId) {
       console.log(`📞 Call answer: ${socket.username} → ${callerId}`);
 
+      // Track active call — both parties
+      activeCalls.set(socket.userId, callerId);
+      activeCalls.set(callerId, socket.userId);
+
       io.to(callerSocketId).emit('call:answer', {
         answererId: socket.userId,
         answererName: socket.username,
@@ -235,6 +243,10 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
   socket.on('call:reject', ({ callerId, reason, callType }) => {
     const callerSocketId = onlineUsers.get(callerId);
 
+    // Clear active call tracking
+    activeCalls.delete(socket.userId);
+    activeCalls.delete(callerId);
+
     if (callerSocketId) {
       console.log(`📞 Call rejected: ${socket.username} rejected call from ${callerId}`);
 
@@ -262,6 +274,10 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
    */
   socket.on('call:end', ({ targetUserId, callDuration, callType, isIncoming }) => {
     const targetSocketId = onlineUsers.get(targetUserId);
+
+    // Clear active call tracking for both parties
+    activeCalls.delete(socket.userId);
+    activeCalls.delete(targetUserId);
 
     if (targetSocketId) {
       console.log(`📞 Call ended: ${socket.username} → ${targetUserId}`);
@@ -359,6 +375,28 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
         userId: socket.userId,
         answer,
       });
+    }
+  });
+
+  /**
+   * Handle disconnect — if user was in an active call, notify the other party.
+   * This ensures the call ends for both sides even if the socket disconnects
+   * before the client can emit call:end (e.g., app killed, network drop).
+   */
+  socket.on('disconnect', () => {
+    const targetUserId = activeCalls.get(socket.userId);
+    if (targetUserId) {
+      console.log(`📞 User ${socket.username} disconnected during active call with ${targetUserId}`);
+      activeCalls.delete(socket.userId);
+      activeCalls.delete(targetUserId);
+
+      const targetSocketId = onlineUsers.get(targetUserId);
+      if (targetSocketId) {
+        io.to(targetSocketId).emit('call:ended', {
+          userId: socket.userId,
+          username: socket.username,
+        });
+      }
     }
   });
 };

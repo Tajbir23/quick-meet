@@ -719,8 +719,11 @@ class P2PFileTransferService {
 
     dc.onerror = (err) => {
       console.error(`[P2P DEBUG] ❌ DataChannel ERROR for ${session.transferId}:`, err);
-      session.status = 'failed';
-      this._notifyUpdate(session.transferId, session);
+      // Don't overwrite terminal states
+      if (!['completed', 'verifying', 'cancelled'].includes(session.status)) {
+        session.status = 'failed';
+        this._notifyUpdate(session.transferId, session);
+      }
     };
 
     // ICE candidates
@@ -742,17 +745,19 @@ class P2PFileTransferService {
 
     pc.oniceconnectionstatechange = () => {
       console.log(`[P2P DEBUG] Sender ICE connection state: ${pc.iceConnectionState} for ${session.transferId}`);
+      // Never overwrite terminal states
+      const isTerminal = ['completed', 'verifying', 'cancelled'].includes(session.status);
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         this._clearConnectionTimeout(session);
       }
-      if (pc.iceConnectionState === 'failed') {
+      if (pc.iceConnectionState === 'failed' && !isTerminal) {
         this._clearConnectionTimeout(session);
         session.status = 'failed';
         session._failReason = 'ice_failed';
         this._notifyUpdate(session.transferId, session);
         this._reportProgressToServer(session);
       }
-      if (pc.iceConnectionState === 'disconnected') {
+      if (pc.iceConnectionState === 'disconnected' && !isTerminal) {
         session.status = 'paused';
         this._notifyUpdate(session.transferId, session);
         this._reportProgressToServer(session);
@@ -844,6 +849,7 @@ class P2PFileTransferService {
 
       dc.onclose = () => {
         console.log(`[P2P DEBUG] Receiver DataChannel CLOSED for ${session.transferId}, status was: ${session.status}`);
+        // Only pause if still actively transferring — never overwrite terminal states
         if (session.status === 'transferring') {
           session.status = 'paused';
           this._notifyUpdate(session.transferId, session);
@@ -858,17 +864,19 @@ class P2PFileTransferService {
 
     pc.oniceconnectionstatechange = () => {
       console.log(`[P2P DEBUG] Receiver ICE connection state: ${pc.iceConnectionState} for ${session.transferId}`);
+      // Never overwrite terminal states
+      const isTerminal = ['completed', 'verifying', 'cancelled'].includes(session.status);
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         this._clearConnectionTimeout(session);
       }
-      if (pc.iceConnectionState === 'failed') {
+      if (pc.iceConnectionState === 'failed' && !isTerminal) {
         this._clearConnectionTimeout(session);
         session.status = 'failed';
         session._failReason = 'ice_failed';
         this._notifyUpdate(session.transferId, session);
         this._reportProgressToServer(session);
       }
-      if (pc.iceConnectionState === 'disconnected') {
+      if (pc.iceConnectionState === 'disconnected' && !isTerminal) {
         session.status = 'paused';
         this._notifyUpdate(session.transferId, session);
         this._reportProgressToServer(session);
@@ -1036,7 +1044,9 @@ class P2PFileTransferService {
       }
 
       session.status = 'completed';
-      this._reportProgressToServer(session);
+      // NOTE: Do NOT call _reportProgressToServer here — it would revert
+      // the DB status from 'completed' back to 'transferring' if the
+      // receiver already reported completion.
       this._notifyUpdate(session.transferId, session);
       if (this.onTransferComplete) {
         this.onTransferComplete(session.transferId);
@@ -1442,7 +1452,7 @@ class P2PFileTransferService {
         });
       }
 
-      // Cleanup
+      // Cleanup received data (keep session alive briefly for UI)
       session.receivedChunks = [];
       session._flushedBlobs = [];
       fileBlob = null;
@@ -1451,6 +1461,10 @@ class P2PFileTransferService {
       if (this.onTransferComplete) {
         this.onTransferComplete(session.transferId);
       }
+
+      // Destroy WebRTC connection after finalization to prevent
+      // ICE disconnected events from overwriting the 'completed' status
+      session.destroy();
     } catch (err) {
       console.error('Failed to finalize received file:', err);
       session.status = 'failed';

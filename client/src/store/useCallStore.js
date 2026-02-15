@@ -741,10 +741,19 @@ const useCallStore = create((set, get) => ({
             console.error('ICE restart failed:', err);
             set({ callStatus: CALL_STATUS.FAILED });
           });
+
+        // Fallback: if ICE stays failed for 10s after restart attempt, end the call
+        setTimeout(() => {
+          const { iceState: laterState, callStatus: laterStatus } = get();
+          if (laterState === 'failed' && laterStatus !== CALL_STATUS.IDLE) {
+            console.log('❌ ICE still failed after 10s — auto-ending call');
+            get().endCall();
+          }
+        }, 10000);
       }
 
       if (state === 'disconnected') {
-        // Disconnected can recover — wait 5 seconds
+        // Disconnected can recover — wait 5 seconds, then try ICE restart
         set({ callStatus: CALL_STATUS.RECONNECTING });
         setTimeout(() => {
           const currentIce = get().iceState;
@@ -775,6 +784,27 @@ const useCallStore = create((set, get) => ({
               });
           }
         }, 5000);
+
+        // Fallback: if still disconnected or not recovered after 15s, end the call
+        // This handles the case where the remote peer hung up but the
+        // call:ended socket event didn't arrive
+        setTimeout(() => {
+          const { iceState: laterState, callStatus: laterStatus } = get();
+          const notRecovered = laterState === 'disconnected' || laterState === 'failed';
+          if (notRecovered && laterStatus !== CALL_STATUS.IDLE) {
+            console.log('❌ ICE not recovered after 15s — auto-ending call');
+            get().endCall();
+          }
+        }, 15000);
+      }
+
+      if (state === 'closed') {
+        // PeerConnection was closed — the remote peer likely hung up
+        const { callStatus: currentStatus } = get();
+        if (currentStatus !== CALL_STATUS.IDLE) {
+          console.log('🔒 ICE state closed — ending call');
+          get().endCall();
+        }
       }
     };
 

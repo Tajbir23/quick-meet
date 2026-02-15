@@ -220,8 +220,10 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
    */
   socket.on('file-transfer:progress', async ({ transferId, lastReceivedChunk, bytesTransferred, speedBps }) => {
     try {
+      // Only update if transfer is NOT in a terminal state (completed/cancelled/failed)
+      // This prevents late progress events from reverting a completed transfer
       await FileTransfer.updateOne(
-        { transferId },
+        { transferId, status: { $nin: ['completed', 'cancelled', 'failed', 'expired'] } },
         {
           $set: {
             lastReceivedChunk,
