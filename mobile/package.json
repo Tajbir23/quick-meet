@@ -1,6 +1,6 @@
 {
   "name": "quick-meet-mobile",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "Quick Meet — Mobile App (Capacitor + Android)",
   "scripts": {
     "build:web": "cd ../client && npm run build",
