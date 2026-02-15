@@ -825,11 +825,9 @@ class P2PFileTransferService {
 
     dc.onerror = (err) => {
       console.error(`[P2P DEBUG] ❌ DataChannel ERROR for ${session.transferId}:`, err);
-      // Don't overwrite terminal states
-      if (!['completed', 'verifying', 'cancelled'].includes(session.status)) {
-        session.status = 'failed';
-        this._notifyUpdate(session.transferId, session);
-      }
+      // Don't fail if relay fallback is available — ICE failure handler will switch to relay
+      if (session._isRelay) return; // Already in relay mode, ignore DC errors
+      // Only fail if no relay fallback possible (shouldn't happen with our fallback)
     };
 
     // ICE candidates
@@ -856,24 +854,10 @@ class P2PFileTransferService {
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         this._clearConnectionTimeout(session);
       }
-      if (pc.iceConnectionState === 'failed' && !isTerminal) {
-        // Try ICE restart before giving up
-        if (!session._iceRestartAttempted) {
-          console.warn(`[P2P] Sender ICE failed for ${session.transferId}, attempting ICE restart...`);
-          session._iceRestartAttempted = true;
-          this._attemptIceRestart(session);
-        } else {
-          this._clearConnectionTimeout(session);
-          session.status = 'failed';
-          session._failReason = 'ice_failed';
-          this._notifyUpdate(session.transferId, session);
-          this._reportProgressToServer(session);
-          if (this.onTransferError) {
-            this.onTransferError(session.transferId, new Error(
-              'P2P connection failed. Please check your network and try again.'
-            ));
-          }
-        }
+      if (pc.iceConnectionState === 'failed' && !isTerminal && !session._isRelay) {
+        // ICE failed → switch to server relay immediately (don't waste time with ICE restart)
+        console.warn(`[P2P] Sender ICE failed for ${session.transferId}, switching to server relay...`);
+        this._switchToRelayMode(session);
       }
       if (pc.iceConnectionState === 'disconnected' && !isTerminal) {
         // Disconnected is often temporary — wait 5s before pausing
@@ -1002,18 +986,10 @@ class P2PFileTransferService {
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         this._clearConnectionTimeout(session);
       }
-      if (pc.iceConnectionState === 'failed' && !isTerminal) {
-        // Receiver can't initiate ICE restart — just report failure
-        this._clearConnectionTimeout(session);
-        session.status = 'failed';
-        session._failReason = 'ice_failed';
-        this._notifyUpdate(session.transferId, session);
-        this._reportProgressToServer(session);
-        if (this.onTransferError) {
-          this.onTransferError(session.transferId, new Error(
-            'P2P connection failed. Please check your network and try again.'
-          ));
-        }
+      if (pc.iceConnectionState === 'failed' && !isTerminal && !session._isRelay) {
+        // ICE failed on receiver — don't mark as failed, wait for sender's relay-start
+        console.warn(`[P2P] Receiver ICE failed for ${session.transferId}, waiting for sender to switch to relay...`);
+        // Keep session alive — sender will emit relay-start and receiver's socket listener will handle it
       }
       if (pc.iceConnectionState === 'disconnected' && !isTerminal) {
         // Disconnected is often temporary — wait 5s
@@ -1910,27 +1886,14 @@ class P2PFileTransferService {
     session._connectionTimer = setTimeout(() => {
       if (session.status === 'connecting' && !session._iceRestartAttempted) {
         const iceState = session.peerConnection?.iceConnectionState || 'unknown';
-        console.warn(`[P2P] ⚠️ Connection slow for ${session.transferId} after 30s (ICE=${iceState}), attempting ICE restart...`);
-        session._iceRestartAttempted = true;
-        this._attemptIceRestart(session);
-
-        // Second timer: after another 30s, actually fail
-        session._connectionTimer = setTimeout(() => {
-          if (session.status === 'connecting') {
-            const finalIceState = session.peerConnection?.iceConnectionState || 'unknown';
-            const sigState = session.peerConnection?.signalingState || 'unknown';
-            console.error(`[P2P] ⏰ Connection TIMEOUT for ${session.transferId} after ${timeoutMs / 1000}s | ICE=${finalIceState} | signaling=${sigState}`);
-            session.status = 'failed';
-            session._failReason = 'connection_timeout';
-            this._notifyUpdate(session.transferId, session);
-            if (this.onTransferError) {
-              this.onTransferError(session.transferId, new Error(
-                `Connection timeout (${timeoutMs / 1000}s). ICE: ${finalIceState}. ` +
-                'Check your network connection or try again.'
-              ));
-            }
-          }
-        }, 30000);
+        console.warn(`[P2P] ⚠️ Connection timeout for ${session.transferId} after 30s (ICE=${iceState}), switching to relay...`);
+        // If still connecting after 30s and not already relay, switch to relay
+        if (!session._isRelay && !session.isReceiver) {
+          this._switchToRelayMode(session);
+        } else if (!session._isRelay && session.isReceiver) {
+          // Receiver just keeps waiting — sender will initiate relay
+          console.log(`[P2P] Receiver waiting for sender relay-start...`);
+        }
       }
     }, 30000);
   }
