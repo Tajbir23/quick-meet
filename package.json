@@ -8,9 +8,25 @@
     "server:dev": "cd server && npm run dev",
     "client": "cd client && npm run dev",
     "client:build": "cd client && npm run build",
-    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "install:all": "cd server && npm install && cd ../client && npm install && cd ../desktop && npm install && cd ../mobile && npm install && cd ..",
     "dev": "concurrently \"npm run server:dev\" \"npm run client\"",
-    "generate-ssl": "node generate-ssl.js"
+    "generate-ssl": "node generate-ssl.js",
+
+    "build:web": "cd client && npm run build",
+    "build:desktop:win": "cd desktop && npx electron-builder --win",
+    "build:desktop:linux": "cd desktop && npx electron-builder --linux",
+    "build:desktop:mac": "cd desktop && npx electron-builder --mac",
+    "build:desktop:all": "cd desktop && npx electron-builder",
+    "build:android:sync": "cd mobile && npx cap sync android",
+    "build:android:open": "cd mobile && npx cap open android",
+    "build:android:debug": "cd mobile/android && gradlew assembleDebug",
+    "build:android:release": "cd mobile/android && gradlew assembleRelease",
+
+    "build:win": "npm run build:web && npm run build:desktop:win",
+    "build:linux": "npm run build:web && npm run build:desktop:linux",
+    "build:mac": "npm run build:web && npm run build:desktop:mac",
+    "build:android": "npm run build:web && npm run build:android:sync && npm run build:android:open",
+    "build:all": "npm run build:web && npm run build:desktop:win && npm run build:android:sync"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

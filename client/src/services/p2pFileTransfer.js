@@ -39,6 +39,7 @@
 
 import { ICE_SERVERS } from '../utils/constants';
 import { getSocket } from '../services/socket';
+import { saveFileToDevice, showNativeNotification, isNative, getPlatform } from '../utils/platform';
 
 // Detect mobile for adaptive chunk sizing
 const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(
@@ -431,6 +432,15 @@ class P2PFileTransferService {
       // Optional: use for sender-side progress display
     });
 
+    // Server tells receiver that sender finished (backup for lost completion marker)
+    socket.on('file-transfer:sender-finished', (data) => {
+      const session = this.sessions.get(data.transferId);
+      if (session && session.isReceiver && session.status !== 'completed') {
+        console.log(`[P2P] Server confirmed sender finished for ${data.transferId}, auto-finalizing...`);
+        this._finalizeReceive(session);
+      }
+    });
+
     this._socketListenersBound = true;
   }
 
@@ -446,7 +456,7 @@ class P2PFileTransferService {
       'file-transfer:cancelled', 'file-transfer:paused', 'file-transfer:completed',
       'file-transfer:peer-offline', 'file-transfer:pending-list', 'file-transfer:resume-request',
       'file-transfer:resume-info', 'file-transfer:offer', 'file-transfer:answer',
-      'file-transfer:ice-candidate', 'file-transfer:progress-ack',
+      'file-transfer:ice-candidate', 'file-transfer:progress-ack', 'file-transfer:sender-finished',
     ];
     events.forEach(e => socket.off(e));
     this._socketListenersBound = false;
@@ -966,6 +976,14 @@ class P2PFileTransferService {
       new DataView(completeMarker).setUint32(0, 0xFFFFFFFF, true); // special marker
       try { dataChannel.send(completeMarker); } catch (e) {}
       
+      // Also notify server that sender finished (so server can tell receiver)
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('file-transfer:sender-done', {
+          transferId: session.transferId,
+        });
+      }
+
       session.status = 'completed';
       this._reportProgressToServer(session);
       this._notifyUpdate(session.transferId, session);
@@ -1125,6 +1143,18 @@ class P2PFileTransferService {
     session.currentChunk = chunkIndex + 1;
     session.bytesTransferred = session._totalBytesReceived;
 
+    // AUTO-FINALIZE: If all chunks received, don't wait for completion marker
+    // This fixes the issue where the marker gets lost when DataChannel closes
+    if (session._receivedCount >= session.totalChunks && session.status !== 'completed') {
+      console.log(`[P2P] All ${session.totalChunks} chunks received for ${session.transferId}, auto-finalizing (no marker needed)`);
+      // Small delay to allow any remaining marker to arrive first
+      setTimeout(() => {
+        if (session.status !== 'completed') {
+          this._finalizeReceive(session);
+        }
+      }, 500);
+    }
+
     // ── Electron: write chunk directly to disk (zero memory) ──────────
     if (session._useElectronStream) {
       window.electronAPI.writeFileChunk(session._electronStreamId, chunkData)
@@ -1196,12 +1226,18 @@ class P2PFileTransferService {
    * Finalize received file — Electron: close stream, Browser: combine chunks and download
    */
   async _finalizeReceive(session) {
+    // Guard against double-finalization
+    if (session.status === 'completed' || session._finalizing) return;
+    session._finalizing = true;
+
     try {
       session.status = 'completed';
+      let savePath = null;
 
       // ── Electron: close the write stream — file is already on disk!
       if (session._useElectronStream) {
         const result = await window.electronAPI.closeFileStream(session._electronStreamId);
+        savePath = result.filePath;
         console.log(`[P2P] File saved: ${result.filePath} (${result.bytesWritten} bytes)`);
         
         // Show native notification
@@ -1214,13 +1250,14 @@ class P2PFileTransferService {
       else if (session._useFSAAStream && session._fsaaWriter) {
         try {
           await session._fsaaWriter.close();
+          savePath = session.fileName; // FSAA — user chose location
           console.log(`[P2P] FSAA file saved: ${session.fileName}`);
         } catch (err) {
           console.error('[P2P] FSAA close error:', err);
         }
         session._fsaaWriter = null;
       }
-      // ── Browser Memory: build blob and trigger download
+      // ── Browser Memory: build blob and save (platform-aware)
       else {
         const parts = [];
         if (session._flushedBlobs && session._flushedBlobs.length > 0) {
@@ -1235,8 +1272,39 @@ class P2PFileTransferService {
         const fileBlob = new Blob(parts, {
           type: session.fileMimeType || 'application/octet-stream'
         });
-        this._downloadBlob(fileBlob, session.fileName);
+
+        // Use platform-aware save for Capacitor (Android/iOS)
+        const platform = getPlatform();
+        if (platform === 'android' || platform === 'ios') {
+          try {
+            const saved = await saveFileToDevice(fileBlob, session.fileName);
+            if (saved) {
+              savePath = `Downloads/${session.fileName}`;
+              console.log(`[P2P] File saved via Capacitor: Downloads/${session.fileName}`);
+              // Show native notification on mobile
+              showNativeNotification(
+                'File received!',
+                `${session.fileName} saved to Downloads folder`
+              );
+            } else {
+              console.warn('[P2P] Capacitor save returned false, trying browser fallback');
+              this._downloadBlob(fileBlob, session.fileName);
+              savePath = 'Downloads';
+            }
+          } catch (err) {
+            console.error('[P2P] Capacitor save failed, using browser fallback:', err);
+            this._downloadBlob(fileBlob, session.fileName);
+            savePath = 'Downloads';
+          }
+        } else {
+          // Web browser: standard download
+          this._downloadBlob(fileBlob, session.fileName);
+          savePath = 'Downloads';
+        }
       }
+
+      // Store save path in session for UI display
+      session._savePath = savePath;
 
       // Report complete to server
       const socket = getSocket();
@@ -1258,6 +1326,7 @@ class P2PFileTransferService {
     } catch (err) {
       console.error('Failed to finalize received file:', err);
       session.status = 'failed';
+      session._finalizing = false;
       this._notifyUpdate(session.transferId, session);
     }
   }
@@ -1326,6 +1395,7 @@ class P2PFileTransferService {
         isReceiver: session.isReceiver,
         peerId: session.peerId,
         isPaused: session.isPaused,
+        savePath: session._savePath || null,
       });
     }
   }

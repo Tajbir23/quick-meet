@@ -12,6 +12,7 @@ import {
   X, Upload, Download, Pause, Play, XCircle,
   CheckCircle, AlertCircle, Clock, Wifi, WifiOff,
   ArrowUpCircle, ArrowDownCircle, Trash2, ChevronDown, ChevronUp,
+  FolderOpen,
 } from 'lucide-react';
 import useFileTransferStore from '../../store/useFileTransferStore';
 
@@ -173,6 +174,30 @@ const TransferItem = ({ transfer }) => {
           <p>Direction: {transfer.isReceiver ? 'Receiving' : 'Sending'}</p>
           <p>Chunk size: {formatSize(transfer.chunkSize || 65536)}</p>
           {transfer.status === 'paused' && <p className="text-orange-400">Transfer paused — will resume when peer reconnects</p>}
+          {transfer.status === 'completed' && transfer.isReceiver && transfer.savePath && (
+            <p className="text-emerald-400 flex items-center gap-1">
+              <FolderOpen size={12} />
+              Saved to: {transfer.savePath}
+            </p>
+          )}
+          {transfer.status === 'completed' && transfer.isReceiver && !transfer.savePath && (
+            <p className="text-emerald-400 flex items-center gap-1">
+              <FolderOpen size={12} />
+              Saved to Downloads folder
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Show save location on completion (without needing to expand) */}
+      {transfer.status === 'completed' && transfer.isReceiver && (
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-400/80">
+          <CheckCircle size={12} />
+          <span className="truncate">
+            {transfer.savePath
+              ? `Saved: ${transfer.savePath}`
+              : 'Saved to Downloads folder'}
+          </span>
         </div>
       )}
     </div>

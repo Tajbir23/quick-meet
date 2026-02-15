@@ -281,6 +281,34 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
   });
 
   /**
+   * SENDER DONE — sender confirms all chunks sent
+   * This acts as a backup signal: if the DataChannel completion marker
+   * is lost (common on mobile), the server relays this to the receiver
+   * so it can auto-finalize.
+   */
+  socket.on('file-transfer:sender-done', async ({ transferId }) => {
+    try {
+      const transfer = await FileTransfer.findOne({ transferId, sender: socket.userId });
+      if (!transfer) return;
+
+      // Only relay if transfer is still in progress (not already completed)
+      if (transfer.status === 'completed') return;
+
+      // Notify receiver that sender has finished sending all chunks
+      const receiverSocketId = onlineUsers.get(transfer.receiver.toString());
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit('file-transfer:sender-finished', {
+          transferId,
+          totalChunks: transfer.totalChunks,
+        });
+        console.log(`📁 Sender done signal relayed to receiver: ${transferId}`);
+      }
+    } catch (err) {
+      console.error('file-transfer:sender-done error:', err);
+    }
+  });
+
+  /**
    * RESUME REQUEST
    * When a user reconnects, check for paused/interrupted transfers
    */
