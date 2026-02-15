@@ -185,6 +185,20 @@ export const dismissCallNotification = async () => {
 };
 
 /**
+ * Show ongoing call notification (visible in notification panel)
+ */
+const showOngoingCallNotification = async (callerName, callType = 'audio') => {
+  if (!BackgroundServicePlugin) return;
+  
+  try {
+    await BackgroundServicePlugin.showOngoingCallNotification({ callerName, callType });
+    console.log(`[BackgroundService] Ongoing call notification: ${callerName} (${callType})`);
+  } catch (err) {
+    console.warn('[BackgroundService] Ongoing call notification failed:', err.message);
+  }
+};
+
+/**
  * Update state: call started
  */
 export const onCallStarted = async (callerName, callType) => {
@@ -192,7 +206,8 @@ export const onCallStarted = async (callerName, callType) => {
   _currentState.callType = callType;
   _currentState.callerName = callerName;
   
-  await dismissCallNotification();
+  // Replace incoming call notification with ongoing call notification
+  await showOngoingCallNotification(callerName, callType);
   await updateNotificationForCurrentState();
 };
 

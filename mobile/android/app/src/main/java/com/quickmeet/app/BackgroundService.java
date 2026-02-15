@@ -130,6 +130,35 @@ public class BackgroundService extends Service {
     }
     
     /**
+     * Show ongoing call notification (visible in notification panel, no sound/vibration)
+     * Replaces the incoming call notification with a calm ongoing one.
+     */
+    public void showOngoingCallNotification(String callerName, String callType) {
+        PendingIntent pendingIntent = getLaunchPendingIntent();
+        
+        String type = (callType != null && callType.equals("video")) ? "Video" : "Voice";
+        String title = type + " Call";
+        String body = "In call with " + callerName;
+        
+        Notification notification = new NotificationCompat.Builder(this, CHANNEL_CALL)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setSmallIcon(android.R.drawable.ic_menu_call)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(false)
+            .setOngoing(true)
+            .setSilent(true) // No sound/vibration for ongoing call
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setUsesChronometer(true) // Shows running timer
+            .setWhen(System.currentTimeMillis()) // Chrono start time
+            .build();
+        
+        notificationManager.notify(NOTIFICATION_CALL, notification);
+        Log.i(TAG, "Ongoing call notification shown: " + callerName);
+    }
+    
+    /**
      * Dismiss the call notification
      */
     public void dismissCallNotification() {

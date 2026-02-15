@@ -107,7 +107,25 @@ public class BackgroundServicePlugin extends Plugin {
     }
     
     /**
-     * Dismiss the incoming call notification
+     * Show ongoing call notification (persistent, no sound)
+     * Shows in notification panel that a call is active.
+     * @param callerName - Name of the remote user
+     * @param callType - "audio" or "video"
+     */
+    @PluginMethod()
+    public void showOngoingCallNotification(PluginCall call) {
+        String callerName = call.getString("callerName", "Unknown");
+        String callType = call.getString("callType", "audio");
+        
+        BackgroundService service = BackgroundService.getInstance();
+        if (service != null) {
+            service.showOngoingCallNotification(callerName, callType);
+        }
+        call.resolve();
+    }
+    
+    /**
+     * Dismiss the call notification (incoming or ongoing)
      */
     @PluginMethod()
     public void dismissCallNotification(PluginCall call) {
