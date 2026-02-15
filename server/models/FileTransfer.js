@@ -78,6 +78,11 @@ const fileTransferSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  // Whether the receiver's hash matched the sender's hash
+  hashVerified: {
+    type: Boolean,
+    default: null,
+  },
   // Transfer status
   status: {
     type: String,

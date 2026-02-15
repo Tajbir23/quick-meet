@@ -12,7 +12,7 @@ import {
   X, Upload, Download, Pause, Play, XCircle,
   CheckCircle, AlertCircle, Clock, Wifi, WifiOff,
   ArrowUpCircle, ArrowDownCircle, Trash2, ChevronDown, ChevronUp,
-  FolderOpen,
+  FolderOpen, ShieldCheck, ShieldAlert, ShieldQuestion, Loader2,
 } from 'lucide-react';
 import useFileTransferStore from '../../store/useFileTransferStore';
 
@@ -53,6 +53,7 @@ const statusColors = {
   connecting: 'text-blue-400 bg-blue-500/10',
   transferring: 'text-green-400 bg-green-500/10',
   paused: 'text-orange-400 bg-orange-500/10',
+  verifying: 'text-cyan-400 bg-cyan-500/10',
   completed: 'text-emerald-400 bg-emerald-500/10',
   failed: 'text-red-400 bg-red-500/10',
   cancelled: 'text-dark-400 bg-dark-500/10',
@@ -63,6 +64,7 @@ const statusIcons = {
   connecting: Wifi,
   transferring: ArrowUpCircle,
   paused: Pause,
+  verifying: Loader2,
   completed: CheckCircle,
   failed: AlertCircle,
   cancelled: XCircle,
@@ -76,7 +78,7 @@ const TransferItem = ({ transfer }) => {
   const [expanded, setExpanded] = useState(false);
 
   const StatusIcon = statusIcons[transfer.status] || Clock;
-  const isActive = ['transferring', 'connecting', 'pending'].includes(transfer.status);
+  const isActive = ['transferring', 'connecting', 'pending', 'verifying'].includes(transfer.status);
   const canPause = transfer.status === 'transferring';
   const canResume = transfer.status === 'paused';
   const canCancel = ['transferring', 'paused', 'connecting', 'pending'].includes(transfer.status);
@@ -191,13 +193,57 @@ const TransferItem = ({ transfer }) => {
 
       {/* Show save location on completion (without needing to expand) */}
       {transfer.status === 'completed' && transfer.isReceiver && (
-        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-400/80">
-          <CheckCircle size={12} />
-          <span className="truncate">
-            {transfer.savePath
-              ? `Saved: ${transfer.savePath}`
-              : 'Saved to Downloads folder'}
-          </span>
+        <div className="mt-2 space-y-1">
+          {/* Save location */}
+          <div className="flex items-center gap-1.5 text-[11px] text-emerald-400/80">
+            <CheckCircle size={12} />
+            <span className="truncate">
+              {transfer.savePath
+                ? `Saved: ${transfer.savePath}`
+                : 'Saved to Downloads folder'}
+            </span>
+          </div>
+          {/* Verification status */}
+          {transfer.hashVerified === true && (
+            <div className="flex items-center gap-1.5 text-[11px] text-emerald-400">
+              <ShieldCheck size={12} />
+              <span>File verified — integrity check passed</span>
+            </div>
+          )}
+          {transfer.hashVerified === false && (
+            <div className="flex items-center gap-1.5 text-[11px] text-red-400">
+              <ShieldAlert size={12} />
+              <span>Warning: File integrity check FAILED — file may be corrupted</span>
+            </div>
+          )}
+          {transfer.hashStatus === 'no_hash' && (
+            <div className="flex items-center gap-1.5 text-[11px] text-dark-500">
+              <ShieldQuestion size={12} />
+              <span>No hash — file not verified</span>
+            </div>
+          )}
+          {transfer.hashStatus === 'unverifiable' && (
+            <div className="flex items-center gap-1.5 text-[11px] text-yellow-500/70">
+              <ShieldQuestion size={12} />
+              <span>Streaming mode — hash verification skipped</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Verifying state */}
+      {transfer.status === 'verifying' && transfer.isReceiver && (
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-cyan-400">
+          <Loader2 size={12} className="animate-spin" />
+          <span>Verifying file integrity...</span>
+        </div>
+      )}
+
+      {/* Sender-side: hash computation status */}
+      {transfer.hashStatus === 'computing' && !transfer.isReceiver && (
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-cyan-400">
+          <Loader2 size={12} className="animate-spin" />
+          <span>Computing file hash for verification...</span>
         </div>
       )}
     </div>

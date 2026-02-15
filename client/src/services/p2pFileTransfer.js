@@ -145,6 +145,12 @@ class TransferSession {
     this._pendingIceCandidates = [];
     this._remoteDescriptionSet = false;
     
+    // File hash for integrity verification (SHA-256)
+    this.fileHash = null;           // Expected hash (from sender)
+    this.computedHash = null;       // Hash computed by receiver
+    this.hashVerified = null;       // null=pending, true=match, false=mismatch
+    this._hashStatus = 'none';      // none, computing, verifying, verified, failed
+    
     // Callbacks
     this.onProgress = null;
     this.onComplete = null;
@@ -301,11 +307,19 @@ class P2PFileTransferService {
       }
     });
 
-    // Transfer completed confirmation
+    // Transfer completed confirmation (sender receives this from server after receiver finishes)
     socket.on('file-transfer:completed', (data) => {
       const session = this.sessions.get(data.transferId);
       if (session) {
         session.status = 'completed';
+        // Store hash verification result from receiver
+        if (data.hashMatch === true) {
+          session.hashVerified = true;
+          session._hashStatus = 'verified';
+        } else if (data.hashMatch === false) {
+          session.hashVerified = false;
+          session._hashStatus = 'failed';
+        }
         this._notifyUpdate(data.transferId, session);
         session.destroy();
       }
@@ -492,7 +506,21 @@ class P2PFileTransferService {
       resumeFrom: 0,
     });
 
+    // Compute SHA-256 hash of the file before sending
+    session._hashStatus = 'computing';
     this.sessions.set(transferId, session);
+    this._notifyUpdate(transferId, session);
+
+    let fileHash = null;
+    try {
+      fileHash = await this._computeFileHash(file);
+      session.fileHash = fileHash;
+      session._hashStatus = 'computed';
+      console.log(`[P2P] File hash computed: ${fileHash.substring(0, 16)}... for ${file.name}`);
+    } catch (err) {
+      console.warn('[P2P] Failed to compute file hash, sending without verification:', err);
+      session._hashStatus = 'none';
+    }
 
     // Request transfer via socket (server creates record)
     const socket = getSocket();
@@ -505,6 +533,7 @@ class P2PFileTransferService {
         fileMimeType: file.type || 'application/octet-stream',
         totalChunks,
         chunkSize,
+        fileHash,
       });
     }
 
@@ -527,6 +556,7 @@ class P2PFileTransferService {
       totalChunks,
       chunkSize,
       isResume,
+      fileHash,
     } = transferData;
 
     const session = new TransferSession({
@@ -539,6 +569,12 @@ class P2PFileTransferService {
       isReceiver: true,
       resumeFrom: isResume ? transferData.resumeFrom || 0 : 0,
     });
+
+    // Store expected hash from sender for verification after receive
+    if (fileHash) {
+      session.fileHash = fileHash;
+      session._hashStatus = 'waiting';
+    }
 
     this.sessions.set(transferId, session);
     session.status = 'connecting';
@@ -1231,20 +1267,14 @@ class P2PFileTransferService {
     session._finalizing = true;
 
     try {
-      session.status = 'completed';
       let savePath = null;
+      let fileBlob = null; // Keep reference for hash verification (memory mode)
 
       // ── Electron: close the write stream — file is already on disk!
       if (session._useElectronStream) {
         const result = await window.electronAPI.closeFileStream(session._electronStreamId);
         savePath = result.filePath;
         console.log(`[P2P] File saved: ${result.filePath} (${result.bytesWritten} bytes)`);
-        
-        // Show native notification
-        window.electronAPI.showNotification({
-          title: 'File received!',
-          body: `${session.fileName} saved successfully.`,
-        });
       }
       // ── Browser FSAA: close writable stream — file is already on disk!
       else if (session._useFSAAStream && session._fsaaWriter) {
@@ -1269,7 +1299,7 @@ class P2PFileTransferService {
             parts.push(session.receivedChunks[i]);
           }
         }
-        const fileBlob = new Blob(parts, {
+        fileBlob = new Blob(parts, {
           type: session.fileMimeType || 'application/octet-stream'
         });
 
@@ -1281,11 +1311,6 @@ class P2PFileTransferService {
             if (saved) {
               savePath = `Downloads/${session.fileName}`;
               console.log(`[P2P] File saved via Capacitor: Downloads/${session.fileName}`);
-              // Show native notification on mobile
-              showNativeNotification(
-                'File received!',
-                `${session.fileName} saved to Downloads folder`
-              );
             } else {
               console.warn('[P2P] Capacitor save returned false, trying browser fallback');
               this._downloadBlob(fileBlob, session.fileName);
@@ -1306,18 +1331,101 @@ class P2PFileTransferService {
       // Store save path in session for UI display
       session._savePath = savePath;
 
-      // Report complete to server
+      // ── FILE INTEGRITY VERIFICATION (SHA-256) ──────────────────────────
+      let hashVerified = null;
+      if (session.fileHash) {
+        session._hashStatus = 'verifying';
+        session.status = 'verifying';
+        this._notifyUpdate(session.transferId, session);
+        console.log(`[P2P] Verifying file integrity for ${session.fileName}...`);
+
+        try {
+          let computedHash = null;
+
+          if (fileBlob) {
+            // Memory mode: hash the blob directly
+            computedHash = await this._computeFileHash(fileBlob);
+          } else if (session._useElectronStream && session._electronFilePath) {
+            // Electron: read saved file and hash it
+            try {
+              const fileData = await window.electronAPI.readFile(session._electronFilePath);
+              const blob = new Blob([fileData]);
+              computedHash = await this._computeFileHash(blob);
+            } catch (e) {
+              console.warn('[P2P] Could not read Electron file for verification:', e);
+            }
+          }
+          // FSAA mode: file is on disk, we can't easily re-read it — skip hash
+          // (FSAA doesn't give us back a readable handle after close)
+
+          if (computedHash) {
+            session.computedHash = computedHash;
+            hashVerified = computedHash === session.fileHash;
+            session.hashVerified = hashVerified;
+            session._hashStatus = hashVerified ? 'verified' : 'failed';
+
+            if (hashVerified) {
+              console.log(`[P2P] ✅ File integrity VERIFIED: ${session.fileName} | hash=${computedHash.substring(0, 16)}...`);
+            } else {
+              console.error(`[P2P] ❌ File integrity FAILED: ${session.fileName} | expected=${session.fileHash.substring(0, 16)}... | got=${computedHash.substring(0, 16)}...`);
+            }
+          } else {
+            // Could not compute hash (FSAA or read error) — mark as unverified
+            session._hashStatus = 'unverifiable';
+            session.hashVerified = null;
+            console.warn(`[P2P] ⚠️ Could not verify file integrity (streaming mode): ${session.fileName}`);
+          }
+        } catch (err) {
+          console.error('[P2P] Hash verification error:', err);
+          session._hashStatus = 'error';
+          session.hashVerified = null;
+        }
+      } else {
+        // No hash provided by sender
+        session._hashStatus = 'no_hash';
+        session.hashVerified = null;
+      }
+
+      // Set final status
+      session.status = 'completed';
+      this._notifyUpdate(session.transferId, session);
+
+      // Show notification with verification result
+      if (session._useElectronStream) {
+        const verifyMsg = hashVerified === true ? ' (Verified ✓)' 
+          : hashVerified === false ? ' (Integrity check FAILED ✗)' 
+          : '';
+        window.electronAPI.showNotification({
+          title: 'File received!',
+          body: `${session.fileName} saved successfully.${verifyMsg}`,
+        });
+      } else {
+        const platform = getPlatform();
+        if (platform === 'android' || platform === 'ios') {
+          const verifyMsg = hashVerified === true ? ' (Verified ✓)' 
+            : hashVerified === false ? ' (Integrity check FAILED!)' 
+            : '';
+          showNativeNotification(
+            'File received!',
+            `${session.fileName} saved to Downloads${verifyMsg}`
+          );
+        }
+      }
+
+      // Report complete to server with verification result
       const socket = getSocket();
       if (socket) {
         socket.emit('file-transfer:complete', {
           transferId: session.transferId,
-          verified: true,
+          verified: hashVerified === true,
+          hashMatch: hashVerified,
         });
       }
 
       // Cleanup
       session.receivedChunks = [];
       session._flushedBlobs = [];
+      fileBlob = null;
       this._notifyUpdate(session.transferId, session);
 
       if (this.onTransferComplete) {
@@ -1348,6 +1456,64 @@ class P2PFileTransferService {
       URL.revokeObjectURL(url);
       document.body.removeChild(a);
     }, 10000);
+  }
+
+  // ============================================
+  // FILE HASH COMPUTATION
+  // ============================================
+
+  /**
+   * Compute SHA-256 hash of a File or Blob
+   * Uses streaming approach for large files to avoid memory overload
+   * @param {File|Blob} fileOrBlob - The file/blob to hash
+   * @returns {Promise<string>} Hex-encoded SHA-256 hash
+   */
+  async _computeFileHash(fileOrBlob) {
+    const HASH_CHUNK_SIZE = 2 * 1024 * 1024; // 2MB chunks for hashing
+    const totalSize = fileOrBlob.size;
+
+    // For small files (<10MB), use simple approach
+    if (totalSize < 10 * 1024 * 1024) {
+      const buffer = await fileOrBlob.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+      return this._arrayBufferToHex(hashBuffer);
+    }
+
+    // For large files, hash in chunks using SubtleCrypto if available,
+    // otherwise fall back to incremental approach
+    // Note: SubtleCrypto doesn't support incremental hashing natively,
+    // so we need to read the whole file but in chunks to avoid OOM
+    let offset = 0;
+    const chunks = [];
+
+    while (offset < totalSize) {
+      const end = Math.min(offset + HASH_CHUNK_SIZE, totalSize);
+      const slice = fileOrBlob.slice(offset, end);
+      const buffer = await slice.arrayBuffer();
+      chunks.push(new Uint8Array(buffer));
+      offset = end;
+    }
+
+    // Combine all chunks into single buffer for SHA-256
+    // For very large files (>500MB), this may use significant memory temporarily
+    const totalLength = chunks.reduce((sum, c) => sum + c.byteLength, 0);
+    const combined = new Uint8Array(totalLength);
+    let pos = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, pos);
+      pos += chunk.byteLength;
+    }
+
+    const hashBuffer = await crypto.subtle.digest('SHA-256', combined.buffer);
+    return this._arrayBufferToHex(hashBuffer);
+  }
+
+  /**
+   * Convert ArrayBuffer to hex string
+   */
+  _arrayBufferToHex(buffer) {
+    const bytes = new Uint8Array(buffer);
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
   // ============================================
@@ -1396,6 +1562,9 @@ class P2PFileTransferService {
         peerId: session.peerId,
         isPaused: session.isPaused,
         savePath: session._savePath || null,
+        fileHash: session.fileHash || null,
+        hashVerified: session.hashVerified,
+        hashStatus: session._hashStatus || 'none',
       });
     }
   }

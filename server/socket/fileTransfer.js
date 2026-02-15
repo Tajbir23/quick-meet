@@ -254,7 +254,7 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
    * TRANSFER COMPLETE
    * Receiver confirms all chunks received and verified
    */
-  socket.on('file-transfer:complete', async ({ transferId, verified }) => {
+  socket.on('file-transfer:complete', async ({ transferId, verified, hashMatch }) => {
     try {
       const transfer = await FileTransfer.findOne({ transferId });
       if (!transfer) return;
@@ -263,18 +263,23 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
       transfer.completedAt = new Date();
       transfer.bytesTransferred = transfer.fileSize;
       transfer.lastReceivedChunk = transfer.totalChunks - 1;
+      if (typeof hashMatch === 'boolean') {
+        transfer.hashVerified = hashMatch;
+      }
       await transfer.save();
 
-      // Notify sender
+      // Notify sender (include verification result)
       const senderSocketId = onlineUsers.get(transfer.sender.toString());
       if (senderSocketId) {
         io.to(senderSocketId).emit('file-transfer:completed', {
           transferId,
           verified: verified || false,
+          hashMatch: hashMatch != null ? hashMatch : null,
         });
       }
 
-      console.log(`📁 File transfer completed: ${transferId} (${transfer.fileName})`);
+      const verifyStr = hashMatch === true ? ' [VERIFIED]' : hashMatch === false ? ' [HASH MISMATCH]' : '';
+      console.log(`📁 File transfer completed: ${transferId} (${transfer.fileName})${verifyStr}`);
     } catch (err) {
       console.error('file-transfer:complete error:', err);
     }
@@ -331,6 +336,7 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
         status: { $in: ['pending', 'paused'] },
         updatedAt: { $gte: staleThreshold },
       })
+        .select('+fileHash')
         .populate('sender', 'username avatar')
         .populate('receiver', 'username avatar')
         .lean();
