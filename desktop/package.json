@@ -1,6 +1,6 @@
 {
   "name": "quick-meet-desktop",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "description": "Quick Meet — Desktop App (Electron)",
   "main": "main.js",
   "scripts": {
