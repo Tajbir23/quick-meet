@@ -64,6 +64,7 @@ const fileRoutes = require('./routes/file');
 const ownerRoutes = require('./routes/owner');
 const fileTransferRoutes = require('./routes/fileTransfer');
 const updateRoutes = require('./routes/update');
+const webhookRoutes = require('./routes/webhook');
 
 // Socket handlers
 const registerSocketHandlers = require('./socket');
@@ -202,6 +203,10 @@ app.use('/api/files', fileRoutes);
 app.use('/api/owner', ownerRoutes);
 app.use('/api/transfers', fileTransferRoutes);
 app.use('/api/updates', updateRoutes);
+
+// GitHub Webhook — auto-deploy on push
+// NOTE: This route handles its own body parsing (raw) for HMAC verification
+app.use('/webhook', webhookRoutes);
 
 // Health check endpoint — sanitized (don't expose internals)
 app.get('/api/health', (req, res) => {
