@@ -750,11 +750,18 @@ class P2PFileTransferService {
         credential: turnData.credential,
       }));
       
-      // Merge STUN + dynamic TURN for true P2P with relay fallback
+      // IMPORTANT: Only include STUN from static config, NOT static TURN servers.
+      // Having both static + dynamic TURN credentials for the SAME TURN server
+      // causes coturn error 437 (wrong transaction ID) due to conflicting allocations.
+      const stunOnly = ICE_SERVERS.iceServers.filter(s => {
+        const url = Array.isArray(s.urls) ? s.urls[0] : s.urls;
+        return url && url.startsWith('stun:');
+      });
+      
       return {
         ...ICE_SERVERS,
         iceServers: [
-          ...ICE_SERVERS.iceServers,
+          ...stunOnly,
           ...turnServers,
         ],
       };
