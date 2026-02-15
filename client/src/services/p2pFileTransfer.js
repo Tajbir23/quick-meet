@@ -99,9 +99,10 @@ export function getPlatformCapability() {
 // Configuration
 const CONFIG = {
   // Chunk size: larger = faster throughput, smaller = less memory pressure
-  CHUNK_SIZE: isMobile ? 32768 : 262144,  // 32KB mobile, 256KB desktop
+  // WebRTC DataChannel supports up to ~256KB messages reliably across browsers
+  CHUNK_SIZE: isMobile ? 65536 : 262144,  // 64KB mobile, 256KB desktop
   // DataChannel buffer threshold for backpressure
-  BUFFER_THRESHOLD: isMobile ? 1 * 1024 * 1024 : 8 * 1024 * 1024, // 1MB mobile, 8MB desktop
+  BUFFER_THRESHOLD: isMobile ? 2 * 1024 * 1024 : 8 * 1024 * 1024, // 2MB mobile, 8MB desktop
   // How often to report progress to server (every N chunks)
   PROGRESS_REPORT_INTERVAL: 200,
   // Max concurrent transfers
@@ -226,6 +227,8 @@ class P2PFileTransferService {
     
     // Socket listeners bound flag
     this._socketListenersBound = false;
+    // Track which socket instance listeners are bound to
+    this._boundSocketId = null;
   }
 
   /**
@@ -242,6 +245,12 @@ class P2PFileTransferService {
    * Ensure socket listeners are bound — call before any transfer action
    */
   ensureListeners() {
+    const socket = getSocket();
+    // Re-bind if socket instance changed (e.g., after reconnect/reload)
+    if (socket && this._socketListenersBound && this._boundSocketId && this._boundSocketId !== socket.id && socket.id) {
+      console.log(`[P2P] ⚠️ Socket instance changed (${this._boundSocketId} → ${socket.id}), re-binding listeners...`);
+      this.unbindSocketListeners();
+    }
     if (!this._socketListenersBound) {
       console.log('[P2P] ensureListeners: listeners not bound, attempting bind...');
       this.bindSocketListeners();
@@ -249,13 +258,21 @@ class P2PFileTransferService {
   }
 
   bindSocketListeners() {
-    if (this._socketListenersBound) return;
-    
     const socket = getSocket();
     if (!socket) {
       console.warn('[P2P] ⚠️ bindSocketListeners: NO SOCKET AVAILABLE — listeners NOT bound!');
       return;
     }
+
+    // If already bound to THIS exact socket, skip
+    if (this._socketListenersBound && this._boundSocketId === socket.id) return;
+
+    // If bound to a DIFFERENT socket, unbind first
+    if (this._socketListenersBound) {
+      console.log(`[P2P] ⚠️ Re-binding: was bound to ${this._boundSocketId}, now binding to ${socket.id}`);
+      this._unbindCurrentListeners(socket);
+    }
+
     console.log(`[P2P] ✅ bindSocketListeners: Binding to socket ${socket.id || '(not connected yet)'}`);
 
     // Incoming transfer request
@@ -460,15 +477,23 @@ class P2PFileTransferService {
     });
 
     this._socketListenersBound = true;
+    this._boundSocketId = socket.id || 'pending';
+
+    // Track socket ID changes (socket.id is null before connect, set after)
+    if (!socket.id) {
+      const onceConnect = () => {
+        this._boundSocketId = socket.id;
+        console.log(`[P2P] Socket connected, updated boundSocketId to ${socket.id}`);
+      };
+      socket.once('connect', onceConnect);
+    }
   }
 
   /**
-   * Unbind socket listeners
+   * Remove file transfer listeners from a specific socket
    */
-  unbindSocketListeners() {
-    const socket = getSocket();
+  _unbindCurrentListeners(socket) {
     if (!socket) return;
-    
     const events = [
       'file-transfer:incoming', 'file-transfer:accepted', 'file-transfer:rejected',
       'file-transfer:cancelled', 'file-transfer:paused', 'file-transfer:completed',
@@ -477,7 +502,18 @@ class P2PFileTransferService {
       'file-transfer:ice-candidate', 'file-transfer:progress-ack', 'file-transfer:sender-finished',
     ];
     events.forEach(e => socket.off(e));
+  }
+
+  /**
+   * Unbind socket listeners
+   */
+  unbindSocketListeners() {
+    const socket = getSocket();
+    if (socket) {
+      this._unbindCurrentListeners(socket);
+    }
     this._socketListenersBound = false;
+    this._boundSocketId = null;
   }
 
   // ============================================

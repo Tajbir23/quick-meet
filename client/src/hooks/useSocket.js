@@ -17,6 +17,7 @@ import useAuthStore from '../store/useAuthStore';
 import webrtcService from '../services/webrtc';
 import { playNotificationSound, showNativeNotification, bringWindowToFront } from '../utils/helpers';
 import useFileTransferStore from '../store/useFileTransferStore';
+import p2pFileTransfer from '../services/p2pFileTransfer';
 
 const useSocket = () => {
   const initialized = useRef(false);
@@ -265,9 +266,17 @@ const useSocket = () => {
     const onConnect = () => {
       console.log('🔌 Socket (re)connected — syncing presence & group rooms');
 
-      // File transfer init retry
+      // ALWAYS re-ensure file transfer listeners on (re)connect
+      // After reconnect, socket.id changes — listeners might be stale
       const ftStore = useFileTransferStore.getState();
-      if (!ftStore.initialized) ftStore.initialize();
+      if (!ftStore.initialized) {
+        ftStore.initialize();
+      } else {
+        // Already initialized — but ensure listeners are bound to current socket
+        p2pFileTransfer.ensureListeners();
+        // Re-check for pending transfers on reconnect
+        p2pFileTransfer.checkPendingTransfers();
+      }
 
       // Re-join all group rooms
       const { myGroups } = useGroupStore.getState();

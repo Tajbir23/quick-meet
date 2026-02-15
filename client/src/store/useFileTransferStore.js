@@ -30,7 +30,11 @@ const useFileTransferStore = create((set, get) => ({
    * Call once after socket connects
    */
   initialize: () => {
-    if (get().initialized) return;
+    if (get().initialized) {
+      // Already initialized — but ensure listeners are still bound to the current socket
+      p2pFileTransfer.ensureListeners();
+      return;
+    }
 
     // Set current user ID so pending-list can distinguish sender vs receiver
     const user = useAuthStore.getState().user;

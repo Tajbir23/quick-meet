@@ -87,6 +87,10 @@ async function createCallMessage(io, onlineUsers, { callerId, receiverId, callTy
   }
 }
 
+// Track active 1-to-1 calls: userId → partnerUserId
+// Used to notify the other party when a user disconnects during a call
+const activeCalls = new Map();
+
 const setupSignalingHandlers = (io, socket, onlineUsers) => {
 
   /**
