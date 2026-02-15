@@ -161,7 +161,13 @@ router.post('/', express.raw({ type: 'application/json' }), (req, res) => {
       try { versions = JSON.parse(fs.readFileSync(versionsPath, 'utf8')); } catch {}
       
       const now = new Date().toISOString();
-      ['web', 'android', 'desktop'].forEach(platform => {
+      // Only auto-bump web and desktop — NOT android.
+      // Android version is only bumped manually when a new APK is built,
+      // because the Android app's native APK version (from build.gradle)
+      // doesn't change on web deploys. Auto-bumping android would make
+      // the server think the latest version matches the APK, preventing
+      // the update prompt from appearing.
+      ['web', 'desktop'].forEach(platform => {
         if (!versions[platform]) versions[platform] = {};
         versions[platform].version = clientPkg.version;
         versions[platform].lastUpdated = now;

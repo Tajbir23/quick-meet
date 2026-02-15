@@ -42,13 +42,42 @@ const UpdateNotification = () => {
   // Keep mustUpdate flag persistent — electron-updater events won't override it
   const mustUpdateRef = useRef(false);
 
+  // Native APK version (Android only) — stays at the APK's versionName
+  // until user installs a new APK. Unlike APP_VERSION which changes on every
+  // web deploy (since Android loads the remote web page).
+  const [nativeVersion, setNativeVersion] = useState(null);
+
   const platform = getPlatform();
+
+  // ─── Get native APK version on Android ──────────
+  useEffect(() => {
+    if (platform !== 'android') return;
+    
+    (async () => {
+      try {
+        const { App } = await import('@capacitor/app');
+        const info = await App.getInfo();
+        console.log('[Update] Native APK version:', info.version);
+        setNativeVersion(info.version);
+      } catch (err) {
+        console.warn('[Update] Failed to get native version:', err.message);
+      }
+    })();
+  }, [platform]);
+
+  // Version to send for update check:
+  // - Android: native APK version (so server can detect APK is outdated)
+  // - Other platforms: web bundle version (APP_VERSION)
+  const checkVersion = (platform === 'android' && nativeVersion) ? nativeVersion : APP_VERSION;
 
   // ─── Server API Check (ALL platforms: web, android, desktop) ──
   const checkServerUpdate = useCallback(async () => {
+    // On Android, wait until native version is resolved
+    if (platform === 'android' && !nativeVersion) return;
+
     try {
       const res = await fetch(
-        `${API_URL}/updates/check?platform=${platform}&version=${APP_VERSION}`
+        `${API_URL}/updates/check?platform=${platform}&version=${checkVersion}`
       );
       const data = await res.json();
       console.log('[Update] Server check result:', data);
@@ -75,7 +104,7 @@ const UpdateNotification = () => {
     } catch (e) {
       console.warn('Update check failed:', e.message);
     }
-  }, [platform]);
+  }, [platform, checkVersion, nativeVersion]);
 
   // ─── Check on mount (EVERY app open) + periodic check ──
   useEffect(() => {
@@ -475,7 +504,7 @@ const UpdateNotification = () => {
                 {/* Current version info */}
                 {isMandatory && (
                   <p className="text-xs text-dark-500 mt-2">
-                    Current: v{APP_VERSION} → New: v{updateState.version}
+                    Current: v{checkVersion} → New: v{updateState.version}
                   </p>
                 )}
 
