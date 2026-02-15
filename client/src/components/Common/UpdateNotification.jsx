@@ -50,15 +50,22 @@ const UpdateNotification = () => {
   const platform = getPlatform();
 
   // ─── Get native APK version on Android ──────────
+  // Use Capacitor bridge directly (NOT ES module import) because
+  // @capacitor/* is externalized in vite.config.js and bare module
+  // specifiers can't be resolved in the WebView.
   useEffect(() => {
     if (platform !== 'android') return;
     
     (async () => {
       try {
-        const { App } = await import('@capacitor/app');
-        const info = await App.getInfo();
-        console.log('[Update] Native APK version:', info.version);
-        setNativeVersion(info.version);
+        const AppPlugin = window.Capacitor?.Plugins?.App;
+        if (AppPlugin) {
+          const info = await AppPlugin.getInfo();
+          console.log('[Update] Native APK version:', info.version);
+          setNativeVersion(info.version);
+        } else {
+          console.warn('[Update] Capacitor App plugin not available');
+        }
       } catch (err) {
         console.warn('[Update] Failed to get native version:', err.message);
       }
@@ -183,14 +190,26 @@ const UpdateNotification = () => {
   }, [updateState]);
 
   // ─── Android: Download APK + open for install ─────────
+  // Uses Capacitor native bridge (window.Capacitor.Plugins) directly
+  // because @capacitor/* is externalized and can't be dynamically imported.
   const handleAndroidDownload = useCallback(async () => {
     if (!updateState?.downloadUrl) return;
     
+    const plugins = window.Capacitor?.Plugins;
+    const FilesystemPlugin = plugins?.Filesystem;
+    const FileOpenerPlugin = plugins?.FileOpener;
+
+    // If no Capacitor Filesystem available, open in system browser
+    if (!FilesystemPlugin) {
+      console.log('[Update] No Capacitor Filesystem, opening download in system browser');
+      window.open(updateState.downloadUrl, '_system');
+      return;
+    }
+
     setAndroidDownloading(true);
     setAndroidProgress(0);
 
     try {
-      // Method 1: Direct download via fetch + Capacitor Filesystem
       console.log('[Update] Downloading APK from:', updateState.downloadUrl);
       
       const response = await fetch(updateState.downloadUrl);
@@ -211,33 +230,37 @@ const UpdateNotification = () => {
         }
       }
 
-      // Convert to base64
+      // Convert to base64 (chunked to avoid call stack overflow on large files)
       const blob = new Blob(chunks, { type: 'application/vnd.android.package-archive' });
       const arrayBuffer = await blob.arrayBuffer();
-      const base64 = btoa(
-        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-      );
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      const CHUNK = 32768;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+      }
+      const base64 = btoa(binary);
 
-      // Save to Capacitor Filesystem
-      const { Filesystem, Directory } = await import('@capacitor/filesystem');
+      // Save via Capacitor Filesystem native bridge
+      // Use string directory names instead of enums (enums are in the
+      // externalized npm package; strings go directly to the native bridge)
       const fileName = `quick-meet-v${updateState.version || 'update'}.apk`;
-
-      // Try saving to Downloads first, fallback to Data
       let savedPath;
+
       try {
-        const result = await Filesystem.writeFile({
+        const result = await FilesystemPlugin.writeFile({
           path: `Download/${fileName}`,
           data: base64,
-          directory: Directory.ExternalStorage,
+          directory: 'EXTERNAL_STORAGE',
           recursive: true,
         });
         savedPath = result.uri;
       } catch (e1) {
         console.warn('[Update] ExternalStorage failed, trying Data:', e1);
-        const result = await Filesystem.writeFile({
+        const result = await FilesystemPlugin.writeFile({
           path: fileName,
           data: base64,
-          directory: Directory.Data,
+          directory: 'DATA',
           recursive: true,
         });
         savedPath = result.uri;
@@ -246,38 +269,27 @@ const UpdateNotification = () => {
       console.log('[Update] APK saved to:', savedPath);
       setAndroidProgress(100);
 
-      // Open APK for installation using file-opener
-      try {
-        const fileOpenerModule = await import('@capacitor-community/file-opener');
-        const FileOpener = fileOpenerModule.FileOpener || fileOpenerModule.FileOpener2 || fileOpenerModule.default;
-        
-        if (FileOpener?.open) {
-          await FileOpener.open({
+      // Open APK for installation
+      if (FileOpenerPlugin?.open) {
+        try {
+          await FileOpenerPlugin.open({
             filePath: savedPath,
             contentType: 'application/vnd.android.package-archive',
             openWithDefault: true,
           });
           console.log('[Update] APK install dialog opened');
-        } else {
-          throw new Error('FileOpener not available');
-        }
-      } catch (openErr) {
-        console.warn('[Update] FileOpener failed:', openErr);
-        // Fallback: try to open via system
-        try {
-          const { App } = await import('@capacitor/app');
-          if (savedPath.startsWith('file://')) {
-            await App.openUrl({ url: savedPath });
-          }
-        } catch (e2) {
-          console.warn('[Update] App.openUrl failed:', e2);
-          // Last fallback: open browser download URL
+        } catch (openErr) {
+          console.warn('[Update] FileOpener failed, trying system browser:', openErr);
           window.open(updateState.downloadUrl, '_system');
         }
+      } else {
+        // No FileOpener plugin — open download URL in system browser
+        console.log('[Update] No FileOpener plugin, opening in system browser');
+        window.open(updateState.downloadUrl, '_system');
       }
     } catch (error) {
       console.error('[Update] Android download error:', error);
-      // Fallback: open download URL in browser
+      // Fallback: open download URL in system browser
       window.open(updateState.downloadUrl, '_system');
     } finally {
       setAndroidDownloading(false);

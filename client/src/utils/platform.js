@@ -117,7 +117,14 @@ const getMimeTypeFromFileName = (fileName) => {
  */
 const saveFileOnMobile = async (blob, fileName) => {
   try {
-    const { Filesystem, Directory } = await import('@capacitor/filesystem');
+    // Use Capacitor native bridge directly (NOT ES module import)
+    // because @capacitor/* is externalized in vite.config.js and bare
+    // module specifiers can't be resolved in the WebView.
+    const FilesystemPlugin = window.Capacitor?.Plugins?.Filesystem;
+    if (!FilesystemPlugin) {
+      console.warn('[Platform] Capacitor Filesystem plugin not available');
+      return browserDownload(blob, fileName);
+    }
     
     // Convert blob to base64
     const reader = new FileReader();
@@ -130,16 +137,17 @@ const saveFileOnMobile = async (blob, fileName) => {
     // Determine the best directory for saving
     // On Android 11+ (API 30), ExternalStorage requires MANAGE_EXTERNAL_STORAGE
     // Use Documents directory as fallback, or External if available
+    // NOTE: Use string directory names (not enum) since the npm package is externalized
     let savedUri = null;
     let savedPath = null;
     let saveDirectory = null;
 
     // Try ExternalStorage/Downloads first (visible in file manager)
     try {
-      const result = await Filesystem.writeFile({
+      const result = await FilesystemPlugin.writeFile({
         path: `Download/${fileName}`,
         data: base64,
-        directory: Directory.ExternalStorage,
+        directory: 'EXTERNAL_STORAGE',
         recursive: true,
       });
       savedUri = result.uri;
@@ -151,10 +159,10 @@ const saveFileOnMobile = async (blob, fileName) => {
       
       // Fallback: save to app's Documents directory
       try {
-        const result = await Filesystem.writeFile({
+        const result = await FilesystemPlugin.writeFile({
           path: `Downloads/${fileName}`,
           data: base64,
-          directory: Directory.Documents,
+          directory: 'DOCUMENTS',
           recursive: true,
         });
         savedUri = result.uri;
@@ -165,10 +173,10 @@ const saveFileOnMobile = async (blob, fileName) => {
         console.warn('[Platform] Documents save failed, trying Data:', docErr.message);
         
         // Last resort: app's internal data directory
-        const result = await Filesystem.writeFile({
+        const result = await FilesystemPlugin.writeFile({
           path: `downloads/${fileName}`,
           data: base64,
-          directory: Directory.Data,
+          directory: 'DATA',
           recursive: true,
         });
         savedUri = result.uri;
@@ -202,65 +210,48 @@ const saveFileOnMobile = async (blob, fileName) => {
  */
 const openFileOnMobile = async (fileUri, filePath, fileName, directory) => {
   const mimeType = getMimeTypeFromFileName(fileName);
+  const plugins = window.Capacitor?.Plugins;
   
-  // Method 1: Try Capacitor FileOpener plugin (if installed)
-  try {
-    const fileOpenerModule = await import('@capacitor-community/file-opener');
-    const FileOpener = fileOpenerModule.FileOpener || fileOpenerModule.FileOpener2 || fileOpenerModule.default;
-    if (FileOpener?.open) {
-      await FileOpener.open({
+  // Method 1: Try Capacitor FileOpener plugin via native bridge
+  if (plugins?.FileOpener?.open) {
+    try {
+      await plugins.FileOpener.open({
         filePath: fileUri,
         contentType: mimeType,
         openWithDefault: true,
       });
       console.log(`[Platform] File opened via FileOpener: ${fileName}`);
       return;
+    } catch (e) {
+      console.log('[Platform] FileOpener failed:', e.message);
     }
-  } catch (e) {
-    // FileOpener plugin not installed — try alternative methods
-    console.log('[Platform] FileOpener plugin not available, trying alternative...', e.message);
   }
 
-  // Method 2: Use Capacitor's App.openUrl for content:// URIs
-  try {
-    const { App } = await import('@capacitor/app');
-    // If the URI is already a content:// URI, we can try opening it
-    if (fileUri.startsWith('content://') || fileUri.startsWith('file://')) {
-      // For Android, we need to construct an intent-like URL
-      // This won't work for APK install, but works for some file types
-      console.log(`[Platform] Attempting to open via App.openUrl: ${fileUri}`);
-    }
-  } catch (e) {
-    console.log('[Platform] App.openUrl not available');
-  }
-
-  // Method 3: Use the WebView's built-in mechanism for downloading
-  // Create a link with the file URI and try to trigger it
-  try {
-    const { Filesystem, Directory } = await import('@capacitor/filesystem');
-    
-    // Get the actual file URI that Android can handle
-    const fileInfo = await Filesystem.getUri({
-      path: filePath,
-      directory: directory === 'ExternalStorage' ? Directory.ExternalStorage 
-        : directory === 'Documents' ? Directory.Documents 
-        : Directory.Data,
-    });
-    
-    if (fileInfo.uri) {
-      // On Android, try opening via the native intent system
-      // We send a message to the native layer to handle this
-      if (window.Capacitor?.Plugins?.FileOpener?.open) {
-        await window.Capacitor.Plugins.FileOpener.open({
+  // Method 2: Get file URI and try opening
+  if (plugins?.Filesystem) {
+    try {
+      const dirMap = {
+        'ExternalStorage': 'EXTERNAL_STORAGE',
+        'Documents': 'DOCUMENTS',
+        'Data': 'DATA',
+      };
+      
+      const fileInfo = await plugins.Filesystem.getUri({
+        path: filePath,
+        directory: dirMap[directory] || 'DATA',
+      });
+      
+      if (fileInfo.uri && plugins?.FileOpener?.open) {
+        await plugins.FileOpener.open({
           filePath: fileInfo.uri,
           contentType: mimeType,
         });
         console.log(`[Platform] File opened via native FileOpener: ${fileName}`);
         return;
       }
+    } catch (e) {
+      console.log('[Platform] Native file open failed:', e.message);
     }
-  } catch (e) {
-    console.log('[Platform] Native file open failed:', e.message);
   }
 
   // If we reach here, auto-open is not possible
@@ -302,15 +293,20 @@ export const showNativeNotification = async (title, body) => {
   
   if (platform === 'android' || platform === 'ios') {
     try {
-      const { LocalNotifications } = await import('@capacitor/local-notifications');
-      await LocalNotifications.schedule({
-        notifications: [{
-          title,
-          body,
-          id: Date.now(),
-          schedule: { at: new Date(Date.now()) },
-        }],
-      });
+      // Use Capacitor native bridge directly
+      const LN = window.Capacitor?.Plugins?.LocalNotifications;
+      if (LN) {
+        await LN.schedule({
+          notifications: [{
+            title,
+            body,
+            id: Date.now(),
+            schedule: { at: new Date(Date.now()) },
+          }],
+        });
+      } else {
+        throw new Error('LocalNotifications plugin not available');
+      }
     } catch (e) {
       // Fallback to web notification
       if (Notification.permission === 'granted') {
@@ -333,12 +329,13 @@ export const keepAwake = async (enable = true) => {
   if (!isNative()) return;
   
   try {
-    // Requires @capacitor-community/keep-awake plugin
-    const { KeepAwake } = await import('@capacitor-community/keep-awake');
+    // Use Capacitor native bridge directly
+    const KA = window.Capacitor?.Plugins?.KeepAwake;
+    if (!KA) return;
     if (enable) {
-      await KeepAwake.keepAwake();
+      await KA.keepAwake();
     } else {
-      await KeepAwake.allowSleep();
+      await KA.allowSleep();
     }
   } catch (e) {
     // Plugin not installed, ignore

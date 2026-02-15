@@ -46,7 +46,7 @@ Quick Meet — Self-hosted Real-time Communication Ecosystem
 | 11 | PM2 দিয়ে server চালু | নিচে দেখো | একবারই |
 | 12 | coturn (TURN server) install | নিচে দেখো | একবারই |
 | 13 | Firewall (UFW) setup | নিচে দেখো | একবারই |
-| 14 | Auto-deploy webhook (optional) | নিচে দেখো | একবারই |
+| 14 | Auto-deploy webhook (GitHub) | নিচে দেখো | একবারই |
 | 15 | Desktop app build (optional) | নিচে দেখো | release এর সময় |
 | 16 | Android APK build (optional) | নিচে দেখো | release এর সময় |
 
@@ -490,92 +490,42 @@ ufw status
 
 ---
 
-## 📌 Step 14: Auto-Deploy Webhook (Optional)
 
-### Install:
-```bash
-apt-get install -y webhook
-```
+## 📌 Step 14: Auto-Deploy Webhook (GitHub Actions)
 
-### Deploy script:
-```bash
-nano /var/www/quick-meet/deploy.sh
-```
+### 1. Webhook সেটআপ (GitHub → Settings → Webhooks)
 
-```bash
-#!/bin/bash
-cd /var/www/quick-meet
-git stash
-git pull origin main
+1. **GitHub Repo → Settings → Webhooks → Add webhook**
+2. **Payload URL:** `https://quickmeet.genuinesoftmart.store/webhook`
+3. **Content type:** `application/json`
+4. **Secret:** `VPS_PASSWORD` (এই exact text টাই, VPS password না)
+5. **Events:** Just the push event
+6. **Add webhook**
 
-# Ensure security logs directory exists
-mkdir -p /var/www/quick-meet/server/logs/security
+> ⚠️ Secret ফিল্ডে VPS এর আসল password না দিয়ে `VPS_PASSWORD` এই text টাই দেবে। VPS এর `.env` ফাইলে `WEBHOOK_SECRET=VPS_PASSWORD` থাকতে হবে।
 
-cd server && npm install
-cd ../client && npm install && npm run build
-pm2 restart quick-meet
-echo "Deploy complete: $(date)"
-```
+### 2. Actions Secret সেটআপ (GitHub → Settings → Secrets and variables → Actions)
 
-```bash
-chmod +x /var/www/quick-meet/deploy.sh
-```
+1. **Settings → Secrets and variables → Actions → New repository secret**
+2. **Name:** `VPS_PASSWORD`
+3. **Value:** VPS এর root password (SSH login password)
+4. **Add secret**
 
-### Webhook config:
-```bash
-nano /etc/webhook.conf
-```
+> এটা GitHub Actions workflow এর SSH deploy job এর জন্য — build শেষে Actions নিজে SSH দিয়ে VPS-এ deploy করবে।
 
-```json
-[
-  {
-    "id": "deploy",
-    "execute-command": "/var/www/quick-meet/deploy.sh",
-    "command-working-directory": "/var/www/quick-meet",
-    "trigger-rule": {
-      "match": {
-        "type": "payload-hmac-sha1",
-        "secret": "quickmeet-secret-2026",
-        "parameter": {
-          "source": "header",
-          "name": "X-Hub-Signature"
-        }
-      }
-    }
-  }
-]
-```
+---
 
-### Systemd service:
-```bash
-nano /etc/systemd/system/webhook.service
-```
+### PM2 Process Name
 
-```ini
-[Unit]
-Description=Webhook Deploy Service
-After=network.target
-
-[Service]
-ExecStart=/usr/bin/webhook -hooks /etc/webhook.conf -port 9000 -verbose
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
+Server process name এখন `quickmeet` (আগে ছিল `quick-meet`). সব জায়গায়:
 
 ```bash
-systemctl daemon-reload
-systemctl enable webhook
-systemctl start webhook
+pm2 restart quickmeet
+pm2 logs quickmeet --lines 30
+pm2 status
 ```
 
-### GitHub Webhook Settings:
-- GitHub Repo → Settings → Webhooks → Add webhook
-- **Payload URL:** `https://quickmeet.genuinesoftmart.store/webhook`
-- **Content type:** `application/json`
-- **Secret:** `quickmeet-secret-2026`
-- **Events:** Just the push event
+---
 
 ---
 
@@ -763,7 +713,7 @@ Project root থেকে এক command এ সব build করা যায়
 | সমস্যা | Command |
 |---|---|
 | Server logs দেখা | `pm2 logs quick-meet --lines 50` |
-| Server restart | `pm2 restart quick-meet` |
+| Server restart | `pm2 restart quickmeet` |
 | Nginx error | `nginx -t && systemctl restart nginx` |
 | Nginx logs | `tail -50 /var/log/nginx/error.log` |
 | coturn status | `systemctl status coturn` |
@@ -1026,7 +976,7 @@ mobile/
 
 1. **`.env` ফাইল git এ push হয় না** — VPS তে manually তৈরি করতে হয়
 2. **Client `.env` change = rebuild লাগবে** — Vite build-time এ inject করে
-3. **Server `.env` change = PM2 restart লাগবে** — `pm2 restart quick-meet`
+3. **Server `.env` change = PM2 restart লাগবে** — `pm2 restart quickmeet`
 4. **coturn password = Client VITE_TURN_CREDENTIAL** — দুইটা MUST match হতে হবে
 5. **SSL auto-renew** — Let's Encrypt 90 দিনে expire হয়, certbot auto-renew করে
 6. **MongoDB Atlas** — Network Access এ 0.0.0.0/0 allow করো (সব IP থেকে access)

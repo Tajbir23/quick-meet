@@ -37,12 +37,16 @@ export const initBackgroundService = async () => {
   if (!isAndroid()) return;
   
   try {
-    // Dynamically import Capacitor plugins
-    const { registerPlugin } = await import('@capacitor/core');
-    const { App } = await import('@capacitor/app');
+    // Use Capacitor native bridge directly (NOT ES module import)
+    // because @capacitor/* is externalized in vite.config.js
+    const plugins = window.Capacitor?.Plugins;
+    if (!plugins) {
+      console.warn('[BackgroundService] Capacitor not available');
+      return;
+    }
     
-    BackgroundServicePlugin = registerPlugin('BackgroundService');
-    AppPlugin = App;
+    BackgroundServicePlugin = plugins.BackgroundService;
+    AppPlugin = plugins.App;
     
     // Start the foreground service
     await startService();
