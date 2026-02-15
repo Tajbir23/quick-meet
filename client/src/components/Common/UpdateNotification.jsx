@@ -189,143 +189,64 @@ const UpdateNotification = () => {
     }
   }, [updateState]);
 
-  // ─── Android: Download APK + open for install ─────────
-  // Uses Capacitor native bridge (window.Capacitor.Plugins) directly
-  // because @capacitor/* is externalized and can't be dynamically imported.
+  // ─── Android: Download APK + open system installer ────
+  // Uses our custom native ApkInstaller plugin which:
+  //  1. Downloads via Android DownloadManager (native, with status bar progress)
+  //  2. Opens APK with FileProvider content:// URI via system installer
   //
   // IMPORTANT: Never use window.open(url, '_system') — Capacitor doesn't
-  // support it and it renders binary data inside the WebView.
-  // Use Capacitor Browser plugin or show user instructions instead.
-  
-  const openInSystemBrowser = useCallback(async (url) => {
-    // Try Capacitor Browser plugin first
-    const BrowserPlugin = window.Capacitor?.Plugins?.Browser;
-    if (BrowserPlugin?.open) {
-      try {
-        await BrowserPlugin.open({ url });
-        return;
-      } catch (e) {
-        console.warn('[Update] Browser.open failed:', e);
-      }
-    }
-    // Fallback: create <a> tag with download attribute
-    const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.download = 'quick-meet.apk';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => document.body.removeChild(a), 100);
-  }, []);
-
+  // support it and renders binary APK data inside the WebView.
   const handleAndroidDownload = useCallback(async () => {
     if (!updateState?.downloadUrl) return;
-    
-    const plugins = window.Capacitor?.Plugins;
-    const FilesystemPlugin = plugins?.Filesystem;
-    const FileOpenerPlugin = plugins?.FileOpener;
 
-    // If no Capacitor Filesystem available, open in system browser
-    if (!FilesystemPlugin) {
-      console.log('[Update] No Capacitor Filesystem, opening download in system browser');
-      await openInSystemBrowser(updateState.downloadUrl);
+    const ApkInstaller = window.Capacitor?.Plugins?.ApkInstaller;
+    if (!ApkInstaller) {
+      console.warn('[Update] ApkInstaller plugin not available');
+      alert('Update is available but the installer plugin is not loaded. Please reinstall the app from the latest APK.');
       return;
     }
 
     setAndroidDownloading(true);
     setAndroidProgress(0);
 
+    // Listen for native download progress events
+    let progressListener = null;
     try {
-      console.log('[Update] Downloading APK from:', updateState.downloadUrl);
-      
-      const response = await fetch(updateState.downloadUrl);
-      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
-      
-      const contentLength = +response.headers.get('Content-Length') || 0;
-      const reader = response.body.getReader();
-      const chunks = [];
-      let received = 0;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        received += value.length;
-        if (contentLength > 0) {
-          setAndroidProgress(Math.round((received / contentLength) * 100));
+      progressListener = await ApkInstaller.addListener('downloadProgress', (data) => {
+        console.log('[Update] Native progress:', data);
+        if (typeof data.progress === 'number') {
+          setAndroidProgress(data.progress);
         }
-      }
+        if (data.status === 'installing') {
+          setAndroidProgress(100);
+        }
+      });
+    } catch (e) {
+      console.warn('[Update] Could not add progress listener:', e);
+    }
 
-      // Convert to base64 (chunked to avoid call stack overflow on large files)
-      const blob = new Blob(chunks, { type: 'application/vnd.android.package-archive' });
-      const arrayBuffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = '';
-      const CHUNK = 32768;
-      for (let i = 0; i < bytes.length; i += CHUNK) {
-        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-      }
-      const base64 = btoa(binary);
-
-      // Save via Capacitor Filesystem native bridge
-      // Use string directory names instead of enums (enums are in the
-      // externalized npm package; strings go directly to the native bridge)
+    try {
       const fileName = `quick-meet-v${updateState.version || 'update'}.apk`;
-      let savedPath;
+      console.log('[Update] Starting native download:', updateState.downloadUrl);
 
-      try {
-        const result = await FilesystemPlugin.writeFile({
-          path: `Download/${fileName}`,
-          data: base64,
-          directory: 'EXTERNAL_STORAGE',
-          recursive: true,
-        });
-        savedPath = result.uri;
-      } catch (e1) {
-        console.warn('[Update] ExternalStorage failed, trying Cache:', e1);
-        const result = await FilesystemPlugin.writeFile({
-          path: fileName,
-          data: base64,
-          directory: 'CACHE',
-          recursive: true,
-        });
-        savedPath = result.uri;
-      }
+      const result = await ApkInstaller.downloadAndInstall({
+        url: updateState.downloadUrl,
+        fileName,
+      });
 
-      console.log('[Update] APK saved to:', savedPath);
-      setAndroidProgress(100);
-
-      // Open APK for installation
-      if (FileOpenerPlugin?.open) {
-        try {
-          await FileOpenerPlugin.open({
-            filePath: savedPath,
-            contentType: 'application/vnd.android.package-archive',
-            openWithDefault: true,
-          });
-          console.log('[Update] APK install dialog opened');
-        } catch (openErr) {
-          console.warn('[Update] FileOpener failed:', openErr);
-          // Show alert instead of window.open which renders binary in WebView
-          alert(`APK saved! Go to your Downloads folder and tap "${fileName}" to install.`);
-        }
-      } else {
-        // No FileOpener — instruct user
-        alert(`APK downloaded to Downloads folder! Open your file manager, find "${fileName}", and tap to install.`);
-      }
+      console.log('[Update] Native install result:', result);
+      // The system installer dialog is now open — user taps "Install"
     } catch (error) {
-      console.error('[Update] Android download error:', error);
-      // Fallback: open in system browser (never window.open which renders binary)
-      try {
-        await openInSystemBrowser(updateState.downloadUrl);
-      } catch (e) {
-        alert('Download failed. Please try again later.');
-      }
+      console.error('[Update] Native download/install error:', error);
+      alert('Download failed: ' + (error?.message || 'Unknown error') + '\n\nPlease try again.');
     } finally {
+      // Cleanup listener
+      if (progressListener?.remove) {
+        try { progressListener.remove(); } catch (e) {}
+      }
       setAndroidDownloading(false);
     }
-  }, [updateState, openInSystemBrowser]);
+  }, [updateState]);
 
   // ─── Web: Clear cache & reload ────────────────────────
   const handleWebReload = useCallback(() => {
