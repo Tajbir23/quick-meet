@@ -24,12 +24,7 @@ export default defineConfig({
     rollupOptions: {
       // Capacitor plugins are mobile-only — exclude from web build
       external: [
-        '@capacitor/filesystem',
-        '@capacitor/core',
-        '@capacitor/app',
-        '@capacitor/haptics',
-        '@capacitor/keyboard',
-        '@capacitor/status-bar',
+        /^@capacitor\//,
       ],
       output: {
         manualChunks: {
