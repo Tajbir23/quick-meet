@@ -534,6 +534,54 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
     }
   });
 
+  // ============================================
+  // SERVER RELAY MODE — fallback when P2P DataChannel fails
+  // Sender sends chunks via Socket.IO, server forwards to receiver
+  // ============================================
+
+  /**
+   * Relay start — sender tells receiver to switch to relay mode
+   */
+  socket.on('file-transfer:relay-start', ({ transferId, targetUserId }) => {
+    console.log(`[FT RELAY] 🔄 Relay mode activated | transferId=${transferId} | sender=${socket.username} → target=${targetUserId}`);
+    const targetSocketId = onlineUsers.get(targetUserId);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('file-transfer:relay-start', {
+        transferId,
+        senderId: socket.userId,
+      });
+    }
+  });
+
+  /**
+   * Relay chunk — forward file chunk from sender to receiver
+   */
+  socket.on('file-transfer:relay-chunk', ({ transferId, targetUserId, chunkIndex, data }) => {
+    const targetSocketId = onlineUsers.get(targetUserId);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('file-transfer:relay-chunk', {
+        transferId,
+        senderId: socket.userId,
+        chunkIndex,
+        data,
+      });
+    }
+  });
+
+  /**
+   * Relay complete — sender finished sending all chunks via relay
+   */
+  socket.on('file-transfer:relay-complete', ({ transferId, targetUserId }) => {
+    console.log(`[FT RELAY] ✅ Relay transfer complete | transferId=${transferId} | sender=${socket.username}`);
+    const targetSocketId = onlineUsers.get(targetUserId);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('file-transfer:relay-complete', {
+        transferId,
+        senderId: socket.userId,
+      });
+    }
+  });
+
   /**
    * On disconnect — pause all active transfers for this user
    * IMPORTANT: Must be fault-tolerant — if MongoDB is temporarily
