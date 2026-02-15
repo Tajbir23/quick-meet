@@ -46,10 +46,6 @@ const securityLogger = require('../security/SecurityEventLogger');
 const { SEVERITY } = require('../security/SecurityEventLogger');
 const Message = require('../models/Message');
 
-// Track active 1-to-1 calls: userId → targetUserId
-// Used to notify the other party when a user disconnects mid-call
-const activeCalls = new Map();
-
 /**
  * Helper: Create a call log message in DB and emit to both users in real-time.
  * The CALLER is always the message sender so the UI shows correct direction.
