@@ -350,30 +350,58 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
    */
   socket.on('file-transfer:check-pending', async () => {
     try {
-      // Auto-expire stale pending/paused transfers older than 24 hours
-      const staleThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      // Auto-expire stale pending transfers older than 5 minutes
+      // (sender probably left or app was closed — file no longer in memory)
+      const pendingStaleThreshold = new Date(Date.now() - 5 * 60 * 1000);
       await FileTransfer.updateMany(
         {
-          status: { $in: ['pending', 'paused'] },
-          updatedAt: { $lt: staleThreshold },
+          status: 'pending',
+          updatedAt: { $lt: pendingStaleThreshold },
         },
-        { $set: { status: 'expired', statusReason: 'Auto-expired after 24 hours' } }
+        { $set: { status: 'expired', statusReason: 'Auto-expired pending after 5 minutes' } }
       );
 
-      // Find ONLY transfers where this user is the RECEIVER and status is resumable
-      // Sender-side transfers cannot be resumed from client (file no longer in memory)
+      // Auto-expire stale paused transfers older than 24 hours
+      const pausedStaleThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      await FileTransfer.updateMany(
+        {
+          status: 'paused',
+          updatedAt: { $lt: pausedStaleThreshold },
+        },
+        { $set: { status: 'expired', statusReason: 'Auto-expired paused after 24 hours' } }
+      );
+
+      // Find transfers where this user is the RECEIVER and status is resumable
       const transfers = await FileTransfer.find({
         receiver: socket.userId,
         status: { $in: ['pending', 'paused'] },
-        updatedAt: { $gte: staleThreshold },
       })
         .select('+fileHash')
         .populate('sender', 'username avatar')
         .populate('receiver', 'username avatar')
         .lean();
 
-      if (transfers.length > 0) {
-        socket.emit('file-transfer:pending-list', { transfers });
+      // CRITICAL: Only show pending transfers if the sender is currently online
+      // (stale pending = sender left/reloaded, file no longer in memory)
+      const validTransfers = transfers.filter(t => {
+        if (t.status === 'pending') {
+          const senderId = t.sender?._id?.toString() || t.sender?.toString();
+          const senderOnline = senderId && onlineUsers.has(senderId);
+          if (!senderOnline) {
+            // Auto-cancel this stale pending transfer
+            FileTransfer.updateOne(
+              { _id: t._id },
+              { $set: { status: 'cancelled', statusReason: 'Sender offline — auto-cancelled' } }
+            ).catch(() => {});
+            return false;
+          }
+        }
+        return true;
+      });
+
+      if (validTransfers.length > 0) {
+        socket.emit('file-transfer:pending-list', { transfers: validTransfers });
+        console.log(`📁 Sent ${validTransfers.length} pending transfers to ${socket.username} (filtered ${transfers.length - validTransfers.length} stale)`);
       }
 
       // Auto-cancel any sender-side transfers that are stuck
@@ -382,7 +410,7 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
         {
           sender: socket.userId,
           status: { $in: ['accepted', 'transferring'] },
-          updatedAt: { $lt: staleThreshold },
+          updatedAt: { $lt: pendingStaleThreshold },
         },
         { $set: { status: 'failed', statusReason: 'Sender reconnected without file — auto-cancelled' } }
       );
@@ -595,11 +623,11 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
       const result = await FileTransfer.updateMany(
         {
           $or: [{ sender: socket.userId }, { receiver: socket.userId }],
-          status: { $in: ['transferring', 'accepted'] },
+          status: { $in: ['transferring', 'accepted', 'pending'] },
         },
         {
           $set: {
-            status: 'paused',
+            status: 'cancelled',
             pausedAt: new Date(),
             statusReason: 'Peer disconnected',
           },
@@ -607,7 +635,7 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
       );
 
       if (result.modifiedCount > 0) {
-        console.log(`📁 Paused ${result.modifiedCount} transfers for disconnected user ${socket.username}`);
+        console.log(`📁 Cancelled ${result.modifiedCount} transfers for disconnected user ${socket.username}`);
       }
     } catch (err) {
       // Log but never crash — this is non-critical cleanup
