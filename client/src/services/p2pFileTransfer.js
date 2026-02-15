@@ -848,7 +848,14 @@ class P2PFileTransferService {
 
       // Wait for ICE gathering to complete (all candidates embedded in SDP)
       await this._waitForIceGathering(pc, 10000);
-      console.log(`[P2P DEBUG] ICE gathering done | transferId=${session.transferId} | candidates in SDP`);
+      
+      // Count candidates in SDP for diagnostics
+      const sdpText = pc.localDescription?.sdp || '';
+      const candidateLines = sdpText.split('\n').filter(l => l.startsWith('a=candidate:'));
+      const hostCount = candidateLines.filter(l => l.includes('typ host')).length;
+      const srflxCount = candidateLines.filter(l => l.includes('typ srflx')).length;
+      const relayCount = candidateLines.filter(l => l.includes('typ relay')).length;
+      console.log(`[P2P DEBUG] ICE gathering done | transferId=${session.transferId} | host=${hostCount} srflx=${srflxCount} relay=${relayCount} total=${candidateLines.length}`);
 
       // Start connection timeout NOW (after ICE gathering), so the full 30+30s
       // budget is available for the actual P2P connection establishment
@@ -1000,7 +1007,14 @@ class P2PFileTransferService {
 
       // Wait for ICE gathering to complete (all candidates embedded in SDP)
       await this._waitForIceGathering(pc, 10000);
-      console.log(`[P2P DEBUG] ICE gathering done (answer) | transferId=${session.transferId} | candidates in SDP`);
+      
+      // Count candidates in SDP for diagnostics
+      const sdpText = pc.localDescription?.sdp || '';
+      const candidateLines = sdpText.split('\n').filter(l => l.startsWith('a=candidate:'));
+      const hostCount = candidateLines.filter(l => l.includes('typ host')).length;
+      const srflxCount = candidateLines.filter(l => l.includes('typ srflx')).length;
+      const relayCount = candidateLines.filter(l => l.includes('typ relay')).length;
+      console.log(`[P2P DEBUG] ICE gathering done (answer) | transferId=${session.transferId} | host=${hostCount} srflx=${srflxCount} relay=${relayCount} total=${candidateLines.length}`);
 
       const socket = getSocket();
       if (socket) {

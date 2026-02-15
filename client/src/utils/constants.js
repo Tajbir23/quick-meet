@@ -25,20 +25,28 @@ export const API_URL = `${SERVER_URL}/api`;
 // - TURN with TLS (turns:) preferred over TCP
 export const ICE_SERVERS = {
   iceServers: [
-    // STUN servers (minimal set — reduce fingerprinting surface)
+    // STUN servers — multiple for reliability (especially Android WebView)
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
     // Self-hosted TURN server (coturn on VPS) — required for NAT traversal
+    // Using BOTH domain and IP to ensure Android WebView can resolve
     {
       urls: [
         'turn:quickmeet.genuinesoftmart.store:3478',
         'turn:quickmeet.genuinesoftmart.store:3478?transport=tcp',
+        'turn:167.71.235.56:3478',
+        'turn:167.71.235.56:3478?transport=tcp',
       ],
       username: 'quickmeet',
       credential: 'QuickMeet@Turn2026Secure',
     },
     {
-      urls: 'turns:quickmeet.genuinesoftmart.store:5349?transport=tcp',
+      urls: [
+        'turns:quickmeet.genuinesoftmart.store:5349?transport=tcp',
+        'turns:167.71.235.56:5349?transport=tcp',
+      ],
       username: 'quickmeet',
       credential: 'QuickMeet@Turn2026Secure',
     },
@@ -49,7 +57,7 @@ export const ICE_SERVERS = {
       credential: import.meta.env.VITE_TURN_CREDENTIAL || '',
     }] : []),
   ].filter(s => s.urls),
-  iceCandidatePoolSize: 5, // Reduced from 10 — fewer pre-allocated candidates
+  iceCandidatePoolSize: 10, // More pre-allocated candidates for faster gathering
 
   // SECURITY POLICIES:
   // 'all' = allow P2P + relay (default, good for performance)

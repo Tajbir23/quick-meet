@@ -491,7 +491,13 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
    * Separate from call signaling to avoid conflicts
    */
   socket.on('file-transfer:offer', ({ transferId, targetUserId, offer }) => {
-    console.log(`[FT SIGNAL] offer received | from=${socket.userId} | target=${targetUserId} | transferId=${transferId}`);
+    // Count candidates in SDP for diagnostics
+    const sdp = offer?.sdp || '';
+    const candidates = sdp.split('\n').filter(l => l.startsWith('a=candidate:'));
+    const host = candidates.filter(l => l.includes('typ host')).length;
+    const srflx = candidates.filter(l => l.includes('typ srflx')).length;
+    const relay = candidates.filter(l => l.includes('typ relay')).length;
+    console.log(`[FT SIGNAL] offer received | from=${socket.userId} | target=${targetUserId} | transferId=${transferId} | ICE: host=${host} srflx=${srflx} relay=${relay} total=${candidates.length}`);
     const targetSocketId = onlineUsers.get(targetUserId);
     if (targetSocketId) {
       console.log(`[FT SIGNAL] offer relayed | targetSocket=${targetSocketId}`);
@@ -507,7 +513,13 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
   });
 
   socket.on('file-transfer:answer', ({ transferId, targetUserId, answer }) => {
-    console.log(`[FT SIGNAL] answer received | from=${socket.userId} | target=${targetUserId} | transferId=${transferId}`);
+    // Count candidates in SDP for diagnostics
+    const sdp = answer?.sdp || '';
+    const candidates = sdp.split('\n').filter(l => l.startsWith('a=candidate:'));
+    const host = candidates.filter(l => l.includes('typ host')).length;
+    const srflx = candidates.filter(l => l.includes('typ srflx')).length;
+    const relay = candidates.filter(l => l.includes('typ relay')).length;
+    console.log(`[FT SIGNAL] answer received | from=${socket.userId} | target=${targetUserId} | transferId=${transferId} | ICE: host=${host} srflx=${srflx} relay=${relay} total=${candidates.length}`);
     const targetSocketId = onlineUsers.get(targetUserId);
     if (targetSocketId) {
       console.log(`[FT SIGNAL] answer relayed | targetSocket=${targetSocketId}`);
