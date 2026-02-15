@@ -192,6 +192,33 @@ const UpdateNotification = () => {
   // ─── Android: Download APK + open for install ─────────
   // Uses Capacitor native bridge (window.Capacitor.Plugins) directly
   // because @capacitor/* is externalized and can't be dynamically imported.
+  //
+  // IMPORTANT: Never use window.open(url, '_system') — Capacitor doesn't
+  // support it and it renders binary data inside the WebView.
+  // Use Capacitor Browser plugin or show user instructions instead.
+  
+  const openInSystemBrowser = useCallback(async (url) => {
+    // Try Capacitor Browser plugin first
+    const BrowserPlugin = window.Capacitor?.Plugins?.Browser;
+    if (BrowserPlugin?.open) {
+      try {
+        await BrowserPlugin.open({ url });
+        return;
+      } catch (e) {
+        console.warn('[Update] Browser.open failed:', e);
+      }
+    }
+    // Fallback: create <a> tag with download attribute
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.download = 'quick-meet.apk';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => document.body.removeChild(a), 100);
+  }, []);
+
   const handleAndroidDownload = useCallback(async () => {
     if (!updateState?.downloadUrl) return;
     
@@ -202,7 +229,7 @@ const UpdateNotification = () => {
     // If no Capacitor Filesystem available, open in system browser
     if (!FilesystemPlugin) {
       console.log('[Update] No Capacitor Filesystem, opening download in system browser');
-      window.open(updateState.downloadUrl, '_system');
+      await openInSystemBrowser(updateState.downloadUrl);
       return;
     }
 
@@ -256,11 +283,11 @@ const UpdateNotification = () => {
         });
         savedPath = result.uri;
       } catch (e1) {
-        console.warn('[Update] ExternalStorage failed, trying Data:', e1);
+        console.warn('[Update] ExternalStorage failed, trying Cache:', e1);
         const result = await FilesystemPlugin.writeFile({
           path: fileName,
           data: base64,
-          directory: 'DATA',
+          directory: 'CACHE',
           recursive: true,
         });
         savedPath = result.uri;
@@ -279,22 +306,26 @@ const UpdateNotification = () => {
           });
           console.log('[Update] APK install dialog opened');
         } catch (openErr) {
-          console.warn('[Update] FileOpener failed, trying system browser:', openErr);
-          window.open(updateState.downloadUrl, '_system');
+          console.warn('[Update] FileOpener failed:', openErr);
+          // Show alert instead of window.open which renders binary in WebView
+          alert(`APK saved! Go to your Downloads folder and tap "${fileName}" to install.`);
         }
       } else {
-        // No FileOpener plugin — open download URL in system browser
-        console.log('[Update] No FileOpener plugin, opening in system browser');
-        window.open(updateState.downloadUrl, '_system');
+        // No FileOpener — instruct user
+        alert(`APK downloaded to Downloads folder! Open your file manager, find "${fileName}", and tap to install.`);
       }
     } catch (error) {
       console.error('[Update] Android download error:', error);
-      // Fallback: open download URL in system browser
-      window.open(updateState.downloadUrl, '_system');
+      // Fallback: open in system browser (never window.open which renders binary)
+      try {
+        await openInSystemBrowser(updateState.downloadUrl);
+      } catch (e) {
+        alert('Download failed. Please try again later.');
+      }
     } finally {
       setAndroidDownloading(false);
     }
-  }, [updateState]);
+  }, [updateState, openInSystemBrowser]);
 
   // ─── Web: Clear cache & reload ────────────────────────
   const handleWebReload = useCallback(() => {

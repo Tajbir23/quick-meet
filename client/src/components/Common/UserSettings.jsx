@@ -636,8 +636,19 @@ const AboutTab = () => {
                       window.open(updateResult.url, '_blank');
                     }
                   } else if (platformKey === 'android' && updateResult.url) {
-                    // Open download URL — UpdateNotification handles proper APK install
-                    window.open(updateResult.url, '_system');
+                    // Open download URL in system browser (never window.open _system)
+                    const BrowserPlugin = window.Capacitor?.Plugins?.Browser;
+                    if (BrowserPlugin?.open) {
+                      BrowserPlugin.open({ url: updateResult.url });
+                    } else {
+                      const a = document.createElement('a');
+                      a.href = updateResult.url;
+                      a.target = '_blank';
+                      a.download = 'quick-meet.apk';
+                      document.body.appendChild(a);
+                      a.click();
+                      setTimeout(() => document.body.removeChild(a), 100);
+                    }
                   }
                 }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium rounded-lg transition-colors"
