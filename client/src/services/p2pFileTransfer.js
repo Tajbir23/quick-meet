@@ -723,8 +723,9 @@ class P2PFileTransferService {
     session.status = 'connecting';
     this._notifyUpdate(session.transferId, session);
 
-    // Start connection timeout (30s)
-    this._startConnectionTimeout(session);
+    // NOTE: Connection timeout starts AFTER ICE gathering (below), not here.
+    // ICE gathering itself can take up to 10s, so starting timeout here would
+    // eat into the actual connection budget.
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
     session.peerConnection = pc;
@@ -759,7 +760,9 @@ class P2PFileTransferService {
 
     dc.onerror = (err) => {
       console.error(`[P2P DEBUG] ❌ DataChannel ERROR for ${session.transferId}:`, err);
-      if (!['completed', 'verifying', 'cancelled'].includes(session.status)) {
+      // Don't immediately fail during active transfer — chunk sending has its own retry logic.
+      // Only fail if we're still in connecting phase (DataChannel never opened).
+      if (session.status === 'connecting') {
         session.status = 'failed';
         session._failReason = 'datachannel_error';
         this._notifyUpdate(session.transferId, session);
@@ -846,6 +849,10 @@ class P2PFileTransferService {
       // Wait for ICE gathering to complete (all candidates embedded in SDP)
       await this._waitForIceGathering(pc, 10000);
       console.log(`[P2P DEBUG] ICE gathering done | transferId=${session.transferId} | candidates in SDP`);
+
+      // Start connection timeout NOW (after ICE gathering), so the full 30+30s
+      // budget is available for the actual P2P connection establishment
+      this._startConnectionTimeout(session);
 
       const socket = getSocket();
       if (socket) {
@@ -1119,7 +1126,31 @@ class P2PFileTransferService {
         packet.set(new Uint8Array(header), 0);
         packet.set(new Uint8Array(arrayBuffer), 4);
         
-        dataChannel.send(packet.buffer);
+        // Retry send up to 3 times with brief delay
+        let sent = false;
+        for (let retry = 0; retry < 3; retry++) {
+          try {
+            if (dataChannel.readyState !== 'open') {
+              console.warn(`[P2P] DataChannel not open (state=${dataChannel.readyState}), waiting...`);
+              await new Promise(r => setTimeout(r, 1000));
+              if (dataChannel.readyState !== 'open') break;
+            }
+            dataChannel.send(packet.buffer);
+            sent = true;
+            break;
+          } catch (sendErr) {
+            console.warn(`[P2P] Chunk ${session.currentChunk} send retry ${retry + 1}/3:`, sendErr.message);
+            if (retry < 2) await new Promise(r => setTimeout(r, 500));
+          }
+        }
+        
+        if (!sent) {
+          console.error(`[P2P] ❌ Failed to send chunk ${session.currentChunk} after 3 retries | dcState=${dataChannel.readyState}`);
+          session.status = 'failed';
+          session._failReason = 'chunk_send_failed';
+          this._notifyUpdate(session.transferId, session);
+          return;
+        }
         
         session.currentChunk++;
         session.bytesTransferred = Math.min(session.currentChunk * chunkSize, file.size);
@@ -1139,8 +1170,9 @@ class P2PFileTransferService {
           this._notifyUpdate(session.transferId, session);
         }
       } catch (err) {
-        console.error(`Error sending chunk ${session.currentChunk}:`, err);
+        console.error(`[P2P] ❌ Error processing chunk ${session.currentChunk}:`, err);
         session.status = 'failed';
+        session._failReason = 'chunk_error';
         this._notifyUpdate(session.transferId, session);
         return;
       }
