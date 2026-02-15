@@ -183,6 +183,10 @@ class TransferSession {
       try { this.dataChannel.close(); } catch (e) {}
       this.dataChannel = null;
     }
+    if (this._disconnectTimer) {
+      clearTimeout(this._disconnectTimer);
+      this._disconnectTimer = null;
+    }
     if (this.peerConnection) {
       this.peerConnection.onicecandidate = null;
       this.peerConnection.oniceconnectionstatechange = null;
@@ -787,16 +791,43 @@ class P2PFileTransferService {
         this._clearConnectionTimeout(session);
       }
       if (pc.iceConnectionState === 'failed' && !isTerminal) {
-        this._clearConnectionTimeout(session);
-        session.status = 'failed';
-        session._failReason = 'ice_failed';
-        this._notifyUpdate(session.transferId, session);
-        this._reportProgressToServer(session);
+        // Try ICE restart before giving up
+        if (!session._iceRestartAttempted) {
+          console.warn(`[P2P] Sender ICE failed for ${session.transferId}, attempting ICE restart...`);
+          session._iceRestartAttempted = true;
+          this._attemptIceRestart(session);
+        } else {
+          this._clearConnectionTimeout(session);
+          session.status = 'failed';
+          session._failReason = 'ice_failed';
+          this._notifyUpdate(session.transferId, session);
+          this._reportProgressToServer(session);
+          if (this.onTransferError) {
+            this.onTransferError(session.transferId, new Error(
+              'P2P connection failed. Please check your network and try again.'
+            ));
+          }
+        }
       }
       if (pc.iceConnectionState === 'disconnected' && !isTerminal) {
-        session.status = 'paused';
-        this._notifyUpdate(session.transferId, session);
-        this._reportProgressToServer(session);
+        // Disconnected is often temporary — wait 5s before pausing
+        if (!session._disconnectTimer) {
+          session._disconnectTimer = setTimeout(() => {
+            session._disconnectTimer = null;
+            if (pc.iceConnectionState === 'disconnected' && !['completed', 'verifying', 'cancelled'].includes(session.status)) {
+              session.status = 'paused';
+              this._notifyUpdate(session.transferId, session);
+              this._reportProgressToServer(session);
+            }
+          }, 5000);
+        }
+      }
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        // Clear disconnect timer if connection recovered
+        if (session._disconnectTimer) {
+          clearTimeout(session._disconnectTimer);
+          session._disconnectTimer = null;
+        }
       }
     };
 
@@ -906,16 +937,36 @@ class P2PFileTransferService {
         this._clearConnectionTimeout(session);
       }
       if (pc.iceConnectionState === 'failed' && !isTerminal) {
+        // Receiver can't initiate ICE restart — just report failure
         this._clearConnectionTimeout(session);
         session.status = 'failed';
         session._failReason = 'ice_failed';
         this._notifyUpdate(session.transferId, session);
         this._reportProgressToServer(session);
+        if (this.onTransferError) {
+          this.onTransferError(session.transferId, new Error(
+            'P2P connection failed. Please check your network and try again.'
+          ));
+        }
       }
       if (pc.iceConnectionState === 'disconnected' && !isTerminal) {
-        session.status = 'paused';
-        this._notifyUpdate(session.transferId, session);
-        this._reportProgressToServer(session);
+        // Disconnected is often temporary — wait 5s
+        if (!session._disconnectTimer) {
+          session._disconnectTimer = setTimeout(() => {
+            session._disconnectTimer = null;
+            if (pc.iceConnectionState === 'disconnected' && !['completed', 'verifying', 'cancelled'].includes(session.status)) {
+              session.status = 'paused';
+              this._notifyUpdate(session.transferId, session);
+              this._reportProgressToServer(session);
+            }
+          }, 5000);
+        }
+      }
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        if (session._disconnectTimer) {
+          clearTimeout(session._disconnectTimer);
+          session._disconnectTimer = null;
+        }
       }
     };
 
@@ -1648,26 +1699,65 @@ class P2PFileTransferService {
   }
 
   /**
-   * Start a connection timeout — if still "connecting" after timeoutMs, mark as failed
+   * Start a connection timeout — if still "connecting" after timeoutMs, try ICE restart first
+   * Mobile networks need more time: 60s timeout with 1 ICE restart attempt
    */
-  _startConnectionTimeout(session, timeoutMs = 30000) {
+  _startConnectionTimeout(session, timeoutMs = 60000) {
     this._clearConnectionTimeout(session);
+    session._iceRestartAttempted = false;
+
+    // First timer: after 30s, attempt ICE restart instead of immediate failure
     session._connectionTimer = setTimeout(() => {
-      if (session.status === 'connecting') {
+      if (session.status === 'connecting' && !session._iceRestartAttempted) {
         const iceState = session.peerConnection?.iceConnectionState || 'unknown';
-        const sigState = session.peerConnection?.signalingState || 'unknown';
-        console.error(`[P2P DEBUG] ⏰ Connection TIMEOUT for ${session.transferId} after ${timeoutMs / 1000}s | ICE=${iceState} | signaling=${sigState}`);
-        session.status = 'failed';
-        session._failReason = 'connection_timeout';
-        this._notifyUpdate(session.transferId, session);
-        if (this.onTransferError) {
-          this.onTransferError(session.transferId, new Error(
-            `Connection timeout (${timeoutMs / 1000}s). ICE state: ${iceState}. ` +
-            'Both devices may need to be on the same network, or a TURN server is required.'
-          ));
-        }
+        console.warn(`[P2P] ⚠️ Connection slow for ${session.transferId} after 30s (ICE=${iceState}), attempting ICE restart...`);
+        session._iceRestartAttempted = true;
+        this._attemptIceRestart(session);
+
+        // Second timer: after another 30s, actually fail
+        session._connectionTimer = setTimeout(() => {
+          if (session.status === 'connecting') {
+            const finalIceState = session.peerConnection?.iceConnectionState || 'unknown';
+            const sigState = session.peerConnection?.signalingState || 'unknown';
+            console.error(`[P2P] ⏰ Connection TIMEOUT for ${session.transferId} after ${timeoutMs / 1000}s | ICE=${finalIceState} | signaling=${sigState}`);
+            session.status = 'failed';
+            session._failReason = 'connection_timeout';
+            this._notifyUpdate(session.transferId, session);
+            if (this.onTransferError) {
+              this.onTransferError(session.transferId, new Error(
+                `Connection timeout (${timeoutMs / 1000}s). ICE: ${finalIceState}. ` +
+                'Check your network connection or try again.'
+              ));
+            }
+          }
+        }, 30000);
       }
-    }, timeoutMs);
+    }, 30000);
+  }
+
+  /**
+   * Attempt ICE restart to recover a stuck connection
+   */
+  async _attemptIceRestart(session) {
+    const pc = session.peerConnection;
+    if (!pc || session.isReceiver) return; // Only sender initiates ICE restart
+
+    try {
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('file-transfer:offer', {
+          transferId: session.transferId,
+          targetUserId: session.peerId,
+          offer: pc.localDescription,
+        });
+        console.log(`[P2P] ICE restart offer sent for ${session.transferId}`);
+      }
+    } catch (err) {
+      console.warn(`[P2P] ICE restart failed for ${session.transferId}:`, err.message);
+    }
   }
 
   /**

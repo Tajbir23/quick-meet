@@ -40,8 +40,10 @@ const initializeSocket = (httpsServer) => {
       credentials: true,
     },
     // Performance tuning
+    // IMPORTANT: Mobile WebViews (Capacitor) can be slow during WebRTC
+    // negotiation. If ping timeout is too aggressive, sockets drop mid-transfer.
     pingInterval: 25000,
-    pingTimeout: 20000,
+    pingTimeout: 60000,
     maxHttpBufferSize: 1e6,
     transports: ['websocket', 'polling'],
     // Security: limit connection rate
