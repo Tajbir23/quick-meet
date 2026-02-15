@@ -26,7 +26,10 @@
     "build:linux": "npm run build:web && npm run build:desktop:linux",
     "build:mac": "npm run build:web && npm run build:desktop:mac",
     "build:android": "npm run build:web && npm run build:android:sync && npm run build:android:open",
-    "build:all": "npm run build:web && npm run build:desktop:win && npm run build:android:sync"
+    "build:all": "npm run build:web && npm run build:desktop:win && npm run build:android:sync",
+    "version:bump": "node scripts/bump-version.js",
+    "version:bump:minor": "node scripts/bump-version.js minor",
+    "version:bump:major": "node scripts/bump-version.js major"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

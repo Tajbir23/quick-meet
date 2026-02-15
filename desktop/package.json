@@ -15,6 +15,7 @@
   "build": {
     "appId": "com.quickmeet.desktop",
     "productName": "Quick Meet",
+    "artifactName": "quick-meet-v${version}-setup.${ext}",
     "directories": {
       "output": "dist"
     },

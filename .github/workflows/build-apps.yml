@@ -12,24 +12,86 @@ concurrency:
 
 jobs:
   # ====================================================
-  # DETERMINE VERSION (shared by all jobs)
+  # AUTO-BUMP VERSION & DETERMINE VERSION
   # ====================================================
   version:
-    name: Get Version
+    name: Bump & Get Version
     runs-on: ubuntu-latest
     outputs:
       desktop_version: ${{ steps.versions.outputs.desktop }}
       android_version: ${{ steps.versions.outputs.android }}
+      app_version: ${{ steps.versions.outputs.app }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Auto-bump patch version
+        if: "!contains(github.event.head_commit.message, '[skip ci]')"
+        run: |
+          # Read current version from mobile/package.json as source of truth
+          CURRENT=$(node -p "require('./mobile/package.json').version")
+          echo "Current version: $CURRENT"
+
+          # Bump patch: 1.0.0 -> 1.0.1, 1.2.3 -> 1.2.4
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          PATCH=$((PATCH + 1))
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "New version: $NEW_VERSION"
+
+          # Update ALL package.json files
+          for PKG in package.json client/package.json server/package.json desktop/package.json mobile/package.json; do
+            if [ -f "$PKG" ]; then
+              node -e "
+                const fs = require('fs');
+                const pkg = JSON.parse(fs.readFileSync('$PKG','utf8'));
+                pkg.version = '$NEW_VERSION';
+                fs.writeFileSync('$PKG', JSON.stringify(pkg, null, 2) + '\n');
+              "
+              echo "Updated $PKG -> $NEW_VERSION"
+            fi
+          done
+
+          # Update versions.json
+          node -e "
+            const fs = require('fs');
+            const p = './server/updates/versions.json';
+            let v = {};
+            try { v = JSON.parse(fs.readFileSync(p,'utf8')); } catch(e) {}
+            const now = new Date().toISOString();
+            ['web','android','desktop'].forEach(k => {
+              if (!v[k]) v[k] = {};
+              v[k].version = '$NEW_VERSION';
+              v[k].lastUpdated = now;
+              if (!v[k].minVersion) v[k].minVersion = '1.0.0';
+            });
+            fs.writeFileSync(p, JSON.stringify(v, null, 2) + '\n');
+          "
+          echo "Updated versions.json -> $NEW_VERSION"
+
+          # Commit and push version bump
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || {
+            git commit -m "chore: bump version to v$NEW_VERSION [skip ci]"
+            git push
+            echo "Committed version bump to v$NEW_VERSION"
+          }
+
       - name: Read versions
         id: versions
         run: |
-          DESKTOP_VERSION=$(node -p "require('./desktop/package.json').version")
-          ANDROID_VERSION=$(node -p "require('./mobile/package.json').version")
-          echo "desktop=$DESKTOP_VERSION" >> $GITHUB_OUTPUT
-          echo "android=$ANDROID_VERSION" >> $GITHUB_OUTPUT
-          echo "Desktop: $DESKTOP_VERSION, Android: $ANDROID_VERSION"
+          APP_VERSION=$(node -p "require('./mobile/package.json').version")
+          echo "desktop=$APP_VERSION" >> $GITHUB_OUTPUT
+          echo "android=$APP_VERSION" >> $GITHUB_OUTPUT
+          echo "app=$APP_VERSION" >> $GITHUB_OUTPUT
+          echo "App version: $APP_VERSION"
 
   # ====================================================
   # BUILD ANDROID APK
@@ -40,8 +102,10 @@ jobs:
     needs: version
     
     steps:
-      - name: Checkout code
+      - name: Checkout code (latest after version bump)
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -92,14 +156,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: quick-meet-debug-apk
-          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          path: mobile/android/app/build/outputs/apk/debug/quick-meet-v*-debug.apk
           retention-days: 30
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: quick-meet-release-apk
-          path: mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          path: mobile/android/app/build/outputs/apk/release/quick-meet-v*-release.apk
           retention-days: 30
 
   # ====================================================
@@ -111,8 +175,10 @@ jobs:
     needs: version
     
     steps:
-      - name: Checkout code
+      - name: Checkout code (latest after version bump)
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -134,7 +200,7 @@ jobs:
         with:
           name: quick-meet-windows-installer
           path: |
-            desktop/dist/Quick Meet Setup*.exe
+            desktop/dist/quick-meet-v*-setup.exe
             desktop/dist/latest.yml
           retention-days: 30
 
@@ -181,8 +247,10 @@ jobs:
       - name: Rename artifacts for release
         run: |
           cd release-assets
-          [ -f app-debug.apk ] && mv app-debug.apk "QuickMeet-v${{ needs.version.outputs.android_version }}-debug.apk" || true
-          [ -f app-release-unsigned.apk ] && mv app-release-unsigned.apk "QuickMeet-v${{ needs.version.outputs.android_version }}-release.apk" || true
+          # APKs are already named quick-meet-v{version}-{type}.apk from build.gradle
+          # Just ensure they exist and list them
+          ls -la *.apk 2>/dev/null || echo "No APK files found"
+          ls -la *.exe 2>/dev/null || echo "No EXE files found"
           ls -la
 
       - name: Create GitHub Release
