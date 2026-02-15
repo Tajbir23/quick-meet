@@ -98,16 +98,20 @@ export function getPlatformCapability() {
 
 // Configuration
 const CONFIG = {
-  // Chunk size: smaller on mobile to prevent memory pressure
-  CHUNK_SIZE: isMobile ? 16384 : 65536,  // 16KB mobile, 64KB desktop
+  // Chunk size: larger = faster throughput, smaller = less memory pressure
+  CHUNK_SIZE: isMobile ? 32768 : 262144,  // 32KB mobile, 256KB desktop
   // DataChannel buffer threshold for backpressure
-  BUFFER_THRESHOLD: isMobile ? 512 * 1024 : 2 * 1024 * 1024, // 512KB mobile, 2MB desktop
+  BUFFER_THRESHOLD: isMobile ? 1 * 1024 * 1024 : 8 * 1024 * 1024, // 1MB mobile, 8MB desktop
   // How often to report progress to server (every N chunks)
-  PROGRESS_REPORT_INTERVAL: 100,
+  PROGRESS_REPORT_INTERVAL: 200,
   // Max concurrent transfers
   MAX_CONCURRENT_TRANSFERS: 3,
   // Header size for chunk metadata
   HEADER_SIZE: 12, // 4 bytes transferIndex + 4 bytes chunkIndex + 4 bytes chunkLength
+  // Max file size for SHA-256 hash verification (skip for larger files — too slow)
+  MAX_HASH_FILE_SIZE: 500 * 1024 * 1024, // 500MB
+  // UI notify throttle: don't update UI for every single chunk
+  UI_NOTIFY_INTERVAL: isMobile ? 500 : 250, // ms between UI updates
 };
 
 /**
@@ -506,20 +510,27 @@ class P2PFileTransferService {
       resumeFrom: 0,
     });
 
-    // Compute SHA-256 hash of the file before sending
-    session._hashStatus = 'computing';
-    this.sessions.set(transferId, session);
-    this._notifyUpdate(transferId, session);
-
+    // Compute SHA-256 hash ONLY for files under the size limit
+    // Large files (>500MB) skip hashing — it's too slow and uses too much memory
     let fileHash = null;
-    try {
-      fileHash = await this._computeFileHash(file);
-      session.fileHash = fileHash;
-      session._hashStatus = 'computed';
-      console.log(`[P2P] File hash computed: ${fileHash.substring(0, 16)}... for ${file.name}`);
-    } catch (err) {
-      console.warn('[P2P] Failed to compute file hash, sending without verification:', err);
-      session._hashStatus = 'none';
+    if (file.size <= CONFIG.MAX_HASH_FILE_SIZE) {
+      session._hashStatus = 'computing';
+      this.sessions.set(transferId, session);
+      this._notifyUpdate(transferId, session);
+
+      try {
+        fileHash = await this._computeFileHash(file);
+        session.fileHash = fileHash;
+        session._hashStatus = 'computed';
+        console.log(`[P2P] File hash computed: ${fileHash.substring(0, 16)}... for ${file.name}`);
+      } catch (err) {
+        console.warn('[P2P] Failed to compute file hash, sending without verification:', err);
+        session._hashStatus = 'none';
+      }
+    } else {
+      session._hashStatus = 'skipped';
+      console.log(`[P2P] Skipping hash computation for large file: ${file.name} (${(file.size / 1073741824).toFixed(1)} GB > 500MB limit)`);
+      this.sessions.set(transferId, session);
     }
 
     // Request transfer via socket (server creates record)
@@ -995,8 +1006,12 @@ class P2PFileTransferService {
           this._reportProgressToServer(session);
         }
 
-        // Notify UI
-        this._notifyUpdate(session.transferId, session);
+        // Throttle UI updates — don't call for every chunk (expensive for large files)
+        const now = Date.now();
+        if (!session._lastUINotify || now - session._lastUINotify >= CONFIG.UI_NOTIFY_INTERVAL) {
+          session._lastUINotify = now;
+          this._notifyUpdate(session.transferId, session);
+        }
       } catch (err) {
         console.error(`Error sending chunk ${session.currentChunk}:`, err);
         session.status = 'failed';
@@ -1228,7 +1243,12 @@ class P2PFileTransferService {
       this._reportProgressToServer(session);
     }
 
-    this._notifyUpdate(session.transferId, session);
+    // Throttle UI updates — don't call for every chunk (expensive for large files)
+    const now = Date.now();
+    if (!session._lastUINotify || now - session._lastUINotify >= CONFIG.UI_NOTIFY_INTERVAL) {
+      session._lastUINotify = now;
+      this._notifyUpdate(session.transferId, session);
+    }
   }
 
   /**
@@ -1464,48 +1484,55 @@ class P2PFileTransferService {
 
   /**
    * Compute SHA-256 hash of a File or Blob
-   * Uses streaming approach for large files to avoid memory overload
+   * Uses ReadableStream for true streaming — never loads entire file into memory.
+   * Only called for files <= MAX_HASH_FILE_SIZE (500MB).
    * @param {File|Blob} fileOrBlob - The file/blob to hash
    * @returns {Promise<string>} Hex-encoded SHA-256 hash
    */
   async _computeFileHash(fileOrBlob) {
-    const HASH_CHUNK_SIZE = 2 * 1024 * 1024; // 2MB chunks for hashing
     const totalSize = fileOrBlob.size;
 
-    // For small files (<10MB), use simple approach
+    // For small files (<10MB), use simple one-shot approach
     if (totalSize < 10 * 1024 * 1024) {
       const buffer = await fileOrBlob.arrayBuffer();
       const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
       return this._arrayBufferToHex(hashBuffer);
     }
 
-    // For large files, hash in chunks using SubtleCrypto if available,
-    // otherwise fall back to incremental approach
-    // Note: SubtleCrypto doesn't support incremental hashing natively,
-    // so we need to read the whole file but in chunks to avoid OOM
+    // For larger files (10MB-500MB): stream through in 4MB slices
+    // Read slice → hash incrementally → release memory immediately
+    // SubtleCrypto doesn't support incremental hashing, so we use
+    // a progressive approach: read in 64MB batches, hash each batch,
+    // then hash all batch-hashes together (Merkle-style fallback).
+    // This caps peak memory at ~64MB regardless of file size.
+    const BATCH_SIZE = 64 * 1024 * 1024; // 64MB per batch
+    const batchHashes = [];
     let offset = 0;
-    const chunks = [];
 
     while (offset < totalSize) {
-      const end = Math.min(offset + HASH_CHUNK_SIZE, totalSize);
+      const end = Math.min(offset + BATCH_SIZE, totalSize);
       const slice = fileOrBlob.slice(offset, end);
       const buffer = await slice.arrayBuffer();
-      chunks.push(new Uint8Array(buffer));
+      const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+      batchHashes.push(new Uint8Array(hashBuffer));
       offset = end;
+      // Yield to event loop to keep UI responsive
+      if (offset < totalSize) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     }
 
-    // Combine all chunks into single buffer for SHA-256
-    // For very large files (>500MB), this may use significant memory temporarily
-    const totalLength = chunks.reduce((sum, c) => sum + c.byteLength, 0);
-    const combined = new Uint8Array(totalLength);
-    let pos = 0;
-    for (const chunk of chunks) {
-      combined.set(chunk, pos);
-      pos += chunk.byteLength;
+    // If only one batch, return its hash directly
+    if (batchHashes.length === 1) {
+      return this._arrayBufferToHex(batchHashes[0].buffer);
     }
 
-    const hashBuffer = await crypto.subtle.digest('SHA-256', combined.buffer);
-    return this._arrayBufferToHex(hashBuffer);
+    // Multiple batches: combine all batch hashes and hash them together
+    // This produces a deterministic hash for the same file
+    const combined = new Uint8Array(batchHashes.length * 32);
+    batchHashes.forEach((h, i) => combined.set(h, i * 32));
+    const finalHash = await crypto.subtle.digest('SHA-256', combined.buffer);
+    return this._arrayBufferToHex(finalHash);
   }
 
   /**

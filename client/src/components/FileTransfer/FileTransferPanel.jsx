@@ -246,6 +246,12 @@ const TransferItem = ({ transfer }) => {
           <span>Computing file hash for verification...</span>
         </div>
       )}
+      {transfer.hashStatus === 'skipped' && !transfer.isReceiver && transfer.status === 'pending' && (
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-dark-400">
+          <ShieldQuestion size={12} />
+          <span>Large file — hash verification skipped</span>
+        </div>
+      )}
     </div>
   );
 };
