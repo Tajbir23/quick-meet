@@ -522,8 +522,10 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
   });
 
   socket.on('file-transfer:ice-candidate', ({ transferId, targetUserId, candidate }) => {
+    console.log(`[FT SIGNAL] ICE candidate received | from=${socket.userId} | target=${targetUserId} | transferId=${transferId} | candidate=${candidate?.candidate?.substring(0, 50)}`);
     const targetSocketId = onlineUsers.get(targetUserId);
     if (targetSocketId) {
+      console.log(`[FT SIGNAL] ICE candidate relayed | targetSocket=${targetSocketId}`);
       io.to(targetSocketId).emit('file-transfer:ice-candidate', {
         transferId,
         senderId: socket.userId,

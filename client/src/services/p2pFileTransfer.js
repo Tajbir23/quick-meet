@@ -835,20 +835,27 @@ class P2PFileTransferService {
       console.log(`[P2P DEBUG] Sender signaling state: ${pc.signalingState} for ${session.transferId}`);
     };
 
-    // Create and send offer
+    // Create and send offer — wait for ICE gathering to complete (vanilla ICE)
+    // This embeds all ICE candidates into the SDP, so no separate ice-candidate signaling needed
     try {
       const offer = await pc.createOffer();
       console.log(`[P2P DEBUG] Offer created | transferId=${session.transferId} | type=${offer.type}`);
       await pc.setLocalDescription(offer);
-      console.log(`[P2P DEBUG] Local description set (offer) | transferId=${session.transferId}`);
+      console.log(`[P2P DEBUG] Local description set (offer) | transferId=${session.transferId} | gathering=${pc.iceGatheringState}`);
+
+      // Wait for ICE gathering to complete (all candidates embedded in SDP)
+      await this._waitForIceGathering(pc, 10000);
+      console.log(`[P2P DEBUG] ICE gathering done | transferId=${session.transferId} | candidates in SDP`);
 
       const socket = getSocket();
       if (socket) {
-        console.log(`[P2P DEBUG] Emitting file-transfer:offer | transferId=${session.transferId} | targetUserId=${session.peerId}`);
+        // Send the FINAL localDescription (with all ICE candidates embedded)
+        const finalOffer = pc.localDescription;
+        console.log(`[P2P DEBUG] Emitting file-transfer:offer (with candidates) | transferId=${session.transferId} | targetUserId=${session.peerId} | sdpLength=${finalOffer.sdp.length}`);
         socket.emit('file-transfer:offer', {
           transferId: session.transferId,
           targetUserId: session.peerId,
-          offer: pc.localDescription,
+          offer: finalOffer,
         });
       } else {
         console.error(`[P2P DEBUG] ❌ NO SOCKET when emitting offer for ${session.transferId}`);
@@ -982,15 +989,21 @@ class P2PFileTransferService {
       const answer = await pc.createAnswer();
       console.log(`[P2P DEBUG] Answer created | transferId=${session.transferId} | type=${answer.type}`);
       await pc.setLocalDescription(answer);
-      console.log(`[P2P DEBUG] Local description set (answer) | transferId=${session.transferId}`);
+      console.log(`[P2P DEBUG] Local description set (answer) | transferId=${session.transferId} | gathering=${pc.iceGatheringState}`);
+
+      // Wait for ICE gathering to complete (all candidates embedded in SDP)
+      await this._waitForIceGathering(pc, 10000);
+      console.log(`[P2P DEBUG] ICE gathering done (answer) | transferId=${session.transferId} | candidates in SDP`);
 
       const socket = getSocket();
       if (socket) {
-        console.log(`[P2P DEBUG] Emitting file-transfer:answer | transferId=${session.transferId} | targetUserId=${senderId}`);
+        // Send the FINAL localDescription (with all ICE candidates embedded)
+        const finalAnswer = pc.localDescription;
+        console.log(`[P2P DEBUG] Emitting file-transfer:answer (with candidates) | transferId=${session.transferId} | targetUserId=${senderId} | sdpLength=${finalAnswer.sdp.length}`);
         socket.emit('file-transfer:answer', {
           transferId: session.transferId,
           targetUserId: senderId,
-          answer: pc.localDescription,
+          answer: finalAnswer,
         });
       } else {
         console.error(`[P2P DEBUG] ❌ NO SOCKET when emitting answer for ${session.transferId}`);
@@ -1022,6 +1035,33 @@ class P2PFileTransferService {
     } catch (err) {
       console.error(`[P2P DEBUG] ❌ Failed to set answer for ${session.transferId}:`, err);
     }
+  }
+
+  /**
+   * Wait for ICE gathering to complete (vanilla ICE)
+   * Returns when all candidates are embedded in the SDP
+   * @param {RTCPeerConnection} pc
+   * @param {number} timeout - max wait time in ms
+   */
+  _waitForIceGathering(pc, timeout = 10000) {
+    return new Promise((resolve) => {
+      if (pc.iceGatheringState === 'complete') {
+        return resolve();
+      }
+      const timer = setTimeout(() => {
+        console.warn(`[P2P] ICE gathering timeout after ${timeout}ms, proceeding with partial candidates`);
+        pc.removeEventListener('icegatheringstatechange', onStateChange);
+        resolve();
+      }, timeout);
+      const onStateChange = () => {
+        if (pc.iceGatheringState === 'complete') {
+          clearTimeout(timer);
+          pc.removeEventListener('icegatheringstatechange', onStateChange);
+          resolve();
+        }
+      };
+      pc.addEventListener('icegatheringstatechange', onStateChange);
+    });
   }
 
   /**
