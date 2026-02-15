@@ -52,10 +52,13 @@ const isElectron = !!window.electronAPI?.isElectron;
 /**
  * Check if the browser supports File System Access API (showSaveFilePicker)
  * Available in Chrome 86+, Edge 86+, Opera 72+
- * NOT available in Firefox, Safari, or mobile browsers
+ * NOT available in Firefox, Safari, or mobile browsers.
+ * IMPORTANT: Disabled on mobile — Android WebView may define showSaveFilePicker
+ * but it fails without user gesture (throws AbortError), breaking the receive flow.
  */
 const hasFSAccessAPI = (() => {
   try {
+    if (isMobile) return false; // Never use FSAA on mobile
     return typeof window.showSaveFilePicker === 'function';
   } catch {
     return false;
@@ -842,11 +845,13 @@ class P2PFileTransferService {
       session.status = 'transferring';
       session.startTime = Date.now();
       this._notifyUpdate(session.transferId, session);
+      this._emitDiag(session, 'dc_open', { side: 'sender' });
       this._sendChunks(session);
     };
 
     dc.onclose = () => {
       console.log(`[P2P DEBUG] DataChannel CLOSED for ${session.transferId}, status was: ${session.status}`);
+      this._emitDiag(session, 'dc_close', { side: 'sender', prevStatus: session.status });
       if (session.status === 'transferring') {
         session.status = 'paused';
         this._notifyUpdate(session.transferId, session);
@@ -1017,22 +1022,51 @@ class P2PFileTransferService {
       session.dataChannel = dc;
       dc.binaryType = 'arraybuffer';
 
-      dc.onopen = () => {
+      dc.onopen = async () => {
         console.log(`[P2P DEBUG] ✅ Receiver DataChannel OPEN for ${session.transferId}`);
         this._clearConnectionTimeout(session);
         session.status = 'transferring';
         session.startTime = Date.now();
+        session._writerReady = false;
         this._notifyUpdate(session.transferId, session);
-        // Initialize progressive writer
-        this._initReceiveWriter(session);
+        this._emitDiag(session, 'dc_open', { side: 'receiver' });
+        // Initialize progressive writer — MUST complete before processing chunks
+        await this._initReceiveWriter(session);
+        // If writer init cancelled the transfer, don't proceed
+        if (session.status === 'cancelled') {
+          console.warn(`[P2P] Writer init cancelled transfer ${session.transferId}`);
+          return;
+        }
+        session._writerReady = true;
+        // Flush any chunks that arrived during writer initialization
+        if (session._pendingChunks && session._pendingChunks.length > 0) {
+          console.log(`[P2P DEBUG] Flushing ${session._pendingChunks.length} chunks queued during writer init`);
+          for (const chunkData of session._pendingChunks) {
+            this._handleReceivedChunk(session, chunkData);
+          }
+          session._pendingChunks = [];
+        }
       };
 
       dc.onmessage = (event) => {
+        // If writer isn't ready yet, queue the chunk
+        if (!session._writerReady) {
+          if (!session._pendingChunks) session._pendingChunks = [];
+          session._pendingChunks.push(event.data);
+          return;
+        }
         this._handleReceivedChunk(session, event.data);
       };
 
       dc.onclose = () => {
         console.log(`[P2P DEBUG] Receiver DataChannel CLOSED for ${session.transferId}, status was: ${session.status}`);
+        this._emitDiag(session, 'dc_close', {
+          side: 'receiver',
+          dcState: dc.readyState,
+          iceState: pc?.iceConnectionState,
+          chunksReceived: session.chunksReceived || 0,
+          bytesReceived: session.bytesReceived || 0,
+        });
         // Only pause if still actively transferring — never overwrite terminal states
         if (session.status === 'transferring') {
           session.status = 'paused';
@@ -1265,6 +1299,12 @@ class P2PFileTransferService {
         
         if (!sent) {
           console.error(`[P2P] ❌ Failed to send chunk ${session.currentChunk} after 3 retries | dcState=${dataChannel.readyState}`);
+          this._emitDiag(session, 'chunk_send_failed', { 
+            chunk: session.currentChunk, 
+            dcState: dataChannel.readyState,
+            iceState: session.peerConnection?.iceConnectionState,
+            buffered: dataChannel.bufferedAmount,
+          });
           session.status = 'failed';
           session._failReason = 'chunk_send_failed';
           this._notifyUpdate(session.transferId, session);
@@ -1366,6 +1406,9 @@ class P2PFileTransferService {
     session._useElectronStream = false;
     session._useFSAAStream = false;
 
+    console.log(`[P2P DEBUG] _initReceiveWriter | isElectron=${isElectron} | hasFSAccessAPI=${hasFSAccessAPI} | isMobile=${isMobile} | fileSize=${session.fileSize}`);
+    this._emitDiag(session, 'writer_init_start', { isElectron, hasFSAccessAPI, isMobile });
+
     // ── PATH 1: Electron native file streaming ──────────────────────────
     if (isElectron) {
       try {
@@ -1397,7 +1440,7 @@ class P2PFileTransferService {
       }
     }
 
-    // ── PATH 2: Browser File System Access API (Chrome/Edge) ────────────
+    // ── PATH 2: Browser File System Access API (Chrome/Edge desktop only) ──
     if (hasFSAccessAPI) {
       try {
         // Build file type filter from extension
@@ -1419,13 +1462,9 @@ class P2PFileTransferService {
         console.log(`[P2P] Browser FSAA stream created for: ${session.fileName}`);
         return;
       } catch (e) {
-        // User cancelled picker (DOMException: AbortError) → cancel transfer
-        if (e?.name === 'AbortError') {
-          session.status = 'cancelled';
-          this._notifyUpdate(session.transferId, session);
-          return;
-        }
-        console.warn('[P2P] FSAA stream init failed, falling back to memory:', e);
+        // Any FSAA error → fall through to memory mode
+        // DO NOT cancel the transfer — FSAA is optional, memory mode is the fallback
+        console.warn(`[P2P] FSAA stream init failed (${e?.name}: ${e?.message}), falling back to memory mode`);
       }
     }
 
@@ -1446,6 +1485,7 @@ class P2PFileTransferService {
 
     session.receivedChunks = new Array(session.totalChunks);
     console.log(`[P2P] Browser memory mode for: ${session.fileName} (${(session.fileSize / 1048576).toFixed(0)}MB)`);
+    this._emitDiag(session, 'writer_init_done', { mode: 'memory', totalChunks: session.totalChunks });
   }
 
   /**
@@ -1472,6 +1512,12 @@ class P2PFileTransferService {
     session._totalBytesReceived = (session._totalBytesReceived || 0) + chunkData.byteLength;
     session.currentChunk = chunkIndex + 1;
     session.bytesTransferred = session._totalBytesReceived;
+
+    // Log first chunk for diagnostics
+    if (session._receivedCount === 1) {
+      console.log(`[P2P DEBUG] First chunk received | chunkIndex=${chunkIndex} | size=${chunkData.byteLength} | status=${session.status}`);
+      this._emitDiag(session, 'first_chunk_received', { chunkIndex, chunkSize: chunkData.byteLength });
+    }
 
     // AUTO-FINALIZE: If all chunks received, don't wait for completion marker
     // This fixes the issue where the marker gets lost when DataChannel closes
@@ -1851,6 +1897,26 @@ class P2PFileTransferService {
         lastReceivedChunk: session.currentChunk - 1,
         bytesTransferred: session.bytesTransferred,
         speedBps: session.speed,
+      });
+    }
+  }
+
+  /**
+   * Emit diagnostic event to server for remote debugging
+   * These appear in PM2 logs and help diagnose client-side issues
+   */
+  _emitDiag(session, event, extra = {}) {
+    const socket = getSocket();
+    if (socket) {
+      socket.emit('file-transfer:diag', {
+        transferId: session.transferId,
+        event,
+        side: session.isReceiver ? 'receiver' : 'sender',
+        status: session.status,
+        chunk: session.currentChunk,
+        dc: session.dataChannel?.readyState || 'none',
+        ice: session.peerConnection?.iceConnectionState || 'none',
+        ...extra,
       });
     }
   }

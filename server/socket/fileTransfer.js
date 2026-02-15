@@ -21,6 +21,16 @@ const { socketGuard } = require('../security');
 const setupFileTransferHandlers = (io, socket, onlineUsers) => {
 
   /**
+   * DIAGNOSTIC EVENT — logs client-side P2P state for debugging
+   */
+  socket.on('file-transfer:diag', (data) => {
+    console.log(
+      `[FT DIAG] ${data.event} | transfer=${data.transferId} | status=${data.status} | dc=${data.dc} | ice=${data.ice}`,
+      JSON.stringify(data)
+    );
+  });
+
+  /**
    * REQUEST FILE TRANSFER
    * Sender initiates a transfer request to receiver
    */
