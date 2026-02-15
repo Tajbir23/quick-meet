@@ -38,6 +38,9 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // Register custom Capacitor plugins
+        registerPlugin(BackgroundServicePlugin.class);
+
         super.onCreate(savedInstanceState);
 
         // Register permission launcher

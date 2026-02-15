@@ -15,6 +15,7 @@ import { create } from 'zustand';
 import api from '../services/api';
 import { getDeviceFingerprint } from '../services/api';
 import { connectSocket, disconnectSocket } from '../services/socket';
+import { stopService as stopBackgroundService } from '../services/backgroundService';
 
 const useAuthStore = create((set, get) => ({
   // State
@@ -180,6 +181,7 @@ const useAuthStore = create((set, get) => ({
     }
 
     disconnectSocket();
+    stopBackgroundService();
 
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
@@ -217,6 +219,7 @@ const useAuthStore = create((set, get) => ({
    */
   handleForceLogout: (reason) => {
     disconnectSocket();
+    stopBackgroundService();
 
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');

@@ -16,6 +16,11 @@ import { create } from 'zustand';
 import webrtcService from '../services/webrtc';
 import { getSocket } from '../services/socket';
 import { CALL_STATUS } from '../utils/constants';
+import {
+  dismissCallNotification,
+  onCallStarted as bgCallStarted,
+  onCallEnded as bgCallEnded,
+} from '../services/backgroundService';
 
 const useCallStore = create((set, get) => ({
   // State
@@ -117,6 +122,9 @@ const useCallStore = create((set, get) => ({
     const { incomingCall } = get();
     if (!incomingCall) return;
 
+    // Dismiss background call notification immediately
+    dismissCallNotification();
+
     try {
       const socket = getSocket();
       if (!socket) throw new Error('Socket not connected');
@@ -167,6 +175,9 @@ const useCallStore = create((set, get) => ({
         answer,
       });
 
+      // Update background notification: call active
+      bgCallStarted(callerName, callType);
+
       // Timer will start when ICE state changes to 'connected'
     } catch (error) {
       console.error('Failed to accept call:', error);
@@ -181,6 +192,9 @@ const useCallStore = create((set, get) => ({
   rejectCall: () => {
     const { incomingCall } = get();
     if (!incomingCall) return;
+
+    // Dismiss background call notification
+    dismissCallNotification();
 
     const socket = getSocket();
     if (socket) {
@@ -205,6 +219,9 @@ const useCallStore = create((set, get) => ({
   endCall: (fromRemote = false) => {
     const { remoteUser, callTimer, isGroupCall, groupId, callDuration, callType, isIncoming } = get();
     const socket = getSocket();
+
+    // Notify background service: call ended
+    bgCallEnded();
 
     if (isGroupCall && groupId) {
       // Leave group call

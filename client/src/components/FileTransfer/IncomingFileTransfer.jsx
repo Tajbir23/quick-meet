@@ -17,6 +17,7 @@ import { Download, X, FileIcon, Film, Image, Music, FileText, Archive, HardDrive
 import useFileTransferStore from '../../store/useFileTransferStore';
 import { getInitials, stringToColor, playNotificationSound } from '../../utils/helpers';
 import { canReceiveLargeFiles, getMaxReceiveSize, getPlatformCapability } from '../../services/p2pFileTransfer';
+import { notifyIncomingTransfer, dismissTransferNotification } from '../../services/backgroundService';
 
 /**
  * Format bytes to human-readable
@@ -210,6 +211,12 @@ const IncomingFileTransfer = () => {
       newRequests.forEach(req => {
         notifiedRef.current.add(req.transferId);
         sendOSNotification(req);
+        // Android: show native notification (works in background)
+        notifyIncomingTransfer(
+          req.senderName || 'Unknown',
+          req.fileName || 'file',
+          formatSize(req.fileSize)
+        );
       });
     }
 

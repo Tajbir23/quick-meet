@@ -3,6 +3,7 @@ import { useEffect, useCallback } from 'react';
 import { RefreshCw } from 'lucide-react';
 import useAuthStore from './store/useAuthStore';
 import { onForceLogout } from './services/socket';
+import { initBackgroundService, stopService as stopBgService } from './services/backgroundService';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import HomePage from './pages/HomePage';
@@ -33,6 +34,15 @@ function App() {
     // Hard reload bypassing cache
     window.location.reload(true);
   }, []);
+
+  // Initialize background service when authenticated (Android foreground service)
+  useEffect(() => {
+    if (isAuthenticated) {
+      initBackgroundService();
+    } else {
+      stopBgService();
+    }
+  }, [isAuthenticated]);
 
   useEffect(() => {
     checkAuth();

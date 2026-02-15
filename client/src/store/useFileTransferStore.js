@@ -13,6 +13,7 @@
 
 import { create } from 'zustand';
 import p2pFileTransfer from '../services/p2pFileTransfer';
+import { updateTransferProgress, dismissTransferNotification } from '../services/backgroundService';
 import useAuthStore from './useAuthStore';
 
 const useFileTransferStore = create((set, get) => ({
@@ -59,6 +60,16 @@ const useFileTransferStore = create((set, get) => ({
           [transferId]: info,
         },
       }));
+
+      // Update Android notification with transfer progress
+      if (info && typeof info.progress === 'number') {
+        const direction = info.direction === 'send' ? 'sending' : 'receiving';
+        updateTransferProgress(
+          info.fileName || 'file',
+          Math.round(info.progress),
+          direction
+        );
+      }
     };
 
     p2pFileTransfer.onIncomingTransfer = (data) => {
@@ -73,6 +84,7 @@ const useFileTransferStore = create((set, get) => ({
 
     p2pFileTransfer.onTransferComplete = (transferId) => {
       // Keep in transfers for history, but update status
+      const transfer = get().transfers[transferId];
       set((state) => ({
         transfers: {
           ...state.transfers,
@@ -82,6 +94,10 @@ const useFileTransferStore = create((set, get) => ({
           },
         },
       }));
+
+      // Show completion in Android notification
+      const direction = transfer?.direction === 'send' ? 'sending' : 'receiving';
+      updateTransferProgress(transfer?.fileName || 'file', 100, direction);
     };
 
     p2pFileTransfer.onTransferError = (transferId, error) => {
@@ -95,6 +111,8 @@ const useFileTransferStore = create((set, get) => ({
           },
         },
       }));
+      // Dismiss Android transfer notification on error
+      dismissTransferNotification();
     };
 
     // Check for pending transfers (resume)
@@ -123,6 +141,8 @@ const useFileTransferStore = create((set, get) => ({
   acceptTransfer: async (transferData) => {
     try {
       await p2pFileTransfer.acceptTransfer(transferData);
+      // Dismiss Android incoming transfer notification
+      dismissTransferNotification();
       // Remove from incoming requests
       set((state) => ({
         incomingRequests: state.incomingRequests.filter(
@@ -139,6 +159,7 @@ const useFileTransferStore = create((set, get) => ({
    */
   rejectTransfer: (transferId) => {
     p2pFileTransfer.rejectTransfer(transferId);
+    dismissTransferNotification();
     set((state) => ({
       incomingRequests: state.incomingRequests.filter(
         r => r.transferId !== transferId

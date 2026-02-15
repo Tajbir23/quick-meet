@@ -18,6 +18,15 @@ import webrtcService from '../services/webrtc';
 import { playNotificationSound, showNativeNotification, bringWindowToFront } from '../utils/helpers';
 import useFileTransferStore from '../store/useFileTransferStore';
 import p2pFileTransfer from '../services/p2pFileTransfer';
+import {
+  notifyIncomingCall,
+  dismissCallNotification,
+  onCallStarted,
+  onCallEnded,
+  onSocketConnected,
+  onSocketDisconnected,
+  isInBackground,
+} from '../services/backgroundService';
 
 const useSocket = () => {
   const initialized = useRef(false);
@@ -145,6 +154,9 @@ const useSocket = () => {
 
       playNotificationSound('call');
 
+      // Android: show high-priority notification (works in background)
+      notifyIncomingCall(callerName, callType);
+
       // Native notification for background/minimized window
       const callLabel = callType === 'video' ? 'Video Call' : 'Voice Call';
       showNativeNotification(
@@ -161,6 +173,11 @@ const useSocket = () => {
     socket.on('call:answer', async ({ answererId, answer }) => {
       try {
         console.log(`📞 Call answered by ${answererId}`);
+        // Dismiss incoming call notification (call was answered)
+        dismissCallNotification();
+        const { remoteUser, callType } = useCallStore.getState();
+        onCallStarted(remoteUser?.username || 'someone', callType);
+
         await webrtcService.handleAnswer(answererId, answer);
         // Don't set CONNECTED here — let ICE state change handle it
         // ICE will transition to 'connected' which sets CALL_STATUS.CONNECTED
@@ -180,16 +197,19 @@ const useSocket = () => {
 
     socket.on('call:rejected', ({ rejecterName, reason }) => {
       console.log(`📞 Call rejected by ${rejecterName}: ${reason}`);
+      onCallEnded();
       useCallStore.getState().endCall(true); // fromRemote=true to prevent double emit
     });
 
     socket.on('call:ended', ({ username }) => {
       console.log(`📞 Call ended by ${username}`);
+      onCallEnded();
       useCallStore.getState().endCall(true); // fromRemote=true to prevent double emit
     });
 
     socket.on('call:user-offline', ({ targetUserId }) => {
       console.log(`📞 User ${targetUserId} is offline`);
+      onCallEnded();
       useCallStore.getState().endCall(true); // fromRemote=true — no call to log for offline
     });
 
@@ -266,6 +286,9 @@ const useSocket = () => {
     const onConnect = () => {
       console.log('🔌 Socket (re)connected — syncing presence & group rooms');
 
+      // Notify background service (updates persistent notification)
+      onSocketConnected();
+
       // ALWAYS re-ensure file transfer listeners on (re)connect
       // After reconnect, socket.id changes — listeners might be stale
       const ftStore = useFileTransferStore.getState();
@@ -290,6 +313,13 @@ const useSocket = () => {
       useChatStore.getState().fetchUsers();
     };
     socket.on('connect', onConnect);
+
+    // Socket disconnected — update background notification
+    const onDisconnect = (reason) => {
+      console.log(`🔌 Socket disconnected: ${reason}`);
+      onSocketDisconnected();
+    };
+    socket.on('disconnect', onDisconnect);
 
     // Group call ended — remove banner & dismiss ringing
     socket.on('group-call:ended', ({ groupId }) => {
@@ -316,6 +346,9 @@ const useSocket = () => {
       });
 
       playNotificationSound('call');
+
+      // Android: show high-priority notification (works in background)
+      notifyIncomingCall(`${callerName} (${groupName || 'Group'})`, 'audio');
 
       // Native notification for background/minimized window
       showNativeNotification(
@@ -457,6 +490,7 @@ const useSocket = () => {
       clearInterval(presenceSyncInterval);
       // Use specific handler references for connect to avoid removing socket.js handlers
       socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
       socket.off('users:online-list', onOnlineList);
       socket.off('user:online', onUserOnline);
       socket.off('user:offline', onUserOffline);
