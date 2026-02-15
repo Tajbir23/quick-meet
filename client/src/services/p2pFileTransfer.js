@@ -716,6 +716,54 @@ class P2PFileTransferService {
   // ============================================
 
   /**
+   * Fetch dynamic TURN credentials from server and merge with static ICE config.
+   * 
+   * WHY: Static TURN credentials with lt-cred-mech cause stale-nonce (438),
+   * wrong-transaction-ID (437), and stale-session errors on coturn — especially
+   * when multiple devices share the same NAT (public IP). Ephemeral credentials
+   * via use-auth-secret (TURN REST API) avoid all these issues.
+   * 
+   * Each TURN URL gets its own iceServers entry so browsers try all transports
+   * simultaneously (UDP, TCP, TLS) instead of sequentially.
+   */
+  async _getIceConfig() {
+    try {
+      const token = localStorage.getItem('token');
+      const baseUrl = import.meta.env.VITE_SERVER_URL || 'https://localhost:5000';
+      const resp = await fetch(`${baseUrl}/api/transfers/turn-credentials`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      
+      if (!resp.ok) {
+        console.warn(`[P2P] Failed to fetch TURN credentials (${resp.status}), using STUN-only config`);
+        return { ...ICE_SERVERS };
+      }
+      
+      const turnData = await resp.json();
+      console.log(`[P2P DEBUG] Got dynamic TURN credentials | username=${turnData.username} | uris=${turnData.uris?.length} | ttl=${turnData.ttl}s`);
+      
+      // Build ICE config with dynamic TURN credentials
+      // Each URI gets its own entry for maximum browser compatibility
+      const turnServers = (turnData.uris || []).map(uri => ({
+        urls: uri,
+        username: turnData.username,
+        credential: turnData.credential,
+      }));
+      
+      return {
+        ...ICE_SERVERS,
+        iceServers: [
+          ...ICE_SERVERS.iceServers,
+          ...turnServers,
+        ],
+      };
+    } catch (err) {
+      console.warn('[P2P] Error fetching TURN credentials, using STUN-only config:', err.message);
+      return { ...ICE_SERVERS };
+    }
+  }
+
+  /**
    * Sender creates PeerConnection + DataChannel and sends offer
    */
   async _setupSenderConnection(session) {
@@ -727,9 +775,11 @@ class P2PFileTransferService {
     // ICE gathering itself can take up to 10s, so starting timeout here would
     // eat into the actual connection budget.
 
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    // Fetch dynamic TURN credentials (ephemeral, avoids stale-nonce issues)
+    const iceConfig = await this._getIceConfig();
+    const pc = new RTCPeerConnection(iceConfig);
     session.peerConnection = pc;
-    console.log(`[P2P DEBUG] RTCPeerConnection created | iceServers:`, JSON.stringify(ICE_SERVERS.iceServers?.map(s => s.urls)));
+    console.log(`[P2P DEBUG] RTCPeerConnection created | iceServers:`, JSON.stringify(iceConfig.iceServers?.map(s => s.urls)));
 
     // Create DataChannel with ordered delivery
     const dc = pc.createDataChannel(`file-${session.transferId}`, {
@@ -887,11 +937,16 @@ class P2PFileTransferService {
    */
   async _handleReceiverOffer(session, offer, senderId) {
     console.log(`[P2P DEBUG] _handleReceiverOffer called | transferId=${session.transferId} | senderId=${senderId}`);
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    
+    // Fetch dynamic TURN credentials (ephemeral, avoids stale-nonce issues)
+    const iceConfig = await this._getIceConfig();
+    const pc = new RTCPeerConnection(iceConfig);
     session.peerConnection = pc;
+    console.log(`[P2P DEBUG] Receiver RTCPeerConnection created | iceServers:`, JSON.stringify(iceConfig.iceServers?.map(s => s.urls)));
 
-    // Start connection timeout (30s) for receiver too
-    this._startConnectionTimeout(session);
+    // NOTE: Connection timeout starts AFTER ICE gathering (below), not here.
+    // ICE gathering itself can take up to 10s, so starting timeout here would
+    // eat into the actual connection budget (same fix as sender side).
 
     // ICE candidates
     pc.onicecandidate = (event) => {
@@ -1015,6 +1070,11 @@ class P2PFileTransferService {
       const srflxCount = candidateLines.filter(l => l.includes('typ srflx')).length;
       const relayCount = candidateLines.filter(l => l.includes('typ relay')).length;
       console.log(`[P2P DEBUG] ICE gathering done (answer) | transferId=${session.transferId} | host=${hostCount} srflx=${srflxCount} relay=${relayCount} total=${candidateLines.length}`);
+
+      // Start connection timeout NOW (after ICE gathering), so the full 30+30s
+      // budget is available for the actual P2P connection establishment.
+      // Previously this was called before ICE gathering, eating into the budget.
+      this._startConnectionTimeout(session);
 
       const socket = getSocket();
       if (socket) {

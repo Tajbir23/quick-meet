@@ -21,8 +21,8 @@ export const API_URL = `${SERVER_URL}/api`;
 // - iceTransportPolicy: 'all' (use 'relay' in high-security mode to hide IPs)
 // - bundlePolicy: 'max-bundle' (reduces attack surface by multiplexing)
 // - rtcpMuxPolicy: 'require' (forces RTCP multiplexing)
-// - Reduced STUN servers (fewer external dependencies)
-// - TURN with TLS (turns:) preferred over TCP
+// - TURN credentials are fetched dynamically via /api/transfers/turn-credentials
+// - No static TURN credentials in client code
 export const ICE_SERVERS = {
   iceServers: [
     // STUN servers — multiple for reliability (especially Android WebView)
@@ -30,25 +30,38 @@ export const ICE_SERVERS = {
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
-    // Self-hosted TURN server (coturn on VPS) — required for NAT traversal
-    // Using BOTH domain and IP to ensure Android WebView can resolve
+    // TURN servers — static long-lived credentials (use-auth-secret / TURN REST API)
+    // Valid for 1 year. P2P file transfer fetches fresh credentials dynamically.
+    // Audio/video calls use these static credentials.
     {
-      urls: [
-        'turn:quickmeet.genuinesoftmart.store:3478',
-        'turn:quickmeet.genuinesoftmart.store:3478?transport=tcp',
-        'turn:167.71.235.56:3478',
-        'turn:167.71.235.56:3478?transport=tcp',
-      ],
-      username: 'quickmeet',
-      credential: 'QuickMeet@Turn2026Secure',
+      urls: 'turn:167.71.235.56:3478',
+      username: '1802712048:quickmeet-static',
+      credential: 'B7Dc9nTOaG3hon1TaYucLt/U/QE=',
     },
     {
-      urls: [
-        'turns:quickmeet.genuinesoftmart.store:5349?transport=tcp',
-        'turns:167.71.235.56:5349?transport=tcp',
-      ],
-      username: 'quickmeet',
-      credential: 'QuickMeet@Turn2026Secure',
+      urls: 'turn:quickmeet.genuinesoftmart.store:3478',
+      username: '1802712048:quickmeet-static',
+      credential: 'B7Dc9nTOaG3hon1TaYucLt/U/QE=',
+    },
+    {
+      urls: 'turn:167.71.235.56:3478?transport=tcp',
+      username: '1802712048:quickmeet-static',
+      credential: 'B7Dc9nTOaG3hon1TaYucLt/U/QE=',
+    },
+    {
+      urls: 'turn:quickmeet.genuinesoftmart.store:3478?transport=tcp',
+      username: '1802712048:quickmeet-static',
+      credential: 'B7Dc9nTOaG3hon1TaYucLt/U/QE=',
+    },
+    {
+      urls: 'turns:quickmeet.genuinesoftmart.store:5349?transport=tcp',
+      username: '1802712048:quickmeet-static',
+      credential: 'B7Dc9nTOaG3hon1TaYucLt/U/QE=',
+    },
+    {
+      urls: 'turns:167.71.235.56:5349?transport=tcp',
+      username: '1802712048:quickmeet-static',
+      credential: 'B7Dc9nTOaG3hon1TaYucLt/U/QE=',
     },
     // Additional TURN from env vars (optional override)
     ...(import.meta.env.VITE_TURN_URL ? [{
@@ -57,7 +70,10 @@ export const ICE_SERVERS = {
       credential: import.meta.env.VITE_TURN_CREDENTIAL || '',
     }] : []),
   ].filter(s => s.urls),
-  iceCandidatePoolSize: 10, // More pre-allocated candidates for faster gathering
+
+  // NOTE: iceCandidatePoolSize removed — pre-allocating pools causes
+  // simultaneous TURN allocations from same NAT, leading to stale session
+  // and wrong transaction ID errors on coturn
 
   // SECURITY POLICIES:
   // 'all' = allow P2P + relay (default, good for performance)
