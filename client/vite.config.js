@@ -25,6 +25,7 @@ export default defineConfig({
       // Capacitor plugins are mobile-only — exclude from web build
       external: [
         /^@capacitor\//,
+        /^@capacitor-community\//,
       ],
       output: {
         manualChunks: {
