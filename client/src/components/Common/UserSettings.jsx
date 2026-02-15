@@ -17,7 +17,8 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   X, Camera, User, Mail, Lock, Eye, EyeOff,
   Shield, Save, Loader2, AlertCircle, Check,
-  Info, Download, RefreshCw, Smartphone, Monitor, Globe, Calendar, Hash
+  Info, Download, RefreshCw, Smartphone, Monitor, Globe, Calendar, Hash,
+  Share2, Copy, Link, ExternalLink
 } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import api from '../../services/api';
@@ -445,10 +446,14 @@ function getPlatformInfo() {
   return { name: 'Web Browser', icon: Globe };
 }
 
+const APP_LINK = 'https://quickmeet.genuinesoftmart.store';
+const APP_SHARE_TEXT = 'Quick Meet - Real-time chat, voice & video calls, and P2P file transfer. Try it now!';
+
 const AboutTab = () => {
   const [serverVersions, setServerVersions] = useState(null);
   const [checking, setChecking] = useState(false);
   const [updateResult, setUpdateResult] = useState(null);
+  const [copied, setCopied] = useState(false);
 
   const platform = getPlatformInfo();
   const PlatformIcon = platform.icon;
@@ -668,6 +673,91 @@ const AboutTab = () => {
           )}
         </div>
       )}
+
+      {/* ─── Share App Link ─── */}
+      <div className="bg-dark-700/50 rounded-xl border border-dark-600 p-4 space-y-3">
+        <div className="flex items-center gap-2 mb-1">
+          <Share2 size={16} className="text-primary-400" />
+          <h4 className="text-sm font-semibold text-white">Share App</h4>
+        </div>
+        <p className="text-xs text-dark-400">Share Quick Meet with your friends and family</p>
+
+        {/* Link display */}
+        <div className="flex items-center gap-2 bg-dark-800 rounded-lg px-3 py-2 border border-dark-600">
+          <Link size={14} className="text-dark-500 flex-shrink-0" />
+          <span className="text-xs text-dark-300 truncate flex-1 select-all">{APP_LINK}</span>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex gap-2">
+          {/* Copy Link */}
+          <button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(APP_LINK);
+                setCopied(true);
+                toast.success('Link copied!');
+                setTimeout(() => setCopied(false), 2000);
+              } catch {
+                // Fallback for older browsers
+                const ta = document.createElement('textarea');
+                ta.value = APP_LINK;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                setCopied(true);
+                toast.success('Link copied!');
+                setTimeout(() => setCopied(false), 2000);
+              }
+            }}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-medium transition-all ${
+              copied
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                : 'bg-dark-600 hover:bg-dark-500 text-dark-200 border border-dark-500'
+            }`}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? 'Copied!' : 'Copy Link'}
+          </button>
+
+          {/* Share (native or fallback) */}
+          <button
+            onClick={async () => {
+              const shareData = {
+                title: 'Quick Meet',
+                text: APP_SHARE_TEXT,
+                url: APP_LINK,
+              };
+              try {
+                if (navigator.share && navigator.canShare?.(shareData)) {
+                  await navigator.share(shareData);
+                } else {
+                  // Fallback: copy full message
+                  await navigator.clipboard.writeText(`${APP_SHARE_TEXT}\n${APP_LINK}`);
+                  toast.success('Share text copied to clipboard!');
+                }
+              } catch (err) {
+                if (err.name !== 'AbortError') {
+                  // User didn't cancel, try clipboard fallback
+                  try {
+                    await navigator.clipboard.writeText(`${APP_SHARE_TEXT}\n${APP_LINK}`);
+                    toast.success('Share text copied to clipboard!');
+                  } catch {
+                    toast.error('Could not share');
+                  }
+                }
+              }
+            }}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-medium bg-primary-600 hover:bg-primary-500 text-white transition-all"
+          >
+            <ExternalLink size={14} />
+            Share
+          </button>
+        </div>
+      </div>
 
       {/* Footer */}
       <div className="text-center pt-2">
