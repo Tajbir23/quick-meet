@@ -25,9 +25,12 @@ export const API_URL = `${SERVER_URL}/api`;
 // - No static TURN credentials in client code
 export const ICE_SERVERS = {
   iceServers: [
-    // TURN servers ONLY — relay mode forces all traffic through TURN.
-    // No STUN servers needed (relay mode ignores srflx/host candidates).
-    // Static long-lived credentials (use-auth-secret / TURN REST API).
+    // STUN servers — for discovering public IP (srflx candidates)
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    // TURN servers — fallback when direct P2P fails (symmetric NAT, firewalls)
+    // Static long-lived credentials (use-auth-secret / TURN REST API)
     // Valid for 1 year. P2P file transfer fetches fresh credentials dynamically.
     {
       urls: 'turn:167.71.235.56:3478',
@@ -67,12 +70,9 @@ export const ICE_SERVERS = {
     }] : []),
   ].filter(s => s.urls),
 
-  // RELAY-ONLY MODE:
-  // Forces ALL WebRTC traffic through the TURN server.
-  // - No local/host IP candidates are generated (privacy + consistency)
-  // - Works identically on local network and internet
-  // - Slightly higher latency but guaranteed connectivity
-  iceTransportPolicy: 'relay',
+  // P2P MODE: 'all' = try direct P2P first, TURN relay as fallback
+  // WebRTC will attempt host → srflx → relay candidates in priority order
+  iceTransportPolicy: 'all',
   bundlePolicy: 'max-bundle',       // Multiplex all media on one transport
   rtcpMuxPolicy: 'require',         // Force RTCP multiplexing
 };
