@@ -1,13 +1,8 @@
-name: Build & Release Apps
+name: Build, Release & Deploy
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'client/**'
-      - 'mobile/**'
-      - 'desktop/**'
-      - '.github/workflows/build-apps.yml'
   workflow_dispatch:
 
 # Ensure only one build runs at a time
@@ -214,3 +209,68 @@ jobs:
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ====================================================
+  # DEPLOY TO VPS (after release is created)
+  # ====================================================
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: [version, build-android, release]
+    if: always() && needs.build-android.result != 'cancelled'
+    
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 167.71.235.56
+          username: root
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            cd /var/www/quick-meet
+            git stash 2>/dev/null || true
+            git pull origin main
+            mkdir -p server/logs/security
+            mkdir -p server/updates/builds
+            
+            # Install + build
+            cd server && npm install --production && cd ..
+            cd client && npm install && npm run build && cd ..
+            
+            # Download latest APK from GitHub Release
+            LATEST_APK_URL=$(curl -s https://api.github.com/repos/Tajbir23/quick-meet/releases/latest | node -e "
+            const chunks = [];
+            process.stdin.on('data', d => chunks.push(d));
+            process.stdin.on('end', () => {
+              try {
+                const data = JSON.parse(Buffer.concat(chunks).toString());
+                const apk = (data.assets || []).find(a => a.name.endsWith('.apk'));
+                if (apk) console.log(apk.browser_download_url);
+              } catch(e) {}
+            });
+            " 2>/dev/null || echo "")
+            
+            if [ -n "$LATEST_APK_URL" ]; then
+              curl -L -o server/updates/builds/quick-meet.apk "$LATEST_APK_URL" 2>/dev/null || true
+            fi
+            
+            # Auto-bump versions.json
+            CLIENT_VERSION=$(node -p "require('./client/package.json').version")
+            node -e "
+            const fs = require('fs');
+            const p = './server/updates/versions.json';
+            let v = {};
+            try { v = JSON.parse(fs.readFileSync(p,'utf8')); } catch(e) {}
+            const now = new Date().toISOString();
+            ['web','android','desktop'].forEach(k => {
+              if (!v[k]) v[k] = {};
+              v[k].version = '$CLIENT_VERSION';
+              v[k].lastUpdated = now;
+              if (!v[k].minVersion) v[k].minVersion = '1.0.0';
+            });
+            fs.writeFileSync(p, JSON.stringify(v, null, 2));
+            console.log('versions.json updated: ' + '$CLIENT_VERSION');
+            "
+            
+            pm2 restart quick-meet
+            echo "Deploy complete: $(date)"

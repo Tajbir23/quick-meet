@@ -1,24 +1,30 @@
 /**
  * ============================================
- * UpdateNotification — Auto-Update Banner
+ * UpdateNotification — Force Update System
  * ============================================
  * 
- * Shows update notifications for both Desktop (Electron)
- * and Mobile (Android/Capacitor) apps.
+ * Checks for updates on EVERY app open (all platforms).
  * 
- * Desktop: Uses electron-updater (auto-download + install)
- * Android: Checks server API + redirects to download
- * Web: Hidden (no updates needed for web)
+ * PLATFORMS:
+ * - Desktop (Electron): electron-updater auto-download + install
+ * - Android (Capacitor): Server API check + download APK link
+ * - Web: Server API check + page reload (auto-deployed)
+ * 
+ * FORCE UPDATE:
+ * When mustUpdate=true, a full-screen blocking overlay appears.
+ * User CANNOT dismiss it — they MUST update to continue.
+ * 
+ * CHECK TIMING:
+ * - Immediately on mount (every app open)
+ * - Every 2 hours while app is running
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Download, RefreshCw, X, ArrowDownToLine, CheckCircle } from 'lucide-react';
-import { API_URL } from '../../utils/constants';
-
-const APP_VERSION = '1.0.0';
+import { Download, RefreshCw, X, ArrowDownToLine, CheckCircle, AlertTriangle } from 'lucide-react';
+import { API_URL, APP_VERSION } from '../../utils/constants';
 
 /**
- * Detect platform
+ * Detect platform key for server API
  */
 function getPlatform() {
   if (window.electronAPI?.isElectron) return 'desktop';
@@ -28,12 +34,50 @@ function getPlatform() {
 
 const UpdateNotification = () => {
   const [updateState, setUpdateState] = useState(null);
-  // { status, version, percent, releaseNotes, downloadUrl, error }
+  // { status, version, percent, releaseNotes, downloadUrl, mustUpdate, error }
   const [dismissed, setDismissed] = useState(false);
 
   const platform = getPlatform();
 
-  // ─── Desktop (Electron) ─────────────────────
+  // ─── Server API Check (ALL platforms: web, android, desktop) ──
+  const checkServerUpdate = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `${API_URL}/updates/check?platform=${platform}&version=${APP_VERSION}`
+      );
+      const data = await res.json();
+
+      if (data.success && data.hasUpdate) {
+        setUpdateState(prev => {
+          // Don't override electron download progress with server check
+          if (prev?.status === 'downloading' || prev?.status === 'downloaded') return prev;
+          return {
+            status: data.mustUpdate ? 'must-update' : 'available',
+            version: data.latestVersion,
+            releaseNotes: data.releaseNotes,
+            downloadUrl: data.downloadUrl,
+            mustUpdate: data.mustUpdate,
+          };
+        });
+        setDismissed(false);
+      }
+    } catch (e) {
+      console.warn('Update check failed:', e.message);
+    }
+  }, [platform]);
+
+  // ─── Check on mount (EVERY app open) + periodic check ──
+  useEffect(() => {
+    // Check immediately on mount — no delay
+    checkServerUpdate();
+
+    // Check every 2 hours while running
+    const interval = setInterval(checkServerUpdate, 2 * 60 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, [checkServerUpdate]);
+
+  // ─── Desktop (Electron) — electron-updater events ──
   useEffect(() => {
     if (platform !== 'desktop') return;
     if (!window.electronAPI?.onUpdateStatus) return;
@@ -48,42 +92,6 @@ const UpdateNotification = () => {
     return cleanup;
   }, [platform]);
 
-  // ─── Android (Capacitor) — Check server API ──
-  useEffect(() => {
-    if (platform !== 'android') return;
-
-    const checkAndroidUpdate = async () => {
-      try {
-        const res = await fetch(
-          `${API_URL}/updates/check?platform=android&version=${APP_VERSION}`
-        );
-        const data = await res.json();
-
-        if (data.success && data.hasUpdate) {
-          setUpdateState({
-            status: data.mustUpdate ? 'must-update' : 'available',
-            version: data.latestVersion,
-            releaseNotes: data.releaseNotes,
-            downloadUrl: data.downloadUrl,
-          });
-        }
-      } catch (e) {
-        console.warn('Android update check failed:', e.message);
-      }
-    };
-
-    // Check after 3 seconds (let app load first)
-    const timer = setTimeout(checkAndroidUpdate, 3000);
-
-    // Check every 6 hours
-    const interval = setInterval(checkAndroidUpdate, 6 * 60 * 60 * 1000);
-
-    return () => {
-      clearTimeout(timer);
-      clearInterval(interval);
-    };
-  }, [platform]);
-
   // ─── Handlers ────────────────────────────────
   const handleInstall = useCallback(() => {
     if (platform === 'desktop' && window.electronAPI?.installUpdate) {
@@ -93,36 +101,40 @@ const UpdateNotification = () => {
 
   const handleDownload = useCallback(() => {
     if (updateState?.downloadUrl) {
-      window.open(updateState.downloadUrl, '_system');
+      if (platform === 'android') {
+        window.open(updateState.downloadUrl, '_system');
+      } else {
+        window.open(updateState.downloadUrl, '_blank');
+      }
     }
-  }, [updateState]);
+  }, [updateState, platform]);
+
+  const handleWebReload = useCallback(() => {
+    // Clear all caches and hard reload
+    if ('caches' in window) {
+      caches.keys().then(names => {
+        names.forEach(name => caches.delete(name));
+      });
+    }
+    window.location.reload(true);
+  }, []);
 
   const handleDismiss = useCallback(() => {
-    if (updateState?.status !== 'must-update') {
+    if (!updateState?.mustUpdate) {
       setDismissed(true);
     }
   }, [updateState]);
 
   // ─── Render Logic ────────────────────────────
-  // Don't show on web
-  if (platform === 'web') return null;
-
-  // Don't show if no update info
   if (!updateState) return null;
-
-  // Don't show if dismissed (unless force update)
-  if (dismissed && updateState.status !== 'must-update') return null;
-
-  // Don't show for non-update statuses
+  if (dismissed && !updateState.mustUpdate) return null;
   if (['checking', 'up-to-date'].includes(updateState.status)) return null;
-
-  // Error state
   if (updateState.status === 'error') return null;
 
   // ─── Download Progress (Desktop) ──────────────
   if (updateState.status === 'downloading') {
     return (
-      <div className="fixed bottom-4 right-4 z-50 bg-dark-800 border border-primary-500/30 rounded-xl shadow-2xl p-4 max-w-xs animate-slide-up">
+      <div className="fixed bottom-4 right-4 z-[9999] bg-dark-800 border border-primary-500/30 rounded-xl shadow-2xl p-4 max-w-xs animate-slide-up">
         <div className="flex items-center gap-3 mb-2">
           <ArrowDownToLine size={18} className="text-primary-400 animate-bounce" />
           <span className="text-sm font-medium text-white">
@@ -143,7 +155,7 @@ const UpdateNotification = () => {
   // ─── Update Downloaded (Desktop) — Prompt restart ──
   if (updateState.status === 'downloaded') {
     return (
-      <div className="fixed bottom-4 right-4 z-50 bg-dark-800 border border-emerald-500/30 rounded-xl shadow-2xl p-4 max-w-sm animate-slide-up">
+      <div className="fixed bottom-4 right-4 z-[9999] bg-dark-800 border border-emerald-500/30 rounded-xl shadow-2xl p-4 max-w-sm animate-slide-up">
         <div className="flex items-start gap-3">
           <CheckCircle size={20} className="text-emerald-400 mt-0.5 shrink-0" />
           <div className="flex-1">
@@ -177,18 +189,19 @@ const UpdateNotification = () => {
     );
   }
 
-  // ─── Update Available (Android) or Must Update ──
+  // ─── Must Update (ALL platforms) — FULL SCREEN BLOCK ──
+  // ─── OR Available Update (dismissible) ──
   if (['available', 'must-update'].includes(updateState.status)) {
     const isMandatory = updateState.status === 'must-update';
 
     return (
       <>
-        {/* Backdrop for mandatory updates */}
+        {/* Full-screen backdrop for mandatory updates — BLOCKS entire app */}
         {isMandatory && (
-          <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
+          <div className="fixed inset-0 z-[9998] bg-black/80 backdrop-blur-md" />
         )}
 
-        <div className={`fixed z-50 ${
+        <div className={`fixed z-[9999] ${
           isMandatory
             ? 'inset-0 flex items-center justify-center p-4'
             : 'bottom-4 right-4 max-w-sm'
@@ -198,41 +211,76 @@ const UpdateNotification = () => {
               ? 'border-red-500/40 max-w-sm w-full'
               : 'border-primary-500/30 animate-slide-up'
           }`}>
-            <div className="flex items-start gap-3">
-              <Download size={22} className={`mt-0.5 shrink-0 ${
-                isMandatory ? 'text-red-400' : 'text-primary-400'
-              }`} />
+            {/* Force update icon */}
+            {isMandatory && (
+              <div className="flex justify-center mb-4">
+                <div className="w-16 h-16 rounded-full bg-red-500/15 flex items-center justify-center">
+                  <AlertTriangle size={32} className="text-red-400" />
+                </div>
+              </div>
+            )}
+
+            <div className={`flex ${isMandatory ? 'flex-col items-center text-center' : 'items-start'} gap-3`}>
+              {!isMandatory && (
+                <Download size={22} className="mt-0.5 shrink-0 text-primary-400" />
+              )}
               <div className="flex-1">
-                <p className="text-sm font-semibold text-white">
-                  {isMandatory ? '⚠️ Update Required' : 'Update Available'}
+                <p className={`font-semibold text-white ${isMandatory ? 'text-lg mb-1' : 'text-sm'}`}>
+                  {isMandatory ? 'Update Required' : 'Update Available'}
                 </p>
-                <p className="text-xs text-dark-400 mt-1">
-                  Version {updateState.version} is available.
+                <p className={`text-dark-400 mt-1 ${isMandatory ? 'text-sm' : 'text-xs'}`}>
+                  {isMandatory
+                    ? `A new version (v${updateState.version}) is required to continue using Quick Meet.`
+                    : `Version ${updateState.version} is available.`
+                  }
                   {updateState.releaseNotes && (
                     <span className="block mt-1 text-dark-300">{updateState.releaseNotes}</span>
                   )}
                 </p>
 
-                <div className="flex gap-2 mt-3">
-                  {platform === 'android' ? (
+                {/* Current version info */}
+                {isMandatory && (
+                  <p className="text-xs text-dark-500 mt-2">
+                    Current: v{APP_VERSION} → New: v{updateState.version}
+                  </p>
+                )}
+
+                <div className={`flex gap-2 mt-4 ${isMandatory ? 'justify-center' : ''}`}>
+                  {platform === 'web' ? (
+                    <button
+                      onClick={handleWebReload}
+                      className={`px-4 py-2 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
+                        isMandatory
+                          ? 'bg-red-600 hover:bg-red-500 px-6 py-2.5 text-sm'
+                          : 'bg-primary-600 hover:bg-primary-500'
+                      }`}
+                    >
+                      <RefreshCw size={14} />
+                      {isMandatory ? 'Reload Now' : 'Reload Page'}
+                    </button>
+                  ) : platform === 'desktop' ? (
+                    <button
+                      onClick={updateState.downloadUrl ? handleDownload : handleInstall}
+                      className={`px-4 py-2 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
+                        isMandatory
+                          ? 'bg-red-600 hover:bg-red-500 px-6 py-2.5 text-sm'
+                          : 'bg-emerald-600 hover:bg-emerald-500'
+                      }`}
+                    >
+                      <Download size={14} />
+                      {isMandatory ? 'Download Update' : 'Install & Restart'}
+                    </button>
+                  ) : (
                     <button
                       onClick={handleDownload}
                       className={`px-4 py-2 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
                         isMandatory
-                          ? 'bg-red-600 hover:bg-red-500'
+                          ? 'bg-red-600 hover:bg-red-500 px-6 py-2.5 text-sm'
                           : 'bg-primary-600 hover:bg-primary-500'
                       }`}
                     >
                       <Download size={14} />
                       Download Update
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handleInstall}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5"
-                    >
-                      <RefreshCw size={14} />
-                      Install & Restart
                     </button>
                   )}
 

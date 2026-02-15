@@ -10,16 +10,18 @@
  * - Change password
  * - Toggle profile visibility (hide from search)
  * - Toggle email visibility
+ * - View app info (About)
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   X, Camera, User, Mail, Lock, Eye, EyeOff,
-  Shield, Save, Loader2, AlertCircle, Check
+  Shield, Save, Loader2, AlertCircle, Check,
+  Info, Download, RefreshCw, Smartphone, Monitor, Globe, Calendar, Hash
 } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import api from '../../services/api';
-import { SERVER_URL } from '../../utils/constants';
+import { SERVER_URL, APP_VERSION, APP_BUILD_DATE } from '../../utils/constants';
 import { getInitials, stringToColor } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 
@@ -168,6 +170,7 @@ const UserSettings = ({ onClose }) => {
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'security', label: 'Security', icon: Lock },
     { id: 'privacy', label: 'Privacy', icon: Shield },
+    { id: 'about', label: 'About', icon: Info },
   ];
 
   return (
@@ -424,7 +427,222 @@ const UserSettings = ({ onClose }) => {
               </button>
             </div>
           )}
+
+          {/* ─── ABOUT TAB ─── */}
+          {activeTab === 'about' && (
+            <AboutTab />
+          )}
         </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── About Tab Component ───
+function getPlatformInfo() {
+  if (window.electronAPI?.isElectron) return { name: 'Desktop (Windows)', icon: Monitor };
+  if (window.Capacitor?.isNativePlatform?.()) return { name: 'Mobile (Android)', icon: Smartphone };
+  return { name: 'Web Browser', icon: Globe };
+}
+
+const AboutTab = () => {
+  const [serverVersions, setServerVersions] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const [updateResult, setUpdateResult] = useState(null);
+
+  const platform = getPlatformInfo();
+  const PlatformIcon = platform.icon;
+
+  // Fetch server version info on mount
+  useEffect(() => {
+    const fetchVersions = async () => {
+      try {
+        const res = await api.get('/updates/versions');
+        if (res.data.success) {
+          setServerVersions(res.data.versions);
+        }
+      } catch (e) {
+        // Silent fail
+      }
+    };
+    fetchVersions();
+  }, []);
+
+  const handleCheckUpdate = useCallback(async () => {
+    setChecking(true);
+    setUpdateResult(null);
+    try {
+      let platformKey = 'web';
+      if (window.electronAPI?.isElectron) platformKey = 'desktop';
+      else if (window.Capacitor?.isNativePlatform?.()) platformKey = 'android';
+
+      const res = await api.get(`/updates/check?platform=${platformKey}&version=${APP_VERSION}`);
+      const data = res.data;
+
+      if (data.success) {
+        if (data.hasUpdate) {
+          setUpdateResult({
+            type: 'update',
+            version: data.latestVersion,
+            notes: data.releaseNotes,
+            url: data.downloadUrl,
+            mustUpdate: data.mustUpdate,
+          });
+        } else {
+          setUpdateResult({ type: 'up-to-date' });
+        }
+      }
+    } catch (e) {
+      setUpdateResult({ type: 'error', message: 'Could not check for updates' });
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  // Get latest update date from server
+  const serverPlatformKey = window.electronAPI?.isElectron ? 'desktop'
+    : window.Capacitor?.isNativePlatform?.() ? 'android' : 'web';
+  const lastUpdated = serverVersions?.[serverPlatformKey]?.lastUpdated;
+  const latestVersion = serverVersions?.[serverPlatformKey]?.version;
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* App Logo & Name */}
+      <div className="flex flex-col items-center gap-2 py-3">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-lg">
+          <span className="text-white text-3xl font-bold">Q</span>
+        </div>
+        <h3 className="text-lg font-bold text-white">Quick Meet</h3>
+        <p className="text-xs text-dark-400">Real-time Communication Platform</p>
+      </div>
+
+      {/* Version Info Card */}
+      <div className="bg-dark-700/50 rounded-xl border border-dark-600 divide-y divide-dark-600">
+        {/* Current Version */}
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary-500/15 flex items-center justify-center">
+              <Hash size={15} className="text-primary-400" />
+            </div>
+            <div>
+              <p className="text-xs text-dark-400">Current Version</p>
+              <p className="text-sm font-semibold text-white">v{APP_VERSION}</p>
+            </div>
+          </div>
+          {latestVersion && latestVersion !== APP_VERSION && (
+            <span className="px-2 py-0.5 bg-amber-500/15 text-amber-400 text-[10px] font-medium rounded-full">
+              v{latestVersion} available
+            </span>
+          )}
+        </div>
+
+        {/* Last Updated */}
+        <div className="flex items-center gap-3 px-4 py-3">
+          <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center">
+            <Calendar size={15} className="text-emerald-400" />
+          </div>
+          <div>
+            <p className="text-xs text-dark-400">Last Updated</p>
+            <p className="text-sm font-medium text-white">{formatDate(lastUpdated || APP_BUILD_DATE)}</p>
+          </div>
+        </div>
+
+        {/* Platform */}
+        <div className="flex items-center gap-3 px-4 py-3">
+          <div className="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center">
+            <PlatformIcon size={15} className="text-blue-400" />
+          </div>
+          <div>
+            <p className="text-xs text-dark-400">Platform</p>
+            <p className="text-sm font-medium text-white">{platform.name}</p>
+          </div>
+        </div>
+
+        {/* Build Date */}
+        <div className="flex items-center gap-3 px-4 py-3">
+          <div className="w-8 h-8 rounded-lg bg-purple-500/15 flex items-center justify-center">
+            <Info size={15} className="text-purple-400" />
+          </div>
+          <div>
+            <p className="text-xs text-dark-400">Build Date</p>
+            <p className="text-sm font-medium text-white">{formatDate(APP_BUILD_DATE)}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Check for Updates Button */}
+      <button
+        onClick={handleCheckUpdate}
+        disabled={checking}
+        className="btn-primary w-full flex items-center justify-center gap-2 py-2.5"
+      >
+        {checking ? (
+          <><Loader2 size={16} className="animate-spin" /> Checking...</>
+        ) : (
+          <><RefreshCw size={16} /> Check for Updates</>
+        )}
+      </button>
+
+      {/* Update Result */}
+      {updateResult && (
+        <div className={`rounded-xl p-3 border ${
+          updateResult.type === 'up-to-date'
+            ? 'bg-emerald-500/10 border-emerald-500/20'
+            : updateResult.type === 'update'
+            ? 'bg-amber-500/10 border-amber-500/20'
+            : 'bg-red-500/10 border-red-500/20'
+        }`}>
+          {updateResult.type === 'up-to-date' && (
+            <div className="flex items-center gap-2">
+              <Check size={16} className="text-emerald-400" />
+              <span className="text-sm text-emerald-300">You're on the latest version!</span>
+            </div>
+          )}
+          {updateResult.type === 'update' && (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Download size={16} className="text-amber-400" />
+                <span className="text-sm font-medium text-amber-300">
+                  v{updateResult.version} available
+                  {updateResult.mustUpdate && ' (Required)'}
+                </span>
+              </div>
+              {updateResult.notes && (
+                <p className="text-xs text-dark-300 mb-3">{updateResult.notes}</p>
+              )}
+              {updateResult.url && (
+                <a
+                  href={updateResult.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium rounded-lg transition-colors"
+                >
+                  <Download size={12} />
+                  Download Update
+                </a>
+              )}
+            </div>
+          )}
+          {updateResult.type === 'error' && (
+            <div className="flex items-center gap-2">
+              <AlertCircle size={16} className="text-red-400" />
+              <span className="text-sm text-red-300">{updateResult.message}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Footer */}
+      <div className="text-center pt-2">
+        <p className="text-[11px] text-dark-500">
+          © 2026 Quick Meet • Built with ❤️
+        </p>
       </div>
     </div>
   );

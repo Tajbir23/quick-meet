@@ -5,6 +5,10 @@
  * SECURITY: ICE transport policy, DTLS enforcement, candidate filtering
  */
 
+// App Version & Build Info
+export const APP_VERSION = '1.0.1';
+export const APP_BUILD_DATE = '2026-02-15';
+
 // Server URL — MUST be HTTPS for WebRTC to work
 export const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'https://localhost:5000';
 

@@ -1,16 +1,25 @@
 {
   "desktop": {
-    "version": "1.0.0",
+    "version": "1.0.1",
     "minVersion": "1.0.0",
-    "releaseNotes": "Initial release — Quick Meet Desktop App",
-    "forceUpdate": false,
-    "downloadUrl": "https://github.com/Tajbir23/quick-meet/releases/latest"
+    "releaseNotes": "About section, force update, auto-build on push",
+    "forceUpdate": true,
+    "downloadUrl": "https://quickmeet.genuinesoftmart.store/api/updates/download/desktop",
+    "lastUpdated": "2026-02-15T00:00:00.000Z"
   },
   "android": {
-    "version": "1.0.0",
+    "version": "1.0.1",
     "minVersion": "1.0.0",
-    "releaseNotes": "Initial release — Quick Meet Android App",
+    "releaseNotes": "About section, force update, auto-build on push",
+    "forceUpdate": true,
+    "downloadUrl": "https://quickmeet.genuinesoftmart.store/api/updates/download/android",
+    "lastUpdated": "2026-02-15T00:00:00.000Z"
+  },
+  "web": {
+    "version": "1.0.1",
+    "minVersion": "1.0.0",
+    "releaseNotes": "About section, force update, auto-build on push",
     "forceUpdate": false,
-    "downloadUrl": "https://github.com/Tajbir23/quick-meet/releases/latest"
+    "lastUpdated": "2026-02-15T00:00:00.000Z"
   }
 }
