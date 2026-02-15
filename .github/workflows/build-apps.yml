@@ -277,8 +277,9 @@ jobs:
           prerelease: false
           files: release-assets/*
           fail_on_unmatched_files: false
+          token: ${{ github.token }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
 
   # ====================================================
   # DEPLOY TO VPS (after release is created)
