@@ -187,10 +187,6 @@ class TransferSession {
       clearTimeout(this._disconnectTimer);
       this._disconnectTimer = null;
     }
-    if (this._relayFallbackTimer) {
-      clearTimeout(this._relayFallbackTimer);
-      this._relayFallbackTimer = null;
-    }
     if (this.peerConnection) {
       this.peerConnection.onicecandidate = null;
       this.peerConnection.oniceconnectionstatechange = null;
@@ -484,54 +480,6 @@ class P2PFileTransferService {
       }
     });
 
-    // ── SERVER RELAY MODE LISTENERS (fallback when P2P fails) ──────────
-
-    // Sender tells receiver to switch to relay mode
-    socket.on('file-transfer:relay-start', (data) => {
-      console.log(`[P2P RELAY] 📨 Relay start received | transferId=${data.transferId}`);
-      const session = this.sessions.get(data.transferId);
-      if (session && session.isReceiver) {
-        session._isRelay = true;
-        // Close P2P connection if it was trying
-        if (session.peerConnection) {
-          session.peerConnection.onicecandidate = null;
-          session.peerConnection.oniceconnectionstatechange = null;
-          session.peerConnection.ondatachannel = null;
-          try { session.peerConnection.close(); } catch (e) {}
-          session.peerConnection = null;
-        }
-        this._clearConnectionTimeout(session);
-        session.status = 'transferring';
-        session.startTime = Date.now();
-        this._initReceiveWriter(session);
-        this._notifyUpdate(session.transferId, session);
-      }
-    });
-
-    // Receive file chunk via server relay
-    socket.on('file-transfer:relay-chunk', (data) => {
-      const session = this.sessions.get(data.transferId);
-      if (session && session.isReceiver) {
-        // Convert to same format as DataChannel chunk: [4-byte header] + [data]
-        const chunkData = data.data;
-        const header = new ArrayBuffer(4);
-        new DataView(header).setUint32(0, data.chunkIndex, true);
-        const combined = new Uint8Array(4 + chunkData.byteLength);
-        combined.set(new Uint8Array(header), 0);
-        combined.set(new Uint8Array(chunkData), 4);
-        this._handleReceivedChunk(session, combined.buffer);
-      }
-    });
-
-    // Relay transfer complete
-    socket.on('file-transfer:relay-complete', (data) => {
-      console.log(`[P2P RELAY] ✅ Relay complete received | transferId=${data.transferId}`);
-      const session = this.sessions.get(data.transferId);
-      if (session && session.isReceiver && session.status !== 'completed') {
-        this._finalizeReceive(session);
-      }
-    });
-
     this._socketListenersBound = true;
     this._boundSocketId = socket.id || 'pending';
 
@@ -556,7 +504,6 @@ class P2PFileTransferService {
       'file-transfer:peer-offline', 'file-transfer:pending-list', 'file-transfer:resume-request',
       'file-transfer:resume-info', 'file-transfer:offer', 'file-transfer:answer',
       'file-transfer:ice-candidate', 'file-transfer:progress-ack', 'file-transfer:sender-finished',
-      'file-transfer:relay-start', 'file-transfer:relay-chunk', 'file-transfer:relay-complete',
     ];
     events.forEach(e => socket.off(e));
   }
@@ -792,22 +739,9 @@ class P2PFileTransferService {
     dc.binaryType = 'arraybuffer';
     console.log(`[P2P DEBUG] DataChannel created: file-${session.transferId}`);
 
-    // Server relay fallback timer — if DataChannel doesn't open in 15s, switch to relay
-    session._relayFallbackTimer = setTimeout(() => {
-      if (session.status === 'connecting' && !session._isRelay) {
-        console.warn(`[P2P] ⚠️ DataChannel not open after 15s for ${session.transferId}, switching to server relay...`);
-        this._switchToRelayMode(session);
-      }
-    }, 15000);
-
-    // DataChannel open → start sending (P2P mode)
+    // DataChannel open → start sending
     dc.onopen = () => {
       console.log(`[P2P DEBUG] ✅ DataChannel OPEN for ${session.transferId}, starting send from chunk ${session.currentChunk}`);
-      // Cancel relay fallback — P2P is working!
-      if (session._relayFallbackTimer) {
-        clearTimeout(session._relayFallbackTimer);
-        session._relayFallbackTimer = null;
-      }
       this._clearConnectionTimeout(session);
       session.status = 'transferring';
       session.startTime = Date.now();
@@ -825,9 +759,11 @@ class P2PFileTransferService {
 
     dc.onerror = (err) => {
       console.error(`[P2P DEBUG] ❌ DataChannel ERROR for ${session.transferId}:`, err);
-      // Don't fail if relay fallback is available — ICE failure handler will switch to relay
-      if (session._isRelay) return; // Already in relay mode, ignore DC errors
-      // Only fail if no relay fallback possible (shouldn't happen with our fallback)
+      if (!['completed', 'verifying', 'cancelled'].includes(session.status)) {
+        session.status = 'failed';
+        session._failReason = 'datachannel_error';
+        this._notifyUpdate(session.transferId, session);
+      }
     };
 
     // ICE candidates
@@ -854,10 +790,20 @@ class P2PFileTransferService {
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         this._clearConnectionTimeout(session);
       }
-      if (pc.iceConnectionState === 'failed' && !isTerminal && !session._isRelay) {
-        // ICE failed → switch to server relay immediately (don't waste time with ICE restart)
-        console.warn(`[P2P] Sender ICE failed for ${session.transferId}, switching to server relay...`);
-        this._switchToRelayMode(session);
+      if (pc.iceConnectionState === 'failed' && !isTerminal) {
+        // Try ICE restart before giving up
+        if (!session._iceRestartAttempted) {
+          console.warn(`[P2P] Sender ICE failed for ${session.transferId}, attempting ICE restart...`);
+          session._iceRestartAttempted = true;
+          this._attemptIceRestart(session);
+        } else {
+          console.error(`[P2P] Sender ICE failed after restart for ${session.transferId}`);
+          this._clearConnectionTimeout(session);
+          session.status = 'failed';
+          session._failReason = 'ice_failed';
+          this._notifyUpdate(session.transferId, session);
+          this._reportProgressToServer(session);
+        }
       }
       if (pc.iceConnectionState === 'disconnected' && !isTerminal) {
         // Disconnected is often temporary — wait 5s before pausing
@@ -986,10 +932,13 @@ class P2PFileTransferService {
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         this._clearConnectionTimeout(session);
       }
-      if (pc.iceConnectionState === 'failed' && !isTerminal && !session._isRelay) {
-        // ICE failed on receiver — don't mark as failed, wait for sender's relay-start
-        console.warn(`[P2P] Receiver ICE failed for ${session.transferId}, waiting for sender to switch to relay...`);
-        // Keep session alive — sender will emit relay-start and receiver's socket listener will handle it
+      if (pc.iceConnectionState === 'failed' && !isTerminal) {
+        console.error(`[P2P] Receiver ICE failed for ${session.transferId}`);
+        this._clearConnectionTimeout(session);
+        session.status = 'failed';
+        session._failReason = 'ice_failed';
+        this._notifyUpdate(session.transferId, session);
+        this._reportProgressToServer(session);
       }
       if (pc.iceConnectionState === 'disconnected' && !isTerminal) {
         // Disconnected is often temporary — wait 5s
@@ -1180,140 +1129,6 @@ class P2PFileTransferService {
       if (this.onTransferComplete) {
         this.onTransferComplete(session.transferId);
       }
-    }
-  }
-
-  // ============================================
-  // SERVER RELAY MODE (Fallback when P2P fails)
-  // ============================================
-
-  /**
-   * Switch from P2P to server relay mode
-   * Called when DataChannel fails to open within 15 seconds
-   */
-  _switchToRelayMode(session) {
-    console.log(`[P2P RELAY] 🔄 Switching to server relay for ${session.transferId}`);
-    session._isRelay = true;
-    
-    // Cancel connection timeout
-    this._clearConnectionTimeout(session);
-    if (session._relayFallbackTimer) {
-      clearTimeout(session._relayFallbackTimer);
-      session._relayFallbackTimer = null;
-    }
-    
-    // Close P2P connection (not needed for relay)
-    if (session.peerConnection) {
-      session.peerConnection.onicecandidate = null;
-      session.peerConnection.oniceconnectionstatechange = null;
-      session.peerConnection.ondatachannel = null;
-      try { session.peerConnection.close(); } catch (e) {}
-      session.peerConnection = null;
-    }
-    if (session.dataChannel) {
-      session.dataChannel.onopen = null;
-      session.dataChannel.onclose = null;
-      session.dataChannel.onerror = null;
-      session.dataChannel.onmessage = null;
-      try { session.dataChannel.close(); } catch (e) {}
-      session.dataChannel = null;
-    }
-    
-    // Notify receiver to switch to relay mode
-    const socket = getSocket();
-    if (socket) {
-      socket.emit('file-transfer:relay-start', {
-        transferId: session.transferId,
-        targetUserId: session.peerId,
-      });
-    }
-    
-    // Start sending via relay
-    session.status = 'transferring';
-    session.startTime = Date.now();
-    this._notifyUpdate(session.transferId, session);
-    this._sendChunksViaRelay(session);
-  }
-
-  /**
-   * Send file chunks through Socket.IO server relay (fallback mode)
-   */
-  async _sendChunksViaRelay(session) {
-    const { file, chunkSize, totalChunks } = session;
-    const socket = getSocket();
-    if (!file || !socket) return;
-
-    console.log(`[P2P RELAY] Starting relay transfer | ${session.fileName} | ${totalChunks} chunks | chunkSize=${chunkSize}`);
-
-    while (session.currentChunk < totalChunks && !session.isPaused && session.status === 'transferring') {
-      const start = session.currentChunk * chunkSize;
-      const end = Math.min(start + chunkSize, file.size);
-      const slice = file.slice(start, end);
-
-      try {
-        const arrayBuffer = await slice.arrayBuffer();
-        
-        // Send chunk via Socket.IO with acknowledgement-based flow control
-        await new Promise((resolve, reject) => {
-          socket.emit('file-transfer:relay-chunk', {
-            transferId: session.transferId,
-            targetUserId: session.peerId,
-            chunkIndex: session.currentChunk,
-            data: arrayBuffer,
-          }, () => resolve()); // Socket.IO ack
-          // Fallback resolve if no ack (server may not ack)
-          setTimeout(resolve, 200);
-        });
-        
-        session.currentChunk++;
-        session.bytesTransferred = Math.min(session.currentChunk * chunkSize, file.size);
-        
-        // Calculate speed every 500ms
-        this._calculateSpeed(session);
-
-        // Report progress to server periodically
-        if (session.currentChunk % CONFIG.PROGRESS_REPORT_INTERVAL === 0) {
-          this._reportProgressToServer(session);
-        }
-
-        // Throttle to avoid overwhelming Socket.IO
-        if (session.currentChunk % 10 === 0) {
-          await new Promise(r => setTimeout(r, 50));
-        }
-
-        // Throttle UI updates
-        const now = Date.now();
-        if (!session._lastUINotify || now - session._lastUINotify >= CONFIG.UI_NOTIFY_INTERVAL) {
-          session._lastUINotify = now;
-          this._notifyUpdate(session.transferId, session);
-        }
-      } catch (err) {
-        console.error(`[P2P RELAY] Error sending chunk ${session.currentChunk}:`, err);
-        session.status = 'failed';
-        this._notifyUpdate(session.transferId, session);
-        return;
-      }
-    }
-
-    // Check if complete
-    if (session.currentChunk >= totalChunks && session.status === 'transferring') {
-      // Send completion via relay
-      socket.emit('file-transfer:relay-complete', {
-        transferId: session.transferId,
-        targetUserId: session.peerId,
-      });
-
-      // Also notify server (same as DataChannel path)
-      socket.emit('file-transfer:sender-done', {
-        transferId: session.transferId,
-      });
-
-      session.status = 'completed';
-      this._notifyUpdate(session.transferId, session);
-      if (this.onTransferComplete) {
-        this.onTransferComplete(session.transferId);
-      }
-      console.log(`[P2P RELAY] ✅ Relay transfer complete | ${session.transferId}`);
     }
   }
 
@@ -1883,17 +1698,24 @@ class P2PFileTransferService {
     session._iceRestartAttempted = false;
 
     // First timer: after 30s, attempt ICE restart instead of immediate failure
+    // First timer: after 30s, attempt ICE restart
     session._connectionTimer = setTimeout(() => {
       if (session.status === 'connecting' && !session._iceRestartAttempted) {
         const iceState = session.peerConnection?.iceConnectionState || 'unknown';
-        console.warn(`[P2P] ⚠️ Connection timeout for ${session.transferId} after 30s (ICE=${iceState}), switching to relay...`);
-        // If still connecting after 30s and not already relay, switch to relay
-        if (!session._isRelay && !session.isReceiver) {
-          this._switchToRelayMode(session);
-        } else if (!session._isRelay && session.isReceiver) {
-          // Receiver just keeps waiting — sender will initiate relay
-          console.log(`[P2P] Receiver waiting for sender relay-start...`);
-        }
+        console.warn(`[P2P] ⚠️ Connection slow for ${session.transferId} after 30s (ICE=${iceState}), attempting ICE restart...`);
+        session._iceRestartAttempted = true;
+        this._attemptIceRestart(session);
+
+        // Second timer: after another 30s, actually fail
+        session._connectionTimer = setTimeout(() => {
+          if (session.status === 'connecting') {
+            const finalIceState = session.peerConnection?.iceConnectionState || 'unknown';
+            console.error(`[P2P] ⏰ Connection TIMEOUT for ${session.transferId} after 60s | ICE=${finalIceState}`);
+            session.status = 'failed';
+            session._failReason = 'connection_timeout';
+            this._notifyUpdate(session.transferId, session);
+          }
+        }, 30000);
       }
     }, 30000);
   }

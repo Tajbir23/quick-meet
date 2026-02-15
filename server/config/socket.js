@@ -44,7 +44,7 @@ const initializeSocket = (httpsServer) => {
     // negotiation. If ping timeout is too aggressive, sockets drop mid-transfer.
     pingInterval: 25000,
     pingTimeout: 60000,
-    maxHttpBufferSize: 2e6, // 2MB — enough for relay file chunks (64KB-256KB)
+    maxHttpBufferSize: 1e6, // 1MB — default for signaling data
     transports: ['websocket', 'polling'],
     // Security: limit connection rate
     connectTimeout: 10000,
