@@ -90,6 +90,12 @@ const UpdateNotification = () => {
       console.log('[Update] Server check result:', data);
 
       if (data.success && data.hasUpdate) {
+        // Android: native changes REQUIRE APK install — always force update
+        // (android version in versions.json is only bumped for native changes)
+        if (platform === 'android') {
+          data.mustUpdate = true;
+        }
+
         // Store mustUpdate persistently
         if (data.mustUpdate) {
           mustUpdateRef.current = true;
