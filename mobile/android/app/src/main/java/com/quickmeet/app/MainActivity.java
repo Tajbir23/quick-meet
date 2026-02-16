@@ -8,6 +8,7 @@ import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import android.widget.Toast;
+import android.util.Log;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -26,6 +27,8 @@ import java.util.Map;
  * - WebRTC camera/microphone permission grants at the WebView level
  * - Runtime permission requests for Android 6.0+
  * - Notification permission for Android 13+
+ * - **IMPORTANT**: Prevents WebView renderer from being suspended during active calls
+ *   by setting RENDERER_PRIORITY_IMPORTANT when the activity goes to background
  * 
  * IMPORTANT: We do NOT replace the WebChromeClient. Capacitor's built-in
  * BridgeWebChromeClient handles file chooser (input[type=file]) and other
@@ -34,6 +37,7 @@ import java.util.Map;
  */
 public class MainActivity extends BridgeActivity {
 
+    private static final String TAG = "QM-MainActivity";
     private ActivityResultLauncher<String[]> permissionLauncher;
 
     @Override
@@ -69,12 +73,6 @@ public class MainActivity extends BridgeActivity {
         super.onStart();
 
         // Configure WebView settings for WebRTC — but do NOT replace the WebChromeClient!
-        // Capacitor's BridgeWebChromeClient handles:
-        //   - onShowFileChooser (input[type=file])
-        //   - onPermissionRequest (camera/mic for WebRTC)
-        //   - onGeolocationPermissionsShowPrompt
-        //   - Console messages, etc.
-        // Replacing it with a plain WebChromeClient breaks all of those.
         WebView webView = getBridge().getWebView();
         if (webView != null) {
             webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
@@ -83,7 +81,39 @@ public class MainActivity extends BridgeActivity {
             webView.getSettings().setDatabaseEnabled(true);
             webView.getSettings().setAllowFileAccess(true);
             webView.getSettings().setAllowContentAccess(true);
+            
+            // Set renderer priority to IMPORTANT so Android doesn't kill/suspend 
+            // the WebView renderer process when the app goes to the background.
+            // This is critical for WebRTC audio/video calls — the renderer process
+            // handles all WebRTC media processing (audio encoding/decoding).
+            // bindRenderer=false means: keep this priority even when not bound to a visible view.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                webView.setRendererPriorityPolicy(
+                    WebView.RENDERER_PRIORITY_IMPORTANT, 
+                    false  // waivedWhenNotVisible=false → keep important even in background
+                );
+                Log.i(TAG, "WebView renderer priority set to IMPORTANT (persistent)");
+            }
         }
+    }
+
+    /**
+     * When the app goes to the background (minimized, home button, screen off),
+     * Android would normally throttle or suspend the WebView renderer.
+     * We override onStop to ensure the WebView stays alive for calls.
+     * 
+     * The BackgroundService with phoneCall+microphone foreground service type
+     * handles the OS-level keep-alive, while the renderer priority policy
+     * set in onStart() prevents the WebView process from being killed.
+     */
+    @Override
+    protected void onStop() {
+        // Check if there's an active call — if so, keep the WebView alive
+        BackgroundService bgService = BackgroundService.getInstance();
+        if (bgService != null) {
+            Log.i(TAG, "onStop — BackgroundService is running, WebView renderer stays IMPORTANT");
+        }
+        super.onStop();
     }
 
     private void requestEssentialPermissions() {

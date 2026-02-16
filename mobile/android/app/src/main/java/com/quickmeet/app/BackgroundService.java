@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -31,6 +32,10 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 import java.security.cert.X509Certificate;
 
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
+import android.media.AudioManager;
+
 /**
  * Foreground Service for Quick Meet
  * 
@@ -38,7 +43,10 @@ import java.security.cert.X509Certificate;
  * - Socket.io connection stays active (incoming calls, messages)
  * - File transfers continue when app is backgrounded
  * - WebView JS execution is not suspended by Android
- * - **NEW**: Polls server for pending notifications every 5 seconds
+ * - **IMPORTANT**: During active calls, the service upgrades to
+ *   phoneCall|microphone foreground service type + acquires audio focus
+ *   so Android doesn't suspend WebRTC audio when minimized.
+ * - Polls server for pending notifications every 5 seconds
  *   using native HTTP (works even when WebView JS is suspended)
  * 
  * Shows a persistent notification in the notification bar.
@@ -76,6 +84,12 @@ public class BackgroundService extends Service {
     private static BackgroundService instance;
     private NotificationManager notificationManager;
     
+    // Audio focus for keeping WebRTC audio alive in background
+    private AudioManager audioManager;
+    private AudioFocusRequest audioFocusRequest;
+    private boolean hasAudioFocus = false;
+    private boolean isInCall = false;
+    
     // Queue for pending notification actions (answer_call, decline_call, etc.)
     private volatile String pendingAction = null;
     
@@ -89,6 +103,7 @@ public class BackgroundService extends Service {
         super.onCreate();
         instance = this;
         notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
         createNotificationChannels();
         acquireWakeLock();
         startPolling();
@@ -192,7 +207,9 @@ public class BackgroundService extends Service {
     }
     
     /**
-     * Show ongoing call notification (visible in notification panel, no sound/vibration)
+     * Show ongoing call notification (visible in notification panel, no sound/vibration).
+     * Also upgrades the foreground service type and acquires audio focus
+     * so WebRTC audio keeps playing when app is minimized.
      */
     public void showOngoingCallNotification(String callerName, String callType) {
         PendingIntent pendingIntent = getLaunchPendingIntent();
@@ -225,14 +242,29 @@ public class BackgroundService extends Service {
             .build();
         
         notificationManager.notify(NOTIFICATION_CALL, notification);
-        Log.i(TAG, "Ongoing call notification shown: " + callerName);
+        
+        // Mark as in-call and upgrade foreground service + audio focus
+        isInCall = true;
+        upgradeToCallForegroundService(notification);
+        acquireAudioFocus();
+        
+        Log.i(TAG, "Ongoing call notification shown + foreground upgraded: " + callerName);
     }
     
     /**
-     * Dismiss the call notification
+     * Dismiss the call notification.
+     * Also downgrades the foreground service type and releases audio focus.
      */
     public void dismissCallNotification() {
         notificationManager.cancel(NOTIFICATION_CALL);
+        
+        // Downgrade foreground service type and release audio focus
+        if (isInCall) {
+            isInCall = false;
+            releaseAudioFocus();
+            downgradeFromCallForegroundService();
+            Log.i(TAG, "Call ended — foreground downgraded, audio focus released");
+        }
     }
     
     /**
@@ -338,6 +370,119 @@ public class BackgroundService extends Service {
      */
     public void dismissMessageNotification() {
         notificationManager.cancel(NOTIFICATION_MESSAGE);
+    }
+    
+    // ========== Call-mode foreground service upgrade/downgrade ==========
+    
+    /**
+     * Upgrade the foreground service type to include phoneCall + microphone.
+     * This tells Android to keep audio processing alive even when the app is in background.
+     * Must be called when a call starts (from showOngoingCallNotification).
+     */
+    private void upgradeToCallForegroundService(Notification callNotification) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Re-start foreground with call + microphone service types
+                int serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                    | ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+                    | ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+                startForeground(NOTIFICATION_BG, callNotification, serviceType);
+                Log.i(TAG, "Foreground service upgraded to phoneCall|microphone|dataSync");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to upgrade foreground service type", e);
+        }
+    }
+    
+    /**
+     * Downgrade the foreground service type back to dataSync only.
+     * Called when a call ends.
+     */
+    private void downgradeFromCallForegroundService() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Rebuild the background notification and re-start foreground with just dataSync
+                Notification bgNotification = buildBackgroundNotification();
+                int serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
+                startForeground(NOTIFICATION_BG, bgNotification, serviceType);
+                Log.i(TAG, "Foreground service downgraded to dataSync only");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to downgrade foreground service type", e);
+        }
+    }
+    
+    /**
+     * Acquire audio focus to prevent Android from killing audio processing.
+     * Uses USAGE_VOICE_COMMUNICATION so the system treats this like a phone call.
+     */
+    private void acquireAudioFocus() {
+        try {
+            if (hasAudioFocus || audioManager == null) return;
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build();
+                
+                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(audioAttributes)
+                    .setAcceptsDelayedFocusGain(true)
+                    .setOnAudioFocusChangeListener(focusChange -> {
+                        // We don't need to react to focus changes
+                        Log.d(TAG, "Audio focus changed: " + focusChange);
+                    })
+                    .build();
+                
+                int result = audioManager.requestAudioFocus(audioFocusRequest);
+                hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
+                
+                // Also set MODE_IN_COMMUNICATION to keep audio path active
+                audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                
+                Log.i(TAG, "Audio focus " + (hasAudioFocus ? "acquired" : "denied") + " (voice communication mode)");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to acquire audio focus", e);
+        }
+    }
+    
+    /**
+     * Release audio focus when call ends.
+     */
+    private void releaseAudioFocus() {
+        try {
+            if (audioManager != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
+                    audioManager.abandonAudioFocusRequest(audioFocusRequest);
+                    audioFocusRequest = null;
+                }
+                audioManager.setMode(AudioManager.MODE_NORMAL);
+                hasAudioFocus = false;
+                Log.i(TAG, "Audio focus released, mode set to NORMAL");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to release audio focus", e);
+        }
+    }
+    
+    /**
+     * Build the background (non-call) notification.
+     * Used when downgrading from call mode back to normal background mode.
+     */
+    private Notification buildBackgroundNotification() {
+        PendingIntent pendingIntent = getLaunchPendingIntent();
+        return new NotificationCompat.Builder(this, CHANNEL_BG)
+            .setContentTitle("Quick Meet")
+            .setContentText("Connected — ready for calls and messages")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(false)
+            .setOngoing(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build();
     }
     
     /**
@@ -618,6 +763,13 @@ public class BackgroundService extends Service {
     public void onDestroy() {
         Log.i(TAG, "BackgroundService destroyed — will be restarted by START_STICKY");
         stopPolling();
+        
+        // Clean up audio focus if still held
+        if (isInCall) {
+            releaseAudioFocus();
+            isInCall = false;
+        }
+        
         if (wakeLock != null && wakeLock.isHeld()) {
             try {
                 wakeLock.release();
