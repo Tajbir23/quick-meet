@@ -101,4 +101,23 @@ const messageLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-module.exports = { apiLimiter, authLimiter, refreshLimiter, uploadLimiter, messageLimiter };
+/**
+ * Push notification polling rate limiter — generous for background polling.
+ * Android BackgroundService polls every 5 seconds = 180 per 15 min.
+ * Allow 250 per 15 minutes to be safe.
+ */
+const pollingLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 250,
+  message: {
+    success: false,
+    message: 'Too many polling requests, please try again later',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    return req.ip + '|' + (req.headers['user-agent'] || 'unknown').slice(0, 50);
+  },
+});
+
+module.exports = { apiLimiter, authLimiter, refreshLimiter, uploadLimiter, messageLimiter, pollingLimiter };

@@ -11,9 +11,9 @@
 const express = require('express');
 const router = express.Router();
 const { getPendingNotifications, pushHealth } = require('../controllers/pushController');
-const { apiLimiter } = require('../middleware/rateLimiter');
+const { pollingLimiter } = require('../middleware/rateLimiter');
 
-router.use(apiLimiter);
+router.use(pollingLimiter);
 
 // No auth middleware — JWT verified inside the handler (query param)
 router.get('/pending', getPendingNotifications);
