@@ -1,11 +1,11 @@
 {
   "desktop": {
-    "version": "1.0.47",
+    "version": "1.0.48",
     "minVersion": "1.0.0",
     "releaseNotes": "Self-hosted background notifications, Firebase removed",
     "forceUpdate": false,
     "downloadUrl": "https://quickmeet.genuinesoftmart.store/api/updates/download/desktop",
-    "lastUpdated": "2026-02-16T09:57:18.940Z"
+    "lastUpdated": "2026-02-16T10:04:32.319Z"
   },
   "android": {
     "version": "1.0.41",
@@ -16,10 +16,10 @@
     "lastUpdated": "2026-02-16T12:00:00.000Z"
   },
   "web": {
-    "version": "1.0.47",
+    "version": "1.0.48",
     "minVersion": "1.0.0",
     "releaseNotes": "Self-hosted background notifications, Firebase removed",
     "forceUpdate": false,
-    "lastUpdated": "2026-02-16T09:57:18.940Z"
+    "lastUpdated": "2026-02-16T10:04:32.319Z"
   }
 }
