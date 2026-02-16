@@ -1,11 +1,11 @@
 {
   "desktop": {
-    "version": "1.0.39",
+    "version": "1.0.40",
     "minVersion": "1.0.0",
     "releaseNotes": "Call end fix, notification panel improvements",
     "forceUpdate": false,
     "downloadUrl": "https://quickmeet.genuinesoftmart.store/api/updates/download/desktop",
-    "lastUpdated": "2026-02-16T06:35:32.099Z"
+    "lastUpdated": "2026-02-16T06:45:05.846Z"
   },
   "android": {
     "version": "1.0.38",
@@ -16,10 +16,10 @@
     "lastUpdated": "2026-02-16T07:00:00.000Z"
   },
   "web": {
-    "version": "1.0.39",
+    "version": "1.0.40",
     "minVersion": "1.0.0",
     "releaseNotes": "Call end fix, notification panel improvements",
     "forceUpdate": false,
-    "lastUpdated": "2026-02-16T06:35:32.099Z"
+    "lastUpdated": "2026-02-16T06:45:05.846Z"
   }
 }
