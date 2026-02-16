@@ -249,13 +249,24 @@ public class BackgroundService extends Service {
     }
     
     /**
-     * Dismiss the call notification.
-     * Also downgrades the foreground service type and releases audio focus.
+     * Dismiss the call notification (ringing or ongoing).
+     * Does NOT downgrade service — use endCall() for that.
+     * This is called when:
+     * - User taps Answer (notification dismissed, call continues)
+     * - Call notification is replaced by ongoing call notification
      */
     public void dismissCallNotification() {
         notificationManager.cancel(NOTIFICATION_CALL);
+        Log.i(TAG, "Call notification dismissed (UI only)");
+    }
+    
+    /**
+     * End the call — downgrade foreground service and release audio focus.
+     * Called when the call actually ends (not when answering).
+     */
+    public void endCall() {
+        notificationManager.cancel(NOTIFICATION_CALL);
         
-        // Downgrade foreground service type and release audio focus
         if (isInCall) {
             isInCall = false;
             releaseAudioFocus();

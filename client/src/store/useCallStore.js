@@ -18,6 +18,7 @@ import { getSocket } from '../services/socket';
 import { CALL_STATUS } from '../utils/constants';
 import {
   dismissCallNotification,
+  endCall as bgEndCall,
   onCallStarted as bgCallStarted,
   onCallEnded as bgCallEnded,
 } from '../services/backgroundService';
@@ -197,8 +198,8 @@ const useCallStore = create((set, get) => ({
     const { incomingCall } = get();
     if (!incomingCall) return;
 
-    // Dismiss background call notification
-    dismissCallNotification();
+    // End call — dismiss notification + release audio focus + downgrade service
+    bgEndCall();
 
     const socket = getSocket();
     if (socket) {

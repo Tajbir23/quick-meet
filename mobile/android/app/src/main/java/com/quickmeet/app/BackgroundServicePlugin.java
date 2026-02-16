@@ -116,13 +116,25 @@ public class BackgroundServicePlugin extends Plugin {
     }
     
     /**
-     * Dismiss the call notification
+     * Dismiss the call notification (UI only — does NOT end the call)
      */
     @PluginMethod()
     public void dismissCallNotification(PluginCall call) {
         BackgroundService service = BackgroundService.getInstance();
         if (service != null) {
             service.dismissCallNotification();
+        }
+        call.resolve();
+    }
+    
+    /**
+     * End the call — dismiss notification + downgrade service + release audio focus
+     */
+    @PluginMethod()
+    public void endCall(PluginCall call) {
+        BackgroundService service = BackgroundService.getInstance();
+        if (service != null) {
+            service.endCall();
         }
         call.resolve();
     }

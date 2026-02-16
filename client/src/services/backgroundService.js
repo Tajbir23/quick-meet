@@ -305,13 +305,26 @@ export const notifyIncomingCall = async (callerName, callType = 'audio') => {
 };
 
 /**
- * Dismiss the incoming call notification
+ * Dismiss the incoming call notification (UI only — does NOT end the call)
  */
 export const dismissCallNotification = async () => {
   if (!BackgroundServicePlugin) return;
   
   try {
     await BackgroundServicePlugin.dismissCallNotification();
+  } catch (err) {
+    // Silent
+  }
+};
+
+/**
+ * End the call — dismiss notification + downgrade foreground service + release audio focus
+ */
+export const endCall = async () => {
+  if (!BackgroundServicePlugin) return;
+  
+  try {
+    await BackgroundServicePlugin.endCall();
   } catch (err) {
     // Silent
   }
@@ -351,7 +364,7 @@ export const onCallEnded = async () => {
   _currentState.callType = null;
   _currentState.callerName = null;
   
-  await dismissCallNotification();
+  await endCall();
   await updateNotificationForCurrentState();
 };
 
@@ -487,6 +500,7 @@ export default {
   setNotificationActionCallbacks,
   notifyIncomingCall,
   dismissCallNotification,
+  endCall,
   onCallStarted,
   onCallEnded,
   notifyNewMessage,

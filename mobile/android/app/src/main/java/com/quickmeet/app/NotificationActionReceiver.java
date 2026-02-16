@@ -33,17 +33,19 @@ public class NotificationActionReceiver extends BroadcastReceiver {
         switch (action) {
             case ACTION_ANSWER_CALL:
                 // Launch app and signal answer
+                // Only dismiss the notification UI — do NOT end the call/downgrade service
+                // The call is being ANSWERED, not ended
                 launchApp(context, "answer_call");
                 if (service != null) {
-                    service.dismissCallNotification();
+                    service.dismissCallNotification(); // UI only, keeps audio focus
                     service.setPendingAction("answer_call");
                 }
                 break;
 
             case ACTION_DECLINE_CALL:
-                // Signal decline without launching app
+                // Signal decline — actually END the call (downgrade service + release audio)
                 if (service != null) {
-                    service.dismissCallNotification();
+                    service.endCall();
                     service.setPendingAction("decline_call");
                 }
                 break;
