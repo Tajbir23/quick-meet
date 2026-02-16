@@ -906,7 +906,20 @@ class P2PFileTransferService {
         chunkSize: session.chunkSize,
         totalChunks: session.totalChunks,
       });
-      this._sendChunks(session);
+      this._sendChunks(session).catch(err => {
+        console.error(`[P2P] ❌ _sendChunks UNHANDLED ERROR for ${session.transferId}:`, err);
+        this._emitDiag(session, 'send_chunks_crash', {
+          error: err?.message || String(err),
+          stack: err?.stack?.substring(0, 300),
+          chunk: session.currentChunk,
+          status: session.status,
+        });
+        if (session.status === 'transferring') {
+          session.status = 'failed';
+          session._failReason = 'send_chunks_crash';
+          this._notifyUpdate(session.transferId, session);
+        }
+      });
     };
 
     dc.onclose = (ev) => {
@@ -1347,22 +1360,28 @@ class P2PFileTransferService {
       side: 'sender',
       hasFile: !!file,
       fileType: file ? typeof file : 'N/A',
+      fileConstructor: file?.constructor?.name,
       fileName: file?.name,
       fileSize: file?.size,
       hasDataChannel: !!dataChannel,
       dcState: dataChannel?.readyState,
       currentChunk: session.currentChunk,
       totalChunks: session.totalChunks,
+      chunkSize: session.chunkSize,
       isPaused: session.isPaused,
       sessionStatus: session.status,
     });
+    console.log(`[P2P] _sendChunks ENTERED | file=${!!file} dc=${dataChannel?.readyState} chunk=${session.currentChunk}/${session.totalChunks} paused=${session.isPaused} status=${session.status}`);
 
     if (!file || !dataChannel) {
       console.error(`[P2P] ⚠️ _sendChunks early return: file=${!!file} dataChannel=${!!dataChannel}`);
+      this._emitDiag(session, 'send_early_return', { hasFile: !!file, hasDC: !!dataChannel });
       return;
     }
 
+    try {
     // Read chunkSize/totalChunks from session LIVE (may have been adapted by SCTP maxMessageSize)
+    console.log(`[P2P] _sendChunks ENTERING WHILE LOOP | condition: ${session.currentChunk} < ${session.totalChunks} && !${session.isPaused} && ${session.status}==='transferring'`);
     while (session.currentChunk < session.totalChunks && !session.isPaused && session.status === 'transferring') {
       // Backpressure: wait if buffer is too full
       if (dataChannel.bufferedAmount > CONFIG.BUFFER_THRESHOLD) {
@@ -1372,10 +1391,24 @@ class P2PFileTransferService {
 
       const start = session.currentChunk * session.chunkSize;
       const end = Math.min(start + session.chunkSize, file.size);
+
+      // Step-by-step logging for first 3 chunks
+      if (session.currentChunk < 3) {
+        console.log(`[P2P] chunk ${session.currentChunk}: slicing [${start}-${end}] from file size=${file.size}`);
+      }
+
       const slice = file.slice(start, end);
 
       try {
-        const arrayBuffer = await slice.arrayBuffer();
+        // Add timeout to arrayBuffer() — Android WebView can hang on stale File refs
+        const arrayBuffer = await Promise.race([
+          slice.arrayBuffer(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('arrayBuffer() timed out after 10s')), 10000)),
+        ]);
+
+        if (session.currentChunk < 3) {
+          console.log(`[P2P] chunk ${session.currentChunk}: arrayBuffer OK, ${arrayBuffer.byteLength} bytes`);
+        }
         
         // Create header: [chunkIndex (4 bytes)] + [data]
         const header = new ArrayBuffer(4);
@@ -1470,6 +1503,11 @@ class P2PFileTransferService {
         }
       } catch (err) {
         console.error(`[P2P] ❌ Error processing chunk ${session.currentChunk}:`, err);
+        this._emitDiag(session, 'chunk_processing_error', {
+          chunk: session.currentChunk,
+          error: err?.message || String(err),
+          dcState: dataChannel.readyState,
+        });
         session.status = 'failed';
         session._failReason = 'chunk_error';
         this._notifyUpdate(session.transferId, session);
@@ -1477,8 +1515,10 @@ class P2PFileTransferService {
       }
     }
 
+    console.log(`[P2P] _sendChunks WHILE LOOP EXITED | chunk=${session.currentChunk}/${session.totalChunks} paused=${session.isPaused} status=${session.status}`);
+
     // Check if complete
-    if (session.currentChunk >= totalChunks && session.status === 'transferring') {
+    if (session.currentChunk >= session.totalChunks && session.status === 'transferring') {
       // Send completion marker
       const completeMarker = new ArrayBuffer(4);
       new DataView(completeMarker).setUint32(0, 0xFFFFFFFF, true); // special marker
@@ -1501,15 +1541,43 @@ class P2PFileTransferService {
         this.onTransferComplete(session.transferId);
       }
     }
+    } catch (outerErr) {
+      console.error(`[P2P] ❌ _sendChunks OUTER CATCH for ${session.transferId}:`, outerErr);
+      this._emitDiag(session, 'send_chunks_outer_error', {
+        error: outerErr?.message || String(outerErr),
+        stack: outerErr?.stack?.substring(0, 300),
+        chunk: session.currentChunk,
+        status: session.status,
+      });
+      if (session.status === 'transferring') {
+        session.status = 'failed';
+        session._failReason = 'send_chunks_outer_error';
+        this._notifyUpdate(session.transferId, session);
+      }
+    }
   }
 
   /**
    * Wait for DataChannel buffer to drain (backpressure)
    */
+
   _waitForBufferDrain(dataChannel) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      // Safety timeout: don't wait more than 30 seconds for buffer drain
+      const safetyTimeout = setTimeout(() => {
+        console.warn(`[P2P] ⚠️ _waitForBufferDrain timed out after 30s | dcState=${dataChannel?.readyState} buffered=${dataChannel?.bufferedAmount}`);
+        resolve(); // resolve anyway so the while loop can continue & check dcState
+      }, 30000);
+
       const check = () => {
+        // If DC closed, resolve immediately — the while loop will exit
+        if (dataChannel.readyState !== 'open') {
+          clearTimeout(safetyTimeout);
+          resolve();
+          return;
+        }
         if (dataChannel.bufferedAmount <= CONFIG.BUFFER_THRESHOLD / 2) {
+          clearTimeout(safetyTimeout);
           resolve();
         } else {
           // Use bufferedamountlow event if available, otherwise poll
@@ -1517,6 +1585,7 @@ class P2PFileTransferService {
             dataChannel.bufferedAmountLowThreshold = CONFIG.BUFFER_THRESHOLD / 2;
             dataChannel.onbufferedamountlow = () => {
               dataChannel.onbufferedamountlow = null;
+              clearTimeout(safetyTimeout);
               resolve();
             };
           } else {

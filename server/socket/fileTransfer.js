@@ -47,7 +47,13 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
     } else if (evt === 'first_chunk_received') {
       extra = ` | chunkIdx=${data.chunkIndex} | size=${data.chunkSize}`;
     } else if (evt === 'send_start') {
-      extra = ` | hasFile=${data.hasFile} | fileType=${data.fileType} | fileName=${data.fileName} | fileSize=${data.fileSize} | hasDC=${data.hasDataChannel} | dcState=${data.dcState} | chunk=${data.currentChunk}/${data.totalChunks} | paused=${data.isPaused} | sessStatus=${data.sessionStatus}`;
+      extra = ` | hasFile=${data.hasFile} | fileType=${data.fileType} | constr=${data.fileConstructor} | fileName=${data.fileName} | fileSize=${data.fileSize} | hasDC=${data.hasDataChannel} | dcState=${data.dcState} | chunk=${data.currentChunk}/${data.totalChunks} | chunkSize=${data.chunkSize} | paused=${data.isPaused} | sessStatus=${data.sessionStatus}`;
+    } else if (evt === 'send_early_return') {
+      extra = ` | hasFile=${data.hasFile} | hasDC=${data.hasDC}`;
+    } else if (evt === 'send_chunks_crash' || evt === 'send_chunks_outer_error') {
+      extra = ` | error=${data.error} | chunk=${data.chunk} | status=${data.status} | stack=${(data.stack || '').substring(0, 150)}`;
+    } else if (evt === 'chunk_processing_error') {
+      extra = ` | chunk=${data.chunk} | error=${data.error} | dcState=${data.dcState}`;
     }
     console.log(`[FT DIAG] ${evt} | ${side} | ...${tid} | status=${data.status} | dc=${data.dc} | ice=${data.ice}${extra}`);
   });
