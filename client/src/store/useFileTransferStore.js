@@ -81,11 +81,9 @@ const useFileTransferStore = create((set, get) => ({
       if (autoAccept && (autoAccept === true || autoAccept === data.transferId)) {
         console.log(`[FileTransferStore] Auto-accepting transfer: ${data.transferId}`);
         set({ autoAcceptTransferId: null });
-        // Small delay to ensure socket is ready
-        setTimeout(() => {
-          p2pFileTransfer.acceptTransfer(data);
-          dismissTransferNotification();
-        }, 500);
+        // Accept immediately — socket is connected (we just received this via socket)
+        p2pFileTransfer.acceptTransfer(data);
+        dismissTransferNotification();
         return;
       }
       

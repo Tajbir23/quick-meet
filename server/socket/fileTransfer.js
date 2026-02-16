@@ -166,6 +166,12 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
 
       console.log(`[FT ACCEPT] Transfer found | sender=${transfer.sender} | receiver=${transfer.receiver} | status=${transfer.status}`);
 
+      // If already accepted, treat as idempotent — don't error
+      if (transfer.status === 'accepted') {
+        console.log(`[FT ACCEPT] Transfer already accepted — idempotent, ignoring duplicate`);
+        return;
+      }
+
       if (transfer.status !== 'pending' && transfer.status !== 'paused') {
         console.warn(`[FT ACCEPT] ⚠️ Cannot accept — wrong status: ${transfer.status}`);
         socket.emit('file-transfer:error', { transferId, message: `Cannot accept: status is ${transfer.status}` });

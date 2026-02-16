@@ -500,6 +500,11 @@ class P2PFileTransferService {
       console.error(`[P2P] ❌ Server error for transfer ${data.transferId}: ${data.message}`);
       const session = this.sessions.get(data.transferId);
       if (session) {
+        // Don't kill an active/successful session due to a stale duplicate accept error
+        if (['transferring', 'completed'].includes(session.status)) {
+          console.log(`[P2P] Ignoring server error for active session ${data.transferId} (status=${session.status})`);
+          return;
+        }
         session.status = 'failed';
         session.error = data.message;
         session.destroy();
@@ -642,6 +647,13 @@ class P2PFileTransferService {
       isResume,
       fileHash,
     } = transferData;
+
+    // Guard: skip if session already exists and is active (duplicate accept race)
+    const existingSession = this.sessions.get(transferId);
+    if (existingSession && ['connecting', 'transferring', 'completed'].includes(existingSession.status)) {
+      console.log(`[P2P] acceptTransfer: session already active for ${transferId} (status=${existingSession.status}) — skipping duplicate`);
+      return transferId;
+    }
 
     const session = new TransferSession({
       transferId,
