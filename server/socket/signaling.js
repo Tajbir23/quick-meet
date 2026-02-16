@@ -86,6 +86,9 @@ function deliverPendingCall(io, socket, userId) {
 
   console.log(`📞 Delivering pending call: ${pending.callerName} → ${userId}`);
 
+  // Clear any stale native call notifications (offer will be delivered via socket now)
+  clearPendingCallNotifications(userId);
+
   // Deliver the call offer to the newly connected user
   socket.emit('call:offer', {
     callerId: pending.callerId,
@@ -298,6 +301,36 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
       });
     }
 
+    // ALSO store as pending call so the offer can be RE-DELIVERED
+    // if the socket drops while app is backgrounded.
+    // When WebView is paused, Socket.io can't respond to pings
+    // → server disconnects after ~25s → user's socket is gone.
+    // When user taps Answer and app resumes, socket reconnects
+    // → deliverPendingCall() re-delivers the stored offer.
+    if (!isReconnect) {
+      const existing = pendingCalls.get(targetUserId);
+      if (existing) clearTimeout(existing.timeout);
+
+      const timeoutId = setTimeout(() => {
+        const pending = pendingCalls.get(targetUserId);
+        if (pending && pending.callerId === socket.userId) {
+          pendingCalls.delete(targetUserId);
+          clearPendingCallNotifications(targetUserId);
+          console.log(`📞 Pending call expired (was online): ${socket.username} → ${targetUserId} (30s timeout)`);
+        }
+      }, PENDING_CALL_TIMEOUT);
+
+      pendingCalls.set(targetUserId, {
+        callerId: socket.userId,
+        callerSocketId: socket.id,
+        offer,
+        callType: callType || 'audio',
+        callerName: socket.username,
+        timeout: timeoutId,
+        createdAt: Date.now(),
+      });
+    }
+
     io.to(targetSocketId).emit('call:offer', {
       callerId: socket.userId,
       callerName: socket.username,
@@ -312,8 +345,14 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
    * SECURITY: SDP sanitized
    */
   socket.on('call:answer', ({ callerId, answer }) => {
-    // Clear pending call notifications for the answerer (they answered, no need for native notification)
+    // Clear pending call notifications AND pending call offer for the answerer
+    // (they answered — no need for native notification or re-delivery)
     clearPendingCallNotifications(socket.userId);
+    const pendingForAnswerer = pendingCalls.get(socket.userId);
+    if (pendingForAnswerer) {
+      clearTimeout(pendingForAnswerer.timeout);
+      pendingCalls.delete(socket.userId);
+    }
 
     // Sanitize SDP answer
     if (answer && answer.sdp) {
