@@ -481,13 +481,32 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
       const isSender = transfer.sender.toString() === socket.userId;
       const isReceiver = transfer.receiver.toString() === socket.userId;
 
-      // ONLY the receiver should emit resume. The sender needs the file
-      // in memory — if sender app restarted, they can't resume.
+      // Sender is trying to resume — they still have the file in memory
+      // (auto-resume from background). Need to notify receiver to set up their side.
       if (isSender) {
-        // Sender is trying to resume — check if they actually have a live
-        // session. Since we can't verify client state from server, just
-        // send resume-info back. Do NOT send resume-request to receiver
-        // (that would cause the accept-loop).
+        const receiverSocketId = onlineUsers.get(transfer.receiver.toString());
+        const peerOnline = !!receiverSocketId;
+
+        if (peerOnline) {
+          // Update status to accepted — sender has file, receiver is online
+          transfer.status = 'accepted';
+          transfer.pausedAt = null;
+          await transfer.save();
+
+          // Tell receiver to set up their side (shows as resume-request)
+          io.to(receiverSocketId).emit('file-transfer:resume-request', {
+            transferId,
+            requestedBy: socket.userId,
+            requestedByName: socket.username,
+            fileName: transfer.fileName,
+            fileSize: transfer.fileSize,
+            totalChunks: transfer.totalChunks,
+            chunkSize: transfer.chunkSize,
+            resumeFrom: transfer.lastReceivedChunk + 1,
+            fileHash: transfer.fileHash || null,
+          });
+        }
+
         socket.emit('file-transfer:resume-info', {
           transferId,
           resumeFrom: transfer.lastReceivedChunk + 1,
@@ -495,10 +514,10 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
           fileName: transfer.fileName,
           fileSize: transfer.fileSize,
           chunkSize: transfer.chunkSize,
-          peerOnline: !!onlineUsers.get(transfer.receiver.toString()),
+          peerOnline,
           role: 'sender',
         });
-        console.log(`📁 File transfer resume (sender): ${transferId} from chunk ${transfer.lastReceivedChunk + 1}`);
+        console.log(`📁 File transfer resume (sender): ${transferId} from chunk ${transfer.lastReceivedChunk + 1} | receiverOnline=${peerOnline}`);
         return;
       }
 
@@ -659,20 +678,45 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
         return;
       }
 
-      // Cancel ACTIVE transfers (transferring/accepted) for either role
-      const activeResult = await FileTransfer.updateMany(
-        {
-          $or: [{ sender: socket.userId }, { receiver: socket.userId }],
-          status: { $in: ['transferring', 'accepted'] },
-        },
-        {
-          $set: {
-            status: 'cancelled',
-            pausedAt: new Date(),
-            statusReason: 'Peer disconnected',
+      // PAUSE active transfers (NOT cancel!) so they can be resumed.
+      // P2P DataChannel dies on disconnect, but both sides can re-establish
+      // when the disconnected user comes back online.
+      const activeTransfers = await FileTransfer.find({
+        $or: [{ sender: socket.userId }, { receiver: socket.userId }],
+        status: { $in: ['transferring', 'accepted'] },
+      }).lean();
+
+      if (activeTransfers.length > 0) {
+        await FileTransfer.updateMany(
+          {
+            _id: { $in: activeTransfers.map(t => t._id) },
           },
+          {
+            $set: {
+              status: 'paused',
+              pausedAt: new Date(),
+              statusReason: 'Peer disconnected — will resume on reconnect',
+            },
+          }
+        );
+
+        // Notify the ONLINE peer that transfer is paused (so their UI updates)
+        for (const t of activeTransfers) {
+          const isSender = t.sender.toString() === socket.userId;
+          const otherUserId = isSender ? t.receiver.toString() : t.sender.toString();
+          const otherSocketId = onlineUsers.get(otherUserId);
+          if (otherSocketId) {
+            io.to(otherSocketId).emit('file-transfer:paused', {
+              transferId: t.transferId,
+              pausedBy: socket.userId,
+              pausedByName: socket.username,
+              reason: 'peer_disconnected',
+            });
+          }
         }
-      );
+
+        console.log(`📁 Paused ${activeTransfers.length} active transfers for disconnected user ${socket.username} (resumable)`);
+      }
 
       // Cancel PENDING transfers only when SENDER disconnects.
       // The file lives in sender's memory — if sender leaves, it's gone.
@@ -692,9 +736,8 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
         }
       );
 
-      const total = activeResult.modifiedCount + pendingSenderResult.modifiedCount;
-      if (total > 0) {
-        console.log(`📁 Cancelled ${total} transfers for disconnected user ${socket.username} (active: ${activeResult.modifiedCount}, pending-sender: ${pendingSenderResult.modifiedCount})`);
+      if (pendingSenderResult.modifiedCount > 0) {
+        console.log(`📁 Cancelled ${pendingSenderResult.modifiedCount} pending sender transfers for ${socket.username}`);
       }
     } catch (err) {
       // Log but never crash — this is non-critical cleanup

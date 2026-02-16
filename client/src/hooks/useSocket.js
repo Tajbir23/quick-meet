@@ -327,6 +327,11 @@ const useSocket = () => {
         p2pFileTransfer.ensureListeners();
         // Re-check for pending transfers on reconnect
         p2pFileTransfer.checkPendingTransfers();
+        // Auto-resume any in-memory paused sessions (coming back from background)
+        // Small delay to ensure socket is fully ready and server has processed reconnect
+        setTimeout(() => {
+          p2pFileTransfer.autoResumePausedSessions();
+        }, 1500);
       }
 
       // Re-join all group rooms

@@ -304,12 +304,26 @@ class P2PFileTransferService {
       console.log(`[P2P DEBUG] 📨 file-transfer:accepted received | transferId=${data.transferId} | receiverId=${data.receiverId} | lastReceivedChunk=${data.lastReceivedChunk}`);
       const session = this.sessions.get(data.transferId);
       if (session && !session.isReceiver) {
+        // Guard: skip if already connecting or actively transferring (duplicate accepted)
+        if (['connecting', 'transferring'].includes(session.status) && session.peerConnection && session.dataChannel) {
+          console.log(`[P2P] Ignoring duplicate file-transfer:accepted for ${data.transferId} (status=${session.status})`);
+          return;
+        }
         // We are the sender, receiver accepted → setup DataChannel
         // CRITICAL: Reset isPaused — it may have been set to true by peer-offline
         // when the receiver was in background. Now they're clearly online (they accepted).
         session.isPaused = false;
         session.currentChunk = data.lastReceivedChunk >= 0 ? data.lastReceivedChunk + 1 : 0;
         session.bytesTransferred = session.currentChunk * session.chunkSize;
+        // Clean up old WebRTC connection if resuming from paused state
+        if (session.peerConnection) {
+          try { session.peerConnection.close(); } catch (e) {}
+          session.peerConnection = null;
+        }
+        if (session.dataChannel) {
+          try { session.dataChannel.close(); } catch (e) {}
+          session.dataChannel = null;
+        }
         await this._setupSenderConnection(session);
       } else {
         console.warn(`[P2P DEBUG] ⚠️ file-transfer:accepted — session not found or wrong role | transferId=${data.transferId} | found=${!!session} | isReceiver=${session?.isReceiver}`);
@@ -446,6 +460,15 @@ class P2PFileTransferService {
       console.log(`[P2P DEBUG] 📨 file-transfer:offer received | transferId=${data.transferId} | senderId=${data.senderId}`);
       const session = this.sessions.get(data.transferId);
       if (session && session.isReceiver) {
+        // Clean up old WebRTC connection before creating new one (resume scenario)
+        if (session.peerConnection) {
+          try { session.peerConnection.close(); } catch (e) {}
+          session.peerConnection = null;
+        }
+        if (session.dataChannel) {
+          try { session.dataChannel.close(); } catch (e) {}
+          session.dataChannel = null;
+        }
         await this._handleReceiverOffer(session, data.offer, data.senderId);
       } else {
         console.warn(`[P2P DEBUG] ⚠️ file-transfer:offer — no matching receiver session | transferId=${data.transferId} | found=${!!session} | isReceiver=${session?.isReceiver}`);
@@ -503,8 +526,8 @@ class P2PFileTransferService {
       console.error(`[P2P] ❌ Server error for transfer ${data.transferId}: ${data.message}`);
       const session = this.sessions.get(data.transferId);
       if (session) {
-        // Don't kill an active/successful session due to a stale duplicate accept error
-        if (['transferring', 'completed'].includes(session.status)) {
+        // Don't kill an active/successful/resuming session due to a stale error
+        if (['transferring', 'completed', 'connecting'].includes(session.status)) {
           console.log(`[P2P] Ignoring server error for active session ${data.transferId} (status=${session.status})`);
           return;
         }
@@ -756,6 +779,67 @@ class P2PFileTransferService {
     const socket = getSocket();
     if (socket) {
       socket.emit('file-transfer:check-pending');
+    }
+  }
+
+  /**
+   * Auto-resume paused in-memory sessions after coming back from background.
+   * Called on socket reconnect — scans local sessions for 'paused' status
+   * and attempts to resume any that still have the file in memory (sender)
+   * or can be re-established (receiver).
+   */
+  autoResumePausedSessions() {
+    const socket = getSocket();
+    if (!socket) return;
+
+    let resumeCount = 0;
+    for (const [transferId, session] of this.sessions) {
+      if (session.status !== 'paused') continue;
+
+      // Sender: can only resume if file is still in memory
+      if (!session.isReceiver) {
+        if (!session.file) {
+          console.log(`[P2P] autoResume: skipping sender session ${transferId} — file lost`);
+          continue;
+        }
+        console.log(`[P2P] autoResume: resuming SENDER session ${transferId} from chunk ${session.currentChunk}/${session.totalChunks}`);
+        session.isPaused = false;
+        // Clean up old peer connection
+        if (session.peerConnection) {
+          try { session.peerConnection.close(); } catch (e) {}
+          session.peerConnection = null;
+        }
+        if (session.dataChannel) {
+          try { session.dataChannel.close(); } catch (e) {}
+          session.dataChannel = null;
+        }
+        session.status = 'connecting';
+        this._notifyUpdate(transferId, session);
+        // Tell server we want to resume — server will notify the receiver
+        socket.emit('file-transfer:resume', { transferId });
+        resumeCount++;
+      } else {
+        // Receiver: tell server we want to resume
+        console.log(`[P2P] autoResume: resuming RECEIVER session ${transferId} from chunk ${session.currentChunk}`);
+        session.isPaused = false;
+        // Clean up old connection
+        if (session.peerConnection) {
+          try { session.peerConnection.close(); } catch (e) {}
+          session.peerConnection = null;
+        }
+        if (session.dataChannel) {
+          try { session.dataChannel.close(); } catch (e) {}
+          session.dataChannel = null;
+        }
+        session.status = 'connecting';
+        this._notifyUpdate(transferId, session);
+        socket.emit('file-transfer:resume', { transferId });
+        resumeCount++;
+      }
+    }
+
+    if (resumeCount > 0) {
+      console.log(`[P2P] autoResume: initiated resume for ${resumeCount} paused sessions`);
     }
   }
 
