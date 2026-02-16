@@ -56,6 +56,14 @@ const userSchema = new mongoose.Schema({
     default: null,
   },
 
+  // FCM push notification tokens (one per device)
+  fcmTokens: [{
+    token: { type: String, required: true },
+    deviceId: { type: String, default: '' },
+    platform: { type: String, enum: ['android', 'ios', 'web'], default: 'android' },
+    updatedAt: { type: Date, default: Date.now },
+  }],
+
   // ─── ROLE & BLOCKING ─────────────────────────────────
   // Only ONE user can have 'owner' role (set directly in DB)
   role: {

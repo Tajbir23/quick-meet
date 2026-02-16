@@ -4,6 +4,7 @@ import { RefreshCw } from 'lucide-react';
 import useAuthStore from './store/useAuthStore';
 import { onForceLogout } from './services/socket';
 import { initBackgroundService, stopService as stopBgService, setNotificationActionCallbacks } from './services/backgroundService';
+import { initPushNotifications, unregisterPushNotifications } from './services/pushNotifications';
 import useCallStore from './store/useCallStore';
 import useFileTransferStore from './store/useFileTransferStore';
 import LoginPage from './pages/LoginPage';
@@ -40,6 +41,7 @@ function App() {
   useEffect(() => {
     if (isAuthenticated) {
       initBackgroundService();
+      initPushNotifications(); // Register FCM push notifications
 
       // Wire notification action buttons to store actions
       setNotificationActionCallbacks({
@@ -73,6 +75,7 @@ function App() {
       });
     } else {
       stopBgService();
+      unregisterPushNotifications(); // Remove FCM token on logout
     }
   }, [isAuthenticated]);
 

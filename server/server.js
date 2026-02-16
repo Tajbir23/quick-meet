@@ -54,6 +54,7 @@ const { SEVERITY } = require('./security/SecurityEventLogger');
 const connectDB = require('./config/db');
 const getSSLOptions = require('./config/ssl');
 const initializeSocket = require('./config/socket');
+const { initializeFirebase } = require('./config/firebase');
 
 // Routes
 const authRoutes = require('./routes/auth');
@@ -65,6 +66,7 @@ const ownerRoutes = require('./routes/owner');
 const fileTransferRoutes = require('./routes/fileTransfer');
 const updateRoutes = require('./routes/update');
 const webhookRoutes = require('./routes/webhook');
+const pushRoutes = require('./routes/push');
 
 // Socket handlers
 const registerSocketHandlers = require('./socket');
@@ -203,6 +205,7 @@ app.use('/api/files', fileRoutes);
 app.use('/api/owner', ownerRoutes);
 app.use('/api/transfers', fileTransferRoutes);
 app.use('/api/updates', updateRoutes);
+app.use('/api/push', pushRoutes);
 
 // GitHub Webhook — auto-deploy on push
 // NOTE: This route handles its own body parsing (raw) for HMAC verification
@@ -250,6 +253,9 @@ const startServer = async () => {
 
     // 1. Connect to MongoDB
     await connectDB();
+
+    // 1.5. Initialize Firebase Admin SDK (for push notifications)
+    initializeFirebase();
 
     // 2. Load SSL certificates (auto-generates if missing)
     const sslOptions = await getSSLOptions();

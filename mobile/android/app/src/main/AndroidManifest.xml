@@ -34,6 +34,15 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Firebase Cloud Messaging Service — handles push when app is killed -->
+        <service
+            android:name=".QuickMeetMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <!-- Boot Receiver: auto-start service when device boots -->
         <receiver
             android:name=".BootReceiver"

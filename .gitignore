@@ -6,6 +6,9 @@ node_modules/
 .env.local
 .env.production
 
+# Firebase service account (sensitive — never commit)
+server/firebase-service-account.json
+
 # Build output
 client/dist/
 client/build/

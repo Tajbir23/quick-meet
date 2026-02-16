@@ -13,6 +13,7 @@
  */
 
 const { socketGuard, securityLogger } = require('../security');
+const { sendPushToUser } = require('../controllers/pushController');
 
 const MAX_MESSAGE_PAYLOAD = 10000; // 10KB max for socket message payloads
 
@@ -21,8 +22,9 @@ const setupChatHandlers = (io, socket, onlineUsers) => {
 
   /**
    * 1-to-1 message delivery — GUARDED
+   * Falls back to FCM push notification if receiver is offline
    */
-  socket.on('message:send', guard.wrapHandler(socket, 'message:send', ({ message, receiverId }) => {
+  socket.on('message:send', guard.wrapHandler(socket, 'message:send', async ({ message, receiverId }) => {
     // Validate payload
     if (!message || !receiverId) return;
     if (typeof receiverId !== 'string' || receiverId.length > 30) return;
@@ -39,6 +41,26 @@ const setupChatHandlers = (io, socket, onlineUsers) => {
         senderId: socket.userId,
         senderName: socket.username,
       });
+    } else {
+      // User offline — send FCM push notification
+      const msgContent = typeof message === 'object'
+        ? (message.content || message.text || 'New message')
+        : String(message);
+      const msgType = typeof message === 'object' ? (message.type || 'text') : 'text';
+      const preview = msgType === 'text'
+        ? (msgContent.length > 100 ? msgContent.substring(0, 100) + '...' : msgContent)
+        : (msgType === 'image' ? '📷 Photo' : msgType === 'file' ? '📎 File' : '💬 Message');
+
+      sendPushToUser(receiverId, {
+        title: socket.username,
+        body: preview,
+        data: {
+          type: 'message',
+          senderId: socket.userId,
+          senderName: socket.username,
+          messageId: message?._id || '',
+        },
+      }).catch(err => console.warn('FCM message push failed:', err.message));
     }
   }));
 
