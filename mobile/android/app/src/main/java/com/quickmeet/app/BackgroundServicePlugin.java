@@ -197,6 +197,32 @@ public class BackgroundServicePlugin extends Plugin {
     }
     
     /**
+     * Set the JWT auth token for native HTTP polling
+     * Called from JS when user logs in or token refreshes
+     */
+    @PluginMethod()
+    public void setAuthToken(PluginCall call) {
+        String token = call.getString("token", null);
+        String serverUrl = call.getString("serverUrl", null);
+        
+        BackgroundService service = BackgroundService.getInstance();
+        if (service != null) {
+            service.setAuthToken(token, serverUrl);
+        } else {
+            // Save to SharedPreferences directly if service not running yet
+            android.content.SharedPreferences prefs = getContext()
+                .getSharedPreferences("QuickMeetPrefs", android.content.Context.MODE_PRIVATE);
+            android.content.SharedPreferences.Editor editor = prefs.edit();
+            if (token != null) editor.putString("auth_token", token);
+            if (serverUrl != null) editor.putString("server_url", serverUrl);
+            editor.apply();
+        }
+        
+        Log.i(TAG, "Auth token " + (token != null ? "set" : "cleared") + " for polling");
+        call.resolve();
+    }
+    
+    /**
      * Get and consume pending action from notification button presses
      * Returns: { action: "answer_call" | "decline_call" | "accept_transfer" | "reject_transfer" | null }
      */

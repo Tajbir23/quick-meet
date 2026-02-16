@@ -62,6 +62,9 @@ export const initBackgroundService = async () => {
     // Start the foreground service
     await startService();
     
+    // Pass JWT token to native service for HTTP polling
+    await passAuthTokenToNative();
+    
     // Request battery optimization bypass (shows system dialog once)
     await requestBatteryOptimization();
     
@@ -79,6 +82,27 @@ export const initBackgroundService = async () => {
     console.log('[BackgroundService] Initialized successfully');
   } catch (err) {
     console.warn('[BackgroundService] Init failed (non-fatal):', err.message);
+  }
+};
+
+/**
+ * Pass JWT auth token to native BackgroundService for HTTP polling.
+ * The native service polls /api/push/pending every 5 seconds
+ * to receive notifications even when WebView JS is suspended.
+ */
+export const passAuthTokenToNative = async () => {
+  if (!BackgroundServicePlugin) return;
+  
+  try {
+    const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
+    const serverUrl = import.meta.env.VITE_SERVER_URL || 'https://quickmeet.genuinesoftmart.store';
+    
+    if (token) {
+      await BackgroundServicePlugin.setAuthToken({ token, serverUrl });
+      console.log('[BackgroundService] Auth token passed to native polling');
+    }
+  } catch (err) {
+    console.warn('[BackgroundService] setAuthToken failed:', err.message);
   }
 };
 

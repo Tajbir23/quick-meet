@@ -1,20 +1,22 @@
 /**
- * Push Notification Routes
+ * Push Notification Routes — Self-Hosted (No Firebase)
  * 
- * POST /api/push/register   — Register FCM token
- * POST /api/push/unregister — Remove FCM token
+ * GET /api/push/pending  — Polled by Android BackgroundService (native HTTP)
+ * GET /api/push/health   — Health check for polling service
+ * 
+ * NOTE: /pending uses JWT from query param (not middleware),
+ * because it's called from native Java HttpURLConnection.
  */
 
 const express = require('express');
 const router = express.Router();
-const { registerToken, unregisterToken } = require('../controllers/pushController');
-const { protect } = require('../middleware/auth');
+const { getPendingNotifications, pushHealth } = require('../controllers/pushController');
 const { apiLimiter } = require('../middleware/rateLimiter');
 
-router.use(protect);
 router.use(apiLimiter);
 
-router.post('/register', registerToken);
-router.post('/unregister', unregisterToken);
+// No auth middleware — JWT verified inside the handler (query param)
+router.get('/pending', getPendingNotifications);
+router.get('/health', pushHealth);
 
 module.exports = router;

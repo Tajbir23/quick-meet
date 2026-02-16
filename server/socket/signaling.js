@@ -45,7 +45,7 @@ const socketGuard = require('../security/SocketGuard');
 const securityLogger = require('../security/SecurityEventLogger');
 const { SEVERITY } = require('../security/SecurityEventLogger');
 const Message = require('../models/Message');
-const { sendPushToUser } = require('../controllers/pushController');
+const { storePendingNotification } = require('../controllers/pushController');
 
 /**
  * Helper: Create a call log message in DB and emit to both users in real-time.
@@ -152,17 +152,17 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
     const targetSocketId = onlineUsers.get(targetUserId);
 
     if (!targetSocketId) {
-      // User is offline — send FCM push notification for incoming call
-      sendPushToUser(targetUserId, {
+      // User is offline — store pending notification for native polling
+      storePendingNotification(targetUserId, {
+        type: 'call',
         title: `${socket.username} is calling...`,
         body: `Incoming ${callType || 'audio'} call`,
         data: {
-          type: 'call',
           callType: callType || 'audio',
           callerId: socket.userId,
           callerName: socket.username,
         },
-      }).catch(err => console.warn('FCM call push failed:', err.message));
+      });
 
       socket.emit('call:user-offline', {
         targetUserId,

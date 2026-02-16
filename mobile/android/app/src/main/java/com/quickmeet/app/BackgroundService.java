@@ -7,12 +7,29 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Build;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+import java.security.cert.X509Certificate;
 
 /**
  * Foreground Service for Quick Meet
@@ -21,6 +38,8 @@ import androidx.core.app.NotificationCompat;
  * - Socket.io connection stays active (incoming calls, messages)
  * - File transfers continue when app is backgrounded
  * - WebView JS execution is not suspended by Android
+ * - **NEW**: Polls server for pending notifications every 5 seconds
+ *   using native HTTP (works even when WebView JS is suspended)
  * 
  * Shows a persistent notification in the notification bar.
  * Like Messenger — always connected even when app is not open.
@@ -47,12 +66,23 @@ public class BackgroundService extends Service {
     private static final int RC_ACCEPT_TRANSFER = 3;
     private static final int RC_REJECT_TRANSFER = 4;
     
+    // Polling config
+    private static final long POLL_INTERVAL_MS = 5000; // 5 seconds
+    private static final String PREFS_NAME = "QuickMeetPrefs";
+    private static final String PREF_AUTH_TOKEN = "auth_token";
+    private static final String PREF_SERVER_URL = "server_url";
+    
     private PowerManager.WakeLock wakeLock;
     private static BackgroundService instance;
     private NotificationManager notificationManager;
     
     // Queue for pending notification actions (answer_call, decline_call, etc.)
     private volatile String pendingAction = null;
+    
+    // Polling thread
+    private HandlerThread pollingThread;
+    private Handler pollingHandler;
+    private boolean isPolling = false;
     
     @Override
     public void onCreate() {
@@ -61,6 +91,7 @@ public class BackgroundService extends Service {
         notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         createNotificationChannels();
         acquireWakeLock();
+        startPolling();
         Log.i(TAG, "BackgroundService created");
     }
     
@@ -426,9 +457,167 @@ public class BackgroundService extends Service {
         );
     }
     
+    /**
+     * Start native HTTP polling for pending notifications.
+     * Runs on a separate HandlerThread so it doesn't block the main thread.
+     * Polls /api/push/pending?token=JWT every 5 seconds.
+     */
+    private void startPolling() {
+        if (isPolling) return;
+        isPolling = true;
+        
+        pollingThread = new HandlerThread("QM-PollingThread");
+        pollingThread.start();
+        pollingHandler = new Handler(pollingThread.getLooper());
+        
+        pollingHandler.post(pollRunnable);
+        Log.i(TAG, "Notification polling started (every " + POLL_INTERVAL_MS + "ms)");
+    }
+    
+    private final Runnable pollRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!isPolling) return;
+            try {
+                pollPendingNotifications();
+            } catch (Exception e) {
+                Log.w(TAG, "Poll error: " + e.getMessage());
+            }
+            if (isPolling && pollingHandler != null) {
+                pollingHandler.postDelayed(this, POLL_INTERVAL_MS);
+            }
+        }
+    };
+    
+    /**
+     * Stop the polling thread
+     */
+    private void stopPolling() {
+        isPolling = false;
+        if (pollingHandler != null) {
+            pollingHandler.removeCallbacksAndMessages(null);
+            pollingHandler = null;
+        }
+        if (pollingThread != null) {
+            pollingThread.quitSafely();
+            pollingThread = null;
+        }
+        Log.i(TAG, "Notification polling stopped");
+    }
+    
+    /**
+     * Poll the server for pending notifications via native HTTP.
+     * This works even when WebView JS is suspended by Android.
+     */
+    private void pollPendingNotifications() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String token = prefs.getString(PREF_AUTH_TOKEN, null);
+        String serverUrl = prefs.getString(PREF_SERVER_URL, null);
+        
+        if (token == null || serverUrl == null) {
+            return; // Not logged in yet, skip
+        }
+        
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(serverUrl + "/api/push/pending?token=" + token);
+            
+            // Trust all certs (self-signed SSL on VPS)
+            if (url.getProtocol().equals("https")) {
+                HttpsURLConnection httpsConn = (HttpsURLConnection) url.openConnection();
+                SSLContext sslContext = SSLContext.getInstance("TLS");
+                sslContext.init(null, new TrustManager[]{new X509TrustManager() {
+                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                    public void checkClientTrusted(X509Certificate[] chain, String authType) {}
+                    public void checkServerTrusted(X509Certificate[] chain, String authType) {}
+                }}, new java.security.SecureRandom());
+                httpsConn.setSSLSocketFactory(sslContext.getSocketFactory());
+                httpsConn.setHostnameVerifier((hostname, session) -> true);
+                conn = httpsConn;
+            } else {
+                conn = (HttpURLConnection) url.openConnection();
+            }
+            
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
+            conn.setRequestProperty("Accept", "application/json");
+            
+            int responseCode = conn.getResponseCode();
+            if (responseCode != 200) {
+                return;
+            }
+            
+            // Read response
+            BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            reader.close();
+            
+            JSONObject response = new JSONObject(sb.toString());
+            int count = response.optInt("count", 0);
+            if (count == 0) return;
+            
+            JSONArray notifications = response.optJSONArray("notifications");
+            if (notifications == null) return;
+            
+            Log.i(TAG, "Polled " + count + " pending notification(s)");
+            
+            for (int i = 0; i < notifications.length(); i++) {
+                JSONObject notif = notifications.getJSONObject(i);
+                String type = notif.optString("type", "message");
+                String title = notif.optString("title", "Quick Meet");
+                String body = notif.optString("body", "");
+                
+                switch (type) {
+                    case "call":
+                        JSONObject callData = notif.optJSONObject("data");
+                        String callerName = callData != null ? callData.optString("callerName", title) : title;
+                        String callType = callData != null ? callData.optString("callType", "audio") : "audio";
+                        showCallNotification(callerName, callType);
+                        break;
+                    case "message":
+                    default:
+                        showMessageNotification(title, body);
+                        break;
+                }
+            }
+            
+        } catch (Exception e) {
+            // Silent fail — will retry on next poll
+            Log.d(TAG, "Poll request failed: " + e.getMessage());
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+    
+    /**
+     * Save auth token for polling (called from JS via BackgroundServicePlugin)
+     */
+    public void setAuthToken(String token, String serverUrl) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        if (token != null) {
+            editor.putString(PREF_AUTH_TOKEN, token);
+        } else {
+            editor.remove(PREF_AUTH_TOKEN);
+        }
+        if (serverUrl != null) {
+            editor.putString(PREF_SERVER_URL, serverUrl);
+        }
+        editor.apply();
+        Log.i(TAG, "Auth token " + (token != null ? "saved" : "cleared") + " for polling");
+    }
+    
     @Override
     public void onDestroy() {
         Log.i(TAG, "BackgroundService destroyed — will be restarted by START_STICKY");
+        stopPolling();
         if (wakeLock != null && wakeLock.isHeld()) {
             try {
                 wakeLock.release();

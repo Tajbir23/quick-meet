@@ -54,8 +54,6 @@ const { SEVERITY } = require('./security/SecurityEventLogger');
 const connectDB = require('./config/db');
 const getSSLOptions = require('./config/ssl');
 const initializeSocket = require('./config/socket');
-const { initializeFirebase } = require('./config/firebase');
-
 // Routes
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
@@ -253,9 +251,6 @@ const startServer = async () => {
 
     // 1. Connect to MongoDB
     await connectDB();
-
-    // 1.5. Initialize Firebase Admin SDK (for push notifications)
-    initializeFirebase();
 
     // 2. Load SSL certificates (auto-generates if missing)
     const sslOptions = await getSSLOptions();

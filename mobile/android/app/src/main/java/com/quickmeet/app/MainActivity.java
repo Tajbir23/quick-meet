@@ -41,7 +41,6 @@ public class MainActivity extends BridgeActivity {
         // Register custom Capacitor plugins
         registerPlugin(BackgroundServicePlugin.class);
         registerPlugin(ApkInstallerPlugin.class);
-        registerPlugin(FirebaseMessagingPlugin.class);
 
         super.onCreate(savedInstanceState);
 
