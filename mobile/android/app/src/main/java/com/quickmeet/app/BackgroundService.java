@@ -166,9 +166,18 @@ public class BackgroundService extends Service {
         PendingIntent launchIntent = getLaunchPendingIntent();
         
         // Action: Answer Call
-        Intent answerIntent = new Intent(this, NotificationActionReceiver.class);
+        // CRITICAL: Use PendingIntent.getActivity() NOT getBroadcast().
+        // Android 12+ blocks "notification trampolining" — a BroadcastReceiver
+        // triggered by a notification action CANNOT call startActivity().
+        // So we launch MainActivity directly with the answer_call extra.
+        // MainActivity.onNewIntent() handles setting the pending action.
+        Intent answerIntent = new Intent(this, MainActivity.class);
         answerIntent.setAction(NotificationActionReceiver.ACTION_ANSWER_CALL);
-        PendingIntent answerPending = PendingIntent.getBroadcast(
+        answerIntent.putExtra("notification_action", "answer_call");
+        answerIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent answerPending = PendingIntent.getActivity(
             this, RC_ANSWER, answerIntent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );

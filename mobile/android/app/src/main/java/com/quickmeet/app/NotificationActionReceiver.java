@@ -32,12 +32,11 @@ public class NotificationActionReceiver extends BroadcastReceiver {
 
         switch (action) {
             case ACTION_ANSWER_CALL:
-                // Launch app and signal answer
-                // Only dismiss the notification UI — do NOT end the call/downgrade service
-                // The call is being ANSWERED, not ended
-                launchApp(context, "answer_call");
+                // NOTE: On Android 12+, the Answer button now uses PendingIntent.getActivity()
+                // and goes directly to MainActivity.onNewIntent() to avoid trampoline restriction.
+                // This BroadcastReceiver case is kept as a fallback for older Android versions.
                 if (service != null) {
-                    service.dismissCallNotification(); // UI only, keeps audio focus
+                    service.dismissCallNotification();
                     service.setPendingAction("answer_call");
                 }
                 break;

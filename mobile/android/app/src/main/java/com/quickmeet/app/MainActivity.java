@@ -48,6 +48,9 @@ public class MainActivity extends BridgeActivity {
 
         super.onCreate(savedInstanceState);
 
+        // Handle notification actions on cold start
+        handleNotificationAction(getIntent());
+
         // Register permission launcher
         permissionLauncher = registerForActivityResult(
             new ActivityResultContracts.RequestMultiplePermissions(),
@@ -156,6 +159,51 @@ public class MainActivity extends BridgeActivity {
             webView.resumeTimers();
             Log.d(TAG, "onResume — WebView fully resumed");
         }
+    }
+
+    /**
+     * Handle notification action intents when Activity is already running.
+     * Android 12+ blocks notification trampolining (BroadcastReceiver → startActivity()),
+     * so notification Answer button uses PendingIntent.getActivity() directly.
+     * This method is called when the Activity receives a new intent while running.
+     */
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        handleNotificationAction(intent);
+    }
+
+    /**
+     * Check if an intent contains a notification action and process it.
+     * Called from both onCreate (cold start) and onNewIntent (warm start).
+     */
+    private void handleNotificationAction(android.content.Intent intent) {
+        if (intent == null) return;
+        
+        String action = intent.getStringExtra("notification_action");
+        if (action == null) return;
+        
+        Log.i(TAG, "Notification action received via Activity intent: " + action);
+        
+        BackgroundService service = BackgroundService.getInstance();
+        if (service == null) {
+            Log.w(TAG, "BackgroundService not running — cannot process action: " + action);
+            return;
+        }
+        
+        switch (action) {
+            case "answer_call":
+                service.dismissCallNotification(); // UI only, keeps audio focus
+                service.setPendingAction("answer_call");
+                Log.i(TAG, "Answer action processed — pending action set");
+                break;
+            default:
+                Log.d(TAG, "Unknown notification action: " + action);
+                break;
+        }
+        
+        // Clear the action from the intent to prevent re-processing
+        intent.removeExtra("notification_action");
     }
 
     /**
