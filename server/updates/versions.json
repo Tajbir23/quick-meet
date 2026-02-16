@@ -8,12 +8,12 @@
     "lastUpdated": "2026-02-16T06:02:35.817Z"
   },
   "android": {
-    "version": "1.0.12",
+    "version": "1.0.38",
     "minVersion": "1.0.0",
-    "releaseNotes": "Call end fix, ongoing call & file transfer in notification panel, background service improvements",
+    "releaseNotes": "Messenger-like background service: notification actions (Answer/Decline call, Accept/Reject file transfer), message notifications, boot auto-start, battery optimization bypass",
     "forceUpdate": false,
     "downloadUrl": "https://quickmeet.genuinesoftmart.store/api/updates/download/android",
-    "lastUpdated": "2026-02-15T12:33:42.948Z"
+    "lastUpdated": "2026-02-16T07:00:00.000Z"
   },
   "web": {
     "version": "1.0.38",
