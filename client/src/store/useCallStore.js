@@ -53,6 +53,10 @@ const useCallStore = create((set, get) => ({
   // Incoming call data
   incomingCall: null,      // { callerId, callerName, offer, callType }
 
+  // Auto-answer flag — set when user taps "Answer" on notification
+  // BEFORE the call offer arrives via socket (race condition fix)
+  autoAnswerPending: false,
+
   // Incoming GROUP call data (separate from 1-to-1)
   incomingGroupCall: null,  // { groupId, groupName, callerName, participantCount }
 
@@ -668,6 +672,18 @@ const useCallStore = create((set, get) => ({
       incomingCall: data,
       callStatus: CALL_STATUS.RINGING,
     });
+
+    // Auto-answer if user already tapped "Answer" on notification
+    // This handles the race condition: notification answer tap arrives
+    // BEFORE the call offer is delivered via socket reconnect
+    if (get().autoAnswerPending) {
+      console.log('📞 Auto-answering call (user tapped Answer on notification)');
+      set({ autoAnswerPending: false });
+      // Small delay to let UI render the incoming call first
+      setTimeout(() => {
+        get().acceptCall();
+      }, 500);
+    }
   },
 
   /**

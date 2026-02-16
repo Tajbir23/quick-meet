@@ -47,7 +47,19 @@ function App() {
         onAnswerCall: () => {
           const callStore = useCallStore.getState();
           if (callStore.incomingCall) {
+            // Call offer already arrived — accept immediately
             callStore.acceptCall();
+          } else {
+            // Call offer hasn't arrived yet (socket reconnecting)
+            // Set flag so it auto-accepts when offer arrives
+            console.log('[App] Answer tapped but no incomingCall yet — setting autoAnswerPending');
+            useCallStore.setState({ autoAnswerPending: true });
+            // Safety timeout: clear flag after 15s if call never arrives
+            setTimeout(() => {
+              if (useCallStore.getState().autoAnswerPending) {
+                useCallStore.setState({ autoAnswerPending: false });
+              }
+            }, 15000);
           }
         },
         onDeclineCall: () => {
