@@ -9,14 +9,17 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.provider.Settings;
 import android.util.Log;
 
+import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.File;
@@ -28,6 +31,8 @@ import java.io.File;
  * the system package installer for installation.
  * 
  * Uses FileProvider for Android 7+ content:// URI requirement.
+ * Downloads to app's external cache dir (no scoped-storage issues).
+ * Checks "Install unknown apps" permission before installing.
  * Sends download progress events to the WebView.
  * 
  * JS usage:
@@ -43,6 +48,7 @@ public class ApkInstallerPlugin extends Plugin {
     private PluginCall pendingCall = null;
     private BroadcastReceiver downloadReceiver = null;
     private Thread progressThread = null;
+    private String pendingInstallPath = null; // saved for after permission grant
 
     @PluginMethod
     public void downloadAndInstall(PluginCall call) {
@@ -67,9 +73,9 @@ public class ApkInstallerPlugin extends Plugin {
                 return;
             }
 
-            // Remove old APK if exists
-            File downloadDir = Environment.getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_DOWNLOADS);
+            // Use app's external cache dir — no scoped storage issues on Android 11+
+            File downloadDir = new File(context.getExternalCacheDir(), "apk-updates");
+            if (!downloadDir.exists()) downloadDir.mkdirs();
             File existingFile = new File(downloadDir, fileName);
             if (existingFile.exists()) {
                 existingFile.delete();
@@ -82,8 +88,7 @@ public class ApkInstallerPlugin extends Plugin {
             request.setDescription("Downloading new version...");
             request.setNotificationVisibility(
                     DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            request.setDestinationInExternalPublicDir(
-                    Environment.DIRECTORY_DOWNLOADS, fileName);
+            request.setDestinationUri(Uri.fromFile(existingFile));
             request.setMimeType("application/vnd.android.package-archive");
 
             // Register BroadcastReceiver for download completion
@@ -204,16 +209,23 @@ public class ApkInstallerPlugin extends Plugin {
             if (status == DownloadManager.STATUS_SUCCESSFUL) {
                 cursor.close();
 
-                // Find the downloaded file
-                File downloadDir = Environment.getExternalStoragePublicDirectory(
-                        Environment.DIRECTORY_DOWNLOADS);
+                // Find the downloaded file in app's external cache dir
+                File downloadDir = new File(context.getExternalCacheDir(), "apk-updates");
                 File apkFile = new File(downloadDir, fileName);
 
                 if (apkFile.exists()) {
                     Log.d(TAG, "APK file found: " + apkFile.getAbsolutePath()
                             + " (" + apkFile.length() + " bytes)");
                     try {
+                        // installApk may redirect to settings for "install unknown apps"
+                        // permission — if so, the @ActivityCallback handles pendingCall
                         installApk(context, apkFile);
+
+                        // If installApk redirected to settings, don't resolve here
+                        if (pendingInstallPath != null) {
+                            // Permission flow in progress — callback will resolve/reject
+                            return;
+                        }
 
                         // Notify JS of success
                         JSObject progress = new JSObject();
@@ -267,9 +279,85 @@ public class ApkInstallerPlugin extends Plugin {
     }
 
     /**
-     * Open APK with system package installer using FileProvider
+     * Open APK with system package installer using FileProvider.
+     * Checks "Install unknown apps" permission first (Android 8+).
      */
     private void installApk(Context context, File apkFile) {
+        // Check "install unknown apps" permission on Android 8+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (!context.getPackageManager().canRequestPackageInstalls()) {
+                Log.w(TAG, "Install from unknown sources NOT allowed — opening settings");
+                pendingInstallPath = apkFile.getAbsolutePath();
+
+                // Notify JS that permission is needed
+                JSObject permEvent = new JSObject();
+                permEvent.put("status", "permission_needed");
+                permEvent.put("progress", 100);
+                notifyListeners("downloadProgress", permEvent);
+
+                // Open the "install unknown apps" settings for this app
+                Intent settingsIntent = new Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + context.getPackageName())
+                );
+                startActivityForResult(pendingCall, settingsIntent, "installPermissionResult");
+                return;
+            }
+        }
+
+        doInstallApk(context, apkFile);
+    }
+
+    /**
+     * Activity callback after user returns from "install unknown apps" settings.
+     */
+    @ActivityCallback
+    private void installPermissionResult(PluginCall call, ActivityResult result) {
+        Context context = getContext();
+        Log.d(TAG, "Returned from install permission settings");
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && context.getPackageManager().canRequestPackageInstalls()
+                && pendingInstallPath != null) {
+            File apkFile = new File(pendingInstallPath);
+            if (apkFile.exists()) {
+                Log.d(TAG, "Permission granted — installing APK");
+                doInstallApk(context, apkFile);
+
+                // Notify JS of success
+                JSObject progress = new JSObject();
+                progress.put("progress", 100);
+                progress.put("status", "installing");
+                notifyListeners("downloadProgress", progress);
+
+                if (pendingCall != null) {
+                    JSObject r = new JSObject();
+                    r.put("success", true);
+                    r.put("filePath", apkFile.getAbsolutePath());
+                    r.put("message", "Install dialog opened after permission grant");
+                    pendingCall.resolve(r);
+                    pendingCall = null;
+                }
+            } else {
+                Log.e(TAG, "APK file gone after permission grant: " + pendingInstallPath);
+                if (pendingCall != null) {
+                    pendingCall.reject("APK file no longer exists");
+                    pendingCall = null;
+                }
+            }
+        } else {
+            Log.w(TAG, "Install permission still not granted");
+            if (call != null) {
+                call.reject("Install permission not granted. Please enable 'Install unknown apps' for Quick Meet in Settings.");
+            }
+        }
+        pendingInstallPath = null;
+    }
+
+    /**
+     * Actually launch the system package installer intent
+     */
+    private void doInstallApk(Context context, File apkFile) {
         Intent intent = new Intent(Intent.ACTION_VIEW);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 

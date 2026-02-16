@@ -207,8 +207,18 @@ const UpdateNotification = () => {
 
     const ApkInstaller = window.Capacitor?.Plugins?.ApkInstaller;
     if (!ApkInstaller) {
-      console.warn('[Update] ApkInstaller plugin not available');
-      alert('Update is available but the installer plugin is not loaded. Please reinstall the app from the latest APK.');
+      console.warn('[Update] ApkInstaller plugin not available — opening in browser');
+      // Fallback: open download URL in system browser
+      try {
+        const Browser = window.Capacitor?.Plugins?.Browser;
+        if (Browser) {
+          await Browser.open({ url: updateState.downloadUrl });
+        } else {
+          window.open(updateState.downloadUrl, '_blank');
+        }
+      } catch (e) {
+        alert('Update is available but could not open download. Please visit:\n' + updateState.downloadUrl);
+      }
       return;
     }
 
@@ -224,6 +234,10 @@ const UpdateNotification = () => {
           setAndroidProgress(data.progress);
         }
         if (data.status === 'installing') {
+          setAndroidProgress(100);
+        }
+        if (data.status === 'permission_needed') {
+          // User is being redirected to "Install unknown apps" settings
           setAndroidProgress(100);
         }
       });
@@ -244,7 +258,24 @@ const UpdateNotification = () => {
       // The system installer dialog is now open — user taps "Install"
     } catch (error) {
       console.error('[Update] Native download/install error:', error);
-      alert('Download failed: ' + (error?.message || 'Unknown error') + '\n\nPlease try again.');
+      
+      // Fallback: offer to open in system browser
+      const openBrowser = confirm(
+        'Native install failed: ' + (error?.message || 'Unknown error') +
+        '\n\nWould you like to download from browser instead?'
+      );
+      if (openBrowser) {
+        try {
+          const Browser = window.Capacitor?.Plugins?.Browser;
+          if (Browser) {
+            await Browser.open({ url: updateState.downloadUrl });
+          } else {
+            window.open(updateState.downloadUrl, '_blank');
+          }
+        } catch (e) {
+          alert('Please download the update manually from:\n' + updateState.downloadUrl);
+        }
+      }
     } finally {
       // Cleanup listener
       if (progressListener?.remove) {
