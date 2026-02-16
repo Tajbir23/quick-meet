@@ -2,24 +2,24 @@
   "desktop": {
     "version": "1.0.41",
     "minVersion": "1.0.0",
-    "releaseNotes": "Call end fix, notification panel improvements",
+    "releaseNotes": "Self-hosted background notifications, Firebase removed",
     "forceUpdate": false,
     "downloadUrl": "https://quickmeet.genuinesoftmart.store/api/updates/download/desktop",
-    "lastUpdated": "2026-02-16T07:54:57.613Z"
+    "lastUpdated": "2026-02-16T12:00:00.000Z"
   },
   "android": {
-    "version": "1.0.38",
+    "version": "1.0.41",
     "minVersion": "1.0.0",
-    "releaseNotes": "Messenger-like background service: notification actions (Answer/Decline call, Accept/Reject file transfer), message notifications, boot auto-start, battery optimization bypass",
+    "releaseNotes": "Self-hosted background notifications (no Firebase) — native HTTP polling keeps you connected even when app is closed",
     "forceUpdate": false,
     "downloadUrl": "https://quickmeet.genuinesoftmart.store/api/updates/download/android",
-    "lastUpdated": "2026-02-16T07:00:00.000Z"
+    "lastUpdated": "2026-02-16T12:00:00.000Z"
   },
   "web": {
     "version": "1.0.41",
     "minVersion": "1.0.0",
-    "releaseNotes": "Call end fix, notification panel improvements",
+    "releaseNotes": "Self-hosted background notifications, Firebase removed",
     "forceUpdate": false,
-    "lastUpdated": "2026-02-16T07:54:57.613Z"
+    "lastUpdated": "2026-02-16T12:00:00.000Z"
   }
 }
