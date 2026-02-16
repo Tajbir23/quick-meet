@@ -422,6 +422,27 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
   });
 
   /**
+   * Check if a call is still active on the server
+   * Used by the client when ICE disconnects — if the peer already ended
+   * the call (activeCalls cleared), the server tells us immediately.
+   */
+  socket.on('call:check-active', ({ peerId }) => {
+    const peerTarget = activeCalls.get(peerId);
+    const selfTarget = activeCalls.get(socket.userId);
+    const isActive = (peerTarget === socket.userId) && (selfTarget === peerId);
+
+    if (!isActive) {
+      console.log(`📞 call:check-active — call NOT active for ${socket.username} ↔ ${peerId}`);
+      socket.emit('call:ended', {
+        userId: peerId,
+        username: '',
+      });
+    } else {
+      console.log(`📞 call:check-active — call IS active for ${socket.username} ↔ ${peerId}`);
+    }
+  });
+
+  /**
    * Toggle media track (notify peer about mute/unmute)
    */
   socket.on('call:toggle-media', ({ targetUserId, kind, enabled }) => {

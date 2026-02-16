@@ -750,6 +750,12 @@ const useCallStore = create((set, get) => ({
         // Guard: if call already ended (e.g. call:ended arrived), skip
         if (get().callStatus === CALL_STATUS.IDLE) return;
 
+        // Immediately check with server if the call is still active
+        const checkSocket = getSocket();
+        if (checkSocket && !get().isGroupCall) {
+          checkSocket.emit('call:check-active', { peerId: remotePeerId });
+        }
+
         set({ callStatus: CALL_STATUS.RECONNECTING });
 
         // Attempt ICE restart
@@ -782,21 +788,30 @@ const useCallStore = create((set, get) => ({
             }
           });
 
-        // Fallback: if ICE stays failed for 10s after restart attempt, end the call
+        // Fallback: if ICE stays failed for 5s after restart attempt, end the call
         setTimeout(() => {
           const { iceState: laterState, callStatus: laterStatus } = get();
           if (laterState === 'failed' && laterStatus !== CALL_STATUS.IDLE) {
-            console.log('❌ ICE still failed after 10s — auto-ending call');
+            console.log('❌ ICE still failed after 5s — auto-ending call');
             get().endCall();
           }
-        }, 10000);
+        }, 5000);
       }
 
       if (state === 'disconnected') {
         // Guard: if call already ended, skip reconnection attempt
         if (get().callStatus === CALL_STATUS.IDLE) return;
 
-        // Disconnected can recover — wait 5 seconds, then try ICE restart
+        // Immediately ask the server if the call is still active.
+        // If the peer already ended (call:end processed), the server will
+        // emit call:ended back to us instantly — no waiting for ICE timeouts.
+        const checkSocket = getSocket();
+        if (checkSocket && !get().isGroupCall) {
+          console.log('🔍 ICE disconnected — checking server if call still active');
+          checkSocket.emit('call:check-active', { peerId: remotePeerId });
+        }
+
+        // Disconnected can recover — wait 3 seconds, then try ICE restart
         set({ callStatus: CALL_STATUS.RECONNECTING });
         setTimeout(() => {
           const currentIce = get().iceState;
@@ -804,7 +819,7 @@ const useCallStore = create((set, get) => ({
           // Skip if call has already ended or ICE recovered
           if (currentStatus === CALL_STATUS.IDLE) return;
           if (currentIce === 'disconnected') {
-            console.log('⚠️ Still disconnected after 5s, attempting ICE restart');
+            console.log('⚠️ Still disconnected after 3s, attempting ICE restart');
             webrtcService.restartIce(remotePeerId)
               .then((offer) => {
                 // Re-check: call might have ended while ICE restart was in progress
@@ -831,19 +846,19 @@ const useCallStore = create((set, get) => ({
                 console.error('ICE restart failed:', err);
               });
           }
-        }, 5000);
+        }, 3000);
 
-        // Fallback: if still disconnected or not recovered after 15s, end the call
+        // Fallback: if still disconnected or not recovered after 5s, end the call
         // This handles the case where the remote peer hung up but the
         // call:ended socket event didn't arrive
         setTimeout(() => {
           const { iceState: laterState, callStatus: laterStatus } = get();
           const notRecovered = laterState === 'disconnected' || laterState === 'failed';
           if (notRecovered && laterStatus !== CALL_STATUS.IDLE) {
-            console.log('❌ ICE not recovered after 15s — auto-ending call');
+            console.log('❌ ICE not recovered after 5s — auto-ending call');
             get().endCall();
           }
-        }, 15000);
+        }, 5000);
       }
 
       if (state === 'closed') {
