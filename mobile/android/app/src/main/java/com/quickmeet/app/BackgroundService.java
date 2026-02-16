@@ -75,7 +75,11 @@ public class BackgroundService extends Service {
     private static final long POLL_INTERVAL_MS = 5000; // 5 seconds
     private static final String PREFS_NAME = "QuickMeetPrefs";
     private static final String PREF_AUTH_TOKEN = "auth_token";
+    private static final String PREF_REFRESH_TOKEN = "refresh_token";
     private static final String PREF_SERVER_URL = "server_url";
+    
+    // Token refresh state — prevent concurrent refreshes
+    private volatile boolean isRefreshingToken = false;
     
     private PowerManager.WakeLock wakeLock;
     private static BackgroundService instance;
@@ -684,6 +688,8 @@ public class BackgroundService extends Service {
     /**
      * Poll the server for pending notifications via native HTTP.
      * This works even when WebView JS is suspended by Android.
+     * If the access token has expired (401), automatically refreshes it
+     * using the stored refresh token.
      */
     private void pollPendingNotifications() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -697,22 +703,7 @@ public class BackgroundService extends Service {
         HttpURLConnection conn = null;
         try {
             URL url = new URL(serverUrl + "/api/push/pending?token=" + token);
-            
-            // Trust all certs (self-signed SSL on VPS)
-            if (url.getProtocol().equals("https")) {
-                HttpsURLConnection httpsConn = (HttpsURLConnection) url.openConnection();
-                SSLContext sslContext = SSLContext.getInstance("TLS");
-                sslContext.init(null, new TrustManager[]{new X509TrustManager() {
-                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                    public void checkClientTrusted(X509Certificate[] chain, String authType) {}
-                    public void checkServerTrusted(X509Certificate[] chain, String authType) {}
-                }}, new java.security.SecureRandom());
-                httpsConn.setSSLSocketFactory(sslContext.getSocketFactory());
-                httpsConn.setHostnameVerifier((hostname, session) -> true);
-                conn = httpsConn;
-            } else {
-                conn = (HttpURLConnection) url.openConnection();
-            }
+            conn = createConnection(url);
             
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(10000);
@@ -720,6 +711,27 @@ public class BackgroundService extends Service {
             conn.setRequestProperty("Accept", "application/json");
             
             int responseCode = conn.getResponseCode();
+            
+            // Token expired — refresh it and retry once
+            if (responseCode == 401) {
+                conn.disconnect();
+                conn = null;
+                
+                if (refreshAuthToken()) {
+                    // Re-read the token (refreshAuthToken saved the new one)
+                    String newToken = prefs.getString(PREF_AUTH_TOKEN, null);
+                    if (newToken != null) {
+                        URL retryUrl = new URL(serverUrl + "/api/push/pending?token=" + newToken);
+                        conn = createConnection(retryUrl);
+                        conn.setRequestMethod("GET");
+                        conn.setConnectTimeout(10000);
+                        conn.setReadTimeout(10000);
+                        conn.setRequestProperty("Accept", "application/json");
+                        responseCode = conn.getResponseCode();
+                    }
+                }
+            }
+            
             if (responseCode != 200) {
                 return;
             }
@@ -773,9 +785,116 @@ public class BackgroundService extends Service {
     }
     
     /**
-     * Save auth token for polling (called from JS via BackgroundServicePlugin)
+     * Create an HttpURLConnection, handling HTTPS with self-signed certs.
      */
-    public void setAuthToken(String token, String serverUrl) {
+    private HttpURLConnection createConnection(URL url) throws Exception {
+        if (url.getProtocol().equals("https")) {
+            HttpsURLConnection httpsConn = (HttpsURLConnection) url.openConnection();
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, new TrustManager[]{new X509TrustManager() {
+                public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                public void checkClientTrusted(X509Certificate[] chain, String authType) {}
+                public void checkServerTrusted(X509Certificate[] chain, String authType) {}
+            }}, new java.security.SecureRandom());
+            httpsConn.setSSLSocketFactory(sslContext.getSocketFactory());
+            httpsConn.setHostnameVerifier((hostname, session) -> true);
+            return httpsConn;
+        } else {
+            return (HttpURLConnection) url.openConnection();
+        }
+    }
+    
+    /**
+     * Refresh the access token using the stored refresh token.
+     * Calls POST /api/auth/refresh with { refreshToken }.
+     * On success, saves new accessToken + refreshToken in SharedPreferences.
+     * Returns true if refresh succeeded, false otherwise.
+     */
+    private boolean refreshAuthToken() {
+        if (isRefreshingToken) return false; // Prevent concurrent refreshes
+        isRefreshingToken = true;
+        
+        HttpURLConnection conn = null;
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            String refreshToken = prefs.getString(PREF_REFRESH_TOKEN, null);
+            String serverUrl = prefs.getString(PREF_SERVER_URL, null);
+            
+            if (refreshToken == null || serverUrl == null) {
+                Log.w(TAG, "Cannot refresh token — no refresh token stored");
+                return false;
+            }
+            
+            URL url = new URL(serverUrl + "/api/auth/refresh");
+            conn = createConnection(url);
+            
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(15000);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setDoOutput(true);
+            
+            // Send refresh token in JSON body
+            JSONObject body = new JSONObject();
+            body.put("refreshToken", refreshToken);
+            
+            java.io.OutputStream os = conn.getOutputStream();
+            os.write(body.toString().getBytes("UTF-8"));
+            os.flush();
+            os.close();
+            
+            int responseCode = conn.getResponseCode();
+            
+            if (responseCode == 200) {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                }
+                reader.close();
+                
+                JSONObject response = new JSONObject(sb.toString());
+                JSONObject data = response.optJSONObject("data");
+                
+                if (data != null) {
+                    String newAccessToken = data.optString("accessToken", null);
+                    String newRefreshToken = data.optString("refreshToken", null);
+                    
+                    if (newAccessToken != null) {
+                        SharedPreferences.Editor editor = prefs.edit();
+                        editor.putString(PREF_AUTH_TOKEN, newAccessToken);
+                        if (newRefreshToken != null) {
+                            editor.putString(PREF_REFRESH_TOKEN, newRefreshToken);
+                        }
+                        editor.apply();
+                        
+                        Log.i(TAG, "✅ Token refreshed successfully via native HTTP");
+                        return true;
+                    }
+                }
+            } else {
+                Log.w(TAG, "Token refresh failed with HTTP " + responseCode);
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Token refresh error: " + e.getMessage());
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+            isRefreshingToken = false;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Save auth tokens for polling (called from JS via BackgroundServicePlugin)
+     * Stores both access token (for polling) and refresh token (for auto-renewal).
+     */
+    public void setAuthToken(String token, String refreshToken, String serverUrl) {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         SharedPreferences.Editor editor = prefs.edit();
         if (token != null) {
@@ -783,11 +902,15 @@ public class BackgroundService extends Service {
         } else {
             editor.remove(PREF_AUTH_TOKEN);
         }
+        if (refreshToken != null) {
+            editor.putString(PREF_REFRESH_TOKEN, refreshToken);
+        }
         if (serverUrl != null) {
             editor.putString(PREF_SERVER_URL, serverUrl);
         }
         editor.apply();
-        Log.i(TAG, "Auth token " + (token != null ? "saved" : "cleared") + " for polling");
+        Log.i(TAG, "Auth token " + (token != null ? "saved" : "cleared") + " for polling"
+            + (refreshToken != null ? " (+ refresh token)" : ""));
     }
     
     @Override

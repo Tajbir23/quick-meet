@@ -209,28 +209,33 @@ public class BackgroundServicePlugin extends Plugin {
     }
     
     /**
-     * Set the JWT auth token for native HTTP polling
-     * Called from JS when user logs in or token refreshes
+     * Set the JWT auth token + refresh token for native HTTP polling.
+     * Called from JS when user logs in or token refreshes.
+     * The refresh token allows the native service to renew the access token
+     * when it expires (every 15 min), even when WebView JS is suspended.
      */
     @PluginMethod()
     public void setAuthToken(PluginCall call) {
         String token = call.getString("token", null);
+        String refreshToken = call.getString("refreshToken", null);
         String serverUrl = call.getString("serverUrl", null);
         
         BackgroundService service = BackgroundService.getInstance();
         if (service != null) {
-            service.setAuthToken(token, serverUrl);
+            service.setAuthToken(token, refreshToken, serverUrl);
         } else {
             // Save to SharedPreferences directly if service not running yet
             android.content.SharedPreferences prefs = getContext()
                 .getSharedPreferences("QuickMeetPrefs", android.content.Context.MODE_PRIVATE);
             android.content.SharedPreferences.Editor editor = prefs.edit();
             if (token != null) editor.putString("auth_token", token);
+            if (refreshToken != null) editor.putString("refresh_token", refreshToken);
             if (serverUrl != null) editor.putString("server_url", serverUrl);
             editor.apply();
         }
         
-        Log.i(TAG, "Auth token " + (token != null ? "set" : "cleared") + " for polling");
+        Log.i(TAG, "Auth token " + (token != null ? "set" : "cleared") + " for polling"
+            + (refreshToken != null ? " (+ refresh token)" : ""));
         call.resolve();
     }
     

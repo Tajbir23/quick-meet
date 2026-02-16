@@ -129,6 +129,14 @@ api.interceptors.response.use(
         // Update default header
         api.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
 
+        // Pass new tokens to native BackgroundService for polling
+        try {
+          const { passAuthTokenToNative } = await import('./backgroundService.js');
+          await passAuthTokenToNative();
+        } catch (e) {
+          // Non-fatal — native service may not be available
+        }
+
         // Process queued requests with new token
         processQueue(null, accessToken);
 
