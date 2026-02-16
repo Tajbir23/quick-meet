@@ -144,22 +144,20 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x mobile/android/gradlew
 
-      - name: Build debug APK
+      - name: Decode release keystore
         run: |
-          cd mobile/android
-          ./gradlew assembleDebug --no-daemon
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > mobile/android/quickmeet-release.keystore
+          ls -la mobile/android/quickmeet-release.keystore
 
-      - name: Build release APK (unsigned)
+      - name: Build signed release APK
         run: |
           cd mobile/android
           ./gradlew assembleRelease --no-daemon
-
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: quick-meet-debug-apk
-          path: mobile/android/app/build/outputs/apk/debug/quick-meet-v*-debug.apk
-          retention-days: 30
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/mobile/android/quickmeet-release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
@@ -227,12 +225,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Download Android Debug APK
-        uses: actions/download-artifact@v4
-        with:
-          name: quick-meet-debug-apk
-          path: release-assets/
 
       - name: Download Android Release APK
         uses: actions/download-artifact@v4

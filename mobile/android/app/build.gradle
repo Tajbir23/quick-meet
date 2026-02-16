@@ -23,10 +23,29 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
+    // Release signing config — uses keystore from environment (CI/CD) or local file
+    signingConfigs {
+        release {
+            def keystorePath = System.getenv('KEYSTORE_PATH') ?: file('../quickmeet-release.keystore').absolutePath
+            def ksPassword = System.getenv('KEYSTORE_PASSWORD') ?: 'QuickMeet2026!'
+            def ksAlias = System.getenv('KEY_ALIAS') ?: 'quickmeet'
+            def ksKeyPassword = System.getenv('KEY_PASSWORD') ?: 'QuickMeet2026!'
+
+            if (file(keystorePath).exists()) {
+                storeFile file(keystorePath)
+                storePassword ksPassword
+                keyAlias ksAlias
+                keyPassword ksKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
     }
 
