@@ -510,6 +510,14 @@ public class BackgroundService extends Service {
     }
     
     /**
+     * Check if currently in a call.
+     * Used by MainActivity to decide whether to keep WebView alive in background.
+     */
+    public boolean isCallActive() {
+        return isInCall;
+    }
+    
+    /**
      * Check if battery optimization is disabled for this app
      */
     public static boolean isBatteryOptimizationDisabled(Context context) {
