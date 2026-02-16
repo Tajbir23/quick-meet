@@ -1,6 +1,6 @@
 {
   "name": "quick-meet-server",
-  "version": "1.0.52",
+  "version": "1.0.53",
   "description": "Quick Meet — Backend server with HTTPS, Socket.io signaling, WebRTC support",
   "main": "server.js",
   "scripts": {
