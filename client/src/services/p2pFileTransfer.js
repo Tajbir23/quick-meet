@@ -305,6 +305,9 @@ class P2PFileTransferService {
       const session = this.sessions.get(data.transferId);
       if (session && !session.isReceiver) {
         // We are the sender, receiver accepted → setup DataChannel
+        // CRITICAL: Reset isPaused — it may have been set to true by peer-offline
+        // when the receiver was in background. Now they're clearly online (they accepted).
+        session.isPaused = false;
         session.currentChunk = data.lastReceivedChunk >= 0 ? data.lastReceivedChunk + 1 : 0;
         session.bytesTransferred = session.currentChunk * session.chunkSize;
         await this._setupSenderConnection(session);
@@ -885,6 +888,7 @@ class P2PFileTransferService {
       console.log(`[P2P DEBUG] ✅ DataChannel OPEN for ${session.transferId}, starting send from chunk ${session.currentChunk}`);
       this._clearConnectionTimeout(session);
       session.status = 'transferring';
+      session.isPaused = false; // Ensure isPaused is reset — DC is open, we must send
       session.startTime = Date.now();
 
       // Check SCTP maxMessageSize and adapt chunk size if needed
