@@ -8,7 +8,6 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -32,8 +31,6 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 import java.security.cert.X509Certificate;
 
-import android.media.AudioAttributes;
-import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 
 /**
@@ -86,7 +83,7 @@ public class BackgroundService extends Service {
     
     // Audio focus for keeping WebRTC audio alive in background
     private AudioManager audioManager;
-    private AudioFocusRequest audioFocusRequest;
+    private Object audioFocusRequest; // AudioFocusRequest (API 26+), stored as Object for compatibility
     private boolean hasAudioFocus = false;
     private boolean isInCall = false;
     
@@ -126,8 +123,8 @@ public class BackgroundService extends Service {
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             // Android 14+ requires foreground service type
-            startForeground(NOTIFICATION_BG, notification, 
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+            // DATA_SYNC = 1
+            startForeground(NOTIFICATION_BG, notification, 1);
         } else {
             startForeground(NOTIFICATION_BG, notification);
         }
@@ -379,13 +376,13 @@ public class BackgroundService extends Service {
      * This tells Android to keep audio processing alive even when the app is in background.
      * Must be called when a call starts (from showOngoingCallNotification).
      */
+    @SuppressWarnings("all")
     private void upgradeToCallForegroundService(Notification callNotification) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Re-start foreground with call + microphone service types
-                int serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-                    | ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
-                    | ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+                // Foreground service type constants (raw int values for compilation safety):
+                // DATA_SYNC=1, PHONE_CALL=4, MICROPHONE=128
+                int serviceType = 1 | 4 | 128;
                 startForeground(NOTIFICATION_BG, callNotification, serviceType);
                 Log.i(TAG, "Foreground service upgraded to phoneCall|microphone|dataSync");
             }
@@ -398,13 +395,14 @@ public class BackgroundService extends Service {
      * Downgrade the foreground service type back to dataSync only.
      * Called when a call ends.
      */
+    @SuppressWarnings("all")
     private void downgradeFromCallForegroundService() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // Rebuild the background notification and re-start foreground with just dataSync
                 Notification bgNotification = buildBackgroundNotification();
-                int serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
-                startForeground(NOTIFICATION_BG, bgNotification, serviceType);
+                // DATA_SYNC = 1
+                startForeground(NOTIFICATION_BG, bgNotification, 1);
                 Log.i(TAG, "Foreground service downgraded to dataSync only");
             }
         } catch (Exception e) {
@@ -416,26 +414,30 @@ public class BackgroundService extends Service {
      * Acquire audio focus to prevent Android from killing audio processing.
      * Uses USAGE_VOICE_COMMUNICATION so the system treats this like a phone call.
      */
+    @SuppressWarnings("all")
     private void acquireAudioFocus() {
         try {
             if (hasAudioFocus || audioManager == null) return;
             
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                AudioAttributes audioAttributes = new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                android.media.AudioAttributes audioAttributes = new android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build();
                 
-                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                android.media.AudioFocusRequest afr = new android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                     .setAudioAttributes(audioAttributes)
                     .setAcceptsDelayedFocusGain(true)
-                    .setOnAudioFocusChangeListener(focusChange -> {
-                        // We don't need to react to focus changes
-                        Log.d(TAG, "Audio focus changed: " + focusChange);
+                    .setOnAudioFocusChangeListener(new AudioManager.OnAudioFocusChangeListener() {
+                        @Override
+                        public void onAudioFocusChange(int focusChange) {
+                            Log.d(TAG, "Audio focus changed: " + focusChange);
+                        }
                     })
                     .build();
                 
-                int result = audioManager.requestAudioFocus(audioFocusRequest);
+                audioFocusRequest = afr;
+                int result = audioManager.requestAudioFocus(afr);
                 hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
                 
                 // Also set MODE_IN_COMMUNICATION to keep audio path active
@@ -451,11 +453,12 @@ public class BackgroundService extends Service {
     /**
      * Release audio focus when call ends.
      */
+    @SuppressWarnings("all")
     private void releaseAudioFocus() {
         try {
             if (audioManager != null) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
-                    audioManager.abandonAudioFocusRequest(audioFocusRequest);
+                    audioManager.abandonAudioFocusRequest((android.media.AudioFocusRequest) audioFocusRequest);
                     audioFocusRequest = null;
                 }
                 audioManager.setMode(AudioManager.MODE_NORMAL);
