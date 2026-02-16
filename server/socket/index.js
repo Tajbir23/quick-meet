@@ -25,6 +25,7 @@ const User = require('../models/User');
 const setupPresenceHandlers = require('./presence');
 const setupChatHandlers = require('./chat');
 const setupSignalingHandlers = require('./signaling');
+const { deliverPendingCall, clearPendingCall } = require('./signaling');
 const setupGroupCallHandlers = require('./groupCall');
 const setupFileTransferHandlers = require('./fileTransfer');
 const socketGuard = require('../security/SocketGuard');
@@ -136,6 +137,12 @@ const registerSocketHandlers = (io) => {
     setupFileTransferHandlers(io, socket, onlineUsers);
 
     // ============================================
+    // Deliver pending calls (user was offline, now reconnected)
+    // If someone called while this user was offline, deliver now
+    // ============================================
+    deliverPendingCall(io, socket, userId);
+
+    // ============================================
     // Security: Request nonce for anti-replay
     // Client can request nonces for signing critical events
     // ============================================
@@ -164,6 +171,9 @@ const registerSocketHandlers = (io) => {
 
       if (isCurrentSocket) {
         onlineUsers.delete(userId);
+
+        // Clear any pending calls for this user
+        clearPendingCall(userId);
 
         // Broadcast offline IMMEDIATELY (before DB update)
         socket.broadcast.emit('user:offline', {

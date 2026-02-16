@@ -48,6 +48,74 @@ const Message = require('../models/Message');
 const { storePendingNotification } = require('../controllers/pushController');
 
 /**
+ * ============================================
+ * Pending Calls Queue
+ * ============================================
+ * 
+ * When a call is made to an offline user:
+ * 1. Store the call offer in pendingCalls (targetUserId → call data)
+ * 2. Send push notification via polling (native Android picks it up)
+ * 3. DON'T immediately tell the caller "user offline"
+ * 4. Wait up to 30 seconds for the target to come online
+ * 5. When target reconnects → deliver the pending call offer
+ * 6. If 30s expires → then tell caller "user offline"
+ * 
+ * This prevents the caller's call from being cut immediately
+ * when the target is in background but reachable via notification.
+ */
+const pendingCalls = new Map(); // targetUserId → { callerId, callerSocketId, offer, callType, callerName, timeout, createdAt }
+const PENDING_CALL_TIMEOUT = 30000; // 30 seconds
+
+/**
+ * Called from socket/index.js when a user connects.
+ * If there's a pending call for this user, deliver it.
+ */
+function deliverPendingCall(io, socket, userId) {
+  const pending = pendingCalls.get(userId);
+  if (!pending) return false;
+
+  // Check if still valid (caller still online)
+  const callerSocketId = pending.callerSocketId;
+  const callerSocket = io.sockets.sockets.get(callerSocketId);
+  if (!callerSocket) {
+    // Caller disconnected — clean up
+    clearTimeout(pending.timeout);
+    pendingCalls.delete(userId);
+    return false;
+  }
+
+  console.log(`📞 Delivering pending call: ${pending.callerName} → ${userId}`);
+
+  // Deliver the call offer to the newly connected user
+  socket.emit('call:offer', {
+    callerId: pending.callerId,
+    callerName: pending.callerName,
+    offer: pending.offer,
+    callType: pending.callType,
+    isReconnect: false,
+  });
+
+  // Clean up
+  clearTimeout(pending.timeout);
+  pendingCalls.delete(userId);
+  return true;
+}
+
+/**
+ * Clean up pending call when caller hangs up or call is rejected
+ */
+function clearPendingCall(callerId) {
+  for (const [targetId, pending] of pendingCalls) {
+    if (pending.callerId === callerId) {
+      clearTimeout(pending.timeout);
+      pendingCalls.delete(targetId);
+      console.log(`📞 Pending call cleared for ${targetId} (caller ${callerId} cancelled)`);
+      return;
+    }
+  }
+}
+
+/**
  * Helper: Create a call log message in DB and emit to both users in real-time.
  * The CALLER is always the message sender so the UI shows correct direction.
  */
@@ -152,7 +220,11 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
     const targetSocketId = onlineUsers.get(targetUserId);
 
     if (!targetSocketId) {
-      // User is offline — store pending notification for native polling
+      // User is offline — store pending call offer + notification
+      // DON'T immediately tell caller "user offline"
+      // Wait up to 30s for target to come online via notification
+      
+      // Store push notification for native polling
       storePendingNotification(targetUserId, {
         type: 'call',
         title: `${socket.username} is calling...`,
@@ -164,10 +236,36 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
         },
       });
 
-      socket.emit('call:user-offline', {
-        targetUserId,
-        message: 'User is offline',
+      // Clear any existing pending call for this target
+      const existing = pendingCalls.get(targetUserId);
+      if (existing) clearTimeout(existing.timeout);
+
+      // Store pending call with 30-second timeout
+      const timeoutId = setTimeout(() => {
+        const pending = pendingCalls.get(targetUserId);
+        if (pending && pending.callerId === socket.userId) {
+          pendingCalls.delete(targetUserId);
+          console.log(`📞 Pending call expired: ${socket.username} → ${targetUserId} (30s timeout)`);
+          
+          // NOW tell caller user is offline (after 30s wait)
+          socket.emit('call:user-offline', {
+            targetUserId,
+            message: 'User is offline',
+          });
+        }
+      }, PENDING_CALL_TIMEOUT);
+
+      pendingCalls.set(targetUserId, {
+        callerId: socket.userId,
+        callerSocketId: socket.id,
+        offer,
+        callType: callType || 'audio',
+        callerName: socket.username,
+        timeout: timeoutId,
+        createdAt: Date.now(),
       });
+
+      console.log(`📞 Call queued (target offline): ${socket.username} → ${targetUserId} — waiting 30s for reconnect`);
       return;
     }
 
@@ -256,9 +354,10 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
   socket.on('call:reject', ({ callerId, reason, callType }) => {
     const callerSocketId = onlineUsers.get(callerId);
 
-    // Clear active call tracking
+    // Clear active call tracking and pending calls
     activeCalls.delete(socket.userId);
     activeCalls.delete(callerId);
+    clearPendingCall(callerId);
 
     if (callerSocketId) {
       console.log(`📞 Call rejected: ${socket.username} rejected call from ${callerId}`);
@@ -288,9 +387,11 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
   socket.on('call:end', ({ targetUserId, callDuration, callType, isIncoming }) => {
     const targetSocketId = onlineUsers.get(targetUserId);
 
-    // Clear active call tracking for both parties
+    // Clear active call tracking and pending calls for both parties
     activeCalls.delete(socket.userId);
     activeCalls.delete(targetUserId);
+    clearPendingCall(socket.userId);
+    clearPendingCall(targetUserId);
 
     if (targetSocketId) {
       console.log(`📞 Call ended: ${socket.username} → ${targetUserId}`);
@@ -415,3 +516,5 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
 };
 
 module.exports = setupSignalingHandlers;
+module.exports.deliverPendingCall = deliverPendingCall;
+module.exports.clearPendingCall = clearPendingCall;
