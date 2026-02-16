@@ -18,7 +18,7 @@ import {
   X, Camera, User, Mail, Lock, Eye, EyeOff,
   Shield, Save, Loader2, AlertCircle, Check,
   Info, Download, RefreshCw, Smartphone, Monitor, Globe, Calendar, Hash,
-  Share2, Copy, Link, ExternalLink
+  Share2, Copy, ExternalLink
 } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import api from '../../services/api';
@@ -446,14 +446,15 @@ function getPlatformInfo() {
   return { name: 'Web Browser', icon: Globe };
 }
 
-const APP_LINK = 'https://quickmeet.genuinesoftmart.store';
+const APP_BASE_URL = 'https://quickmeet.genuinesoftmart.store';
+const APP_DOWNLOAD_ANDROID = `${APP_BASE_URL}/api/updates/download/android`;
+const APP_DOWNLOAD_DESKTOP = `${APP_BASE_URL}/api/updates/download/desktop`;
 const APP_SHARE_TEXT = 'Quick Meet - Real-time chat, voice & video calls, and P2P file transfer. Try it now!';
 
 const AboutTab = () => {
   const [serverVersions, setServerVersions] = useState(null);
   const [checking, setChecking] = useState(false);
   const [updateResult, setUpdateResult] = useState(null);
-  const [copied, setCopied] = useState(false);
 
   const platform = getPlatformInfo();
   const PlatformIcon = platform.icon;
@@ -682,81 +683,109 @@ const AboutTab = () => {
         </div>
         <p className="text-xs text-dark-400">Share Quick Meet with your friends and family</p>
 
-        {/* Link display */}
-        <div className="flex items-center gap-2 bg-dark-800 rounded-lg px-3 py-2 border border-dark-600">
-          <Link size={14} className="text-dark-500 flex-shrink-0" />
-          <span className="text-xs text-dark-300 truncate flex-1 select-all">{APP_LINK}</span>
+        {/* Download links */}
+        <div className="space-y-2">
+          {/* Android Download */}
+          <div className="flex items-center gap-2 bg-dark-800 rounded-lg px-3 py-2.5 border border-dark-600">
+            <Smartphone size={14} className="text-emerald-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] text-dark-400">Android App {serverVersions?.android?.version ? `(v${serverVersions.android.version})` : ''}</p>
+              <p className="text-xs text-dark-300 truncate select-all">{APP_DOWNLOAD_ANDROID}</p>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(APP_DOWNLOAD_ANDROID);
+                  toast.success('Android link copied!');
+                } catch {
+                  toast.error('Copy failed');
+                }
+              }}
+              className="p-1.5 rounded-md hover:bg-dark-600 text-dark-400 hover:text-white transition-colors flex-shrink-0"
+              title="Copy Android link"
+            >
+              <Copy size={12} />
+            </button>
+          </div>
+
+          {/* Desktop Download */}
+          <div className="flex items-center gap-2 bg-dark-800 rounded-lg px-3 py-2.5 border border-dark-600">
+            <Monitor size={14} className="text-blue-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] text-dark-400">Desktop App {serverVersions?.desktop?.version ? `(v${serverVersions.desktop.version})` : ''}</p>
+              <p className="text-xs text-dark-300 truncate select-all">{APP_DOWNLOAD_DESKTOP}</p>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(APP_DOWNLOAD_DESKTOP);
+                  toast.success('Desktop link copied!');
+                } catch {
+                  toast.error('Copy failed');
+                }
+              }}
+              className="p-1.5 rounded-md hover:bg-dark-600 text-dark-400 hover:text-white transition-colors flex-shrink-0"
+              title="Copy Desktop link"
+            >
+              <Copy size={12} />
+            </button>
+          </div>
+
+          {/* Web App */}
+          <div className="flex items-center gap-2 bg-dark-800 rounded-lg px-3 py-2.5 border border-dark-600">
+            <Globe size={14} className="text-purple-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] text-dark-400">Web App</p>
+              <p className="text-xs text-dark-300 truncate select-all">{APP_BASE_URL}</p>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(APP_BASE_URL);
+                  toast.success('Web link copied!');
+                } catch {
+                  toast.error('Copy failed');
+                }
+              }}
+              className="p-1.5 rounded-md hover:bg-dark-600 text-dark-400 hover:text-white transition-colors flex-shrink-0"
+              title="Copy Web link"
+            >
+              <Copy size={12} />
+            </button>
+          </div>
         </div>
 
-        {/* Action buttons */}
-        <div className="flex gap-2">
-          {/* Copy Link */}
-          <button
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(APP_LINK);
-                setCopied(true);
-                toast.success('Link copied!');
-                setTimeout(() => setCopied(false), 2000);
-              } catch {
-                // Fallback for older browsers
-                const ta = document.createElement('textarea');
-                ta.value = APP_LINK;
-                ta.style.position = 'fixed';
-                ta.style.opacity = '0';
-                document.body.appendChild(ta);
-                ta.select();
-                document.execCommand('copy');
-                document.body.removeChild(ta);
-                setCopied(true);
-                toast.success('Link copied!');
-                setTimeout(() => setCopied(false), 2000);
+        {/* Share All Links button */}
+        <button
+          onClick={async () => {
+            const shareMsg = `${APP_SHARE_TEXT}\n\n📱 Android: ${APP_DOWNLOAD_ANDROID}\n💻 Desktop: ${APP_DOWNLOAD_DESKTOP}\n🌐 Web: ${APP_BASE_URL}`;
+            const shareData = {
+              title: 'Quick Meet',
+              text: shareMsg,
+            };
+            try {
+              if (navigator.share && navigator.canShare?.(shareData)) {
+                await navigator.share(shareData);
+              } else {
+                await navigator.clipboard.writeText(shareMsg);
+                toast.success('All links copied to clipboard!');
               }
-            }}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-medium transition-all ${
-              copied
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                : 'bg-dark-600 hover:bg-dark-500 text-dark-200 border border-dark-500'
-            }`}
-          >
-            {copied ? <Check size={14} /> : <Copy size={14} />}
-            {copied ? 'Copied!' : 'Copy Link'}
-          </button>
-
-          {/* Share (native or fallback) */}
-          <button
-            onClick={async () => {
-              const shareData = {
-                title: 'Quick Meet',
-                text: APP_SHARE_TEXT,
-                url: APP_LINK,
-              };
-              try {
-                if (navigator.share && navigator.canShare?.(shareData)) {
-                  await navigator.share(shareData);
-                } else {
-                  // Fallback: copy full message
-                  await navigator.clipboard.writeText(`${APP_SHARE_TEXT}\n${APP_LINK}`);
-                  toast.success('Share text copied to clipboard!');
-                }
-              } catch (err) {
-                if (err.name !== 'AbortError') {
-                  // User didn't cancel, try clipboard fallback
-                  try {
-                    await navigator.clipboard.writeText(`${APP_SHARE_TEXT}\n${APP_LINK}`);
-                    toast.success('Share text copied to clipboard!');
-                  } catch {
-                    toast.error('Could not share');
-                  }
+            } catch (err) {
+              if (err.name !== 'AbortError') {
+                try {
+                  await navigator.clipboard.writeText(shareMsg);
+                  toast.success('All links copied to clipboard!');
+                } catch {
+                  toast.error('Could not share');
                 }
               }
-            }}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-medium bg-primary-600 hover:bg-primary-500 text-white transition-all"
-          >
-            <ExternalLink size={14} />
-            Share
-          </button>
-        </div>
+            }
+          }}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-medium bg-primary-600 hover:bg-primary-500 text-white transition-all"
+        >
+          <ExternalLink size={14} />
+          Share All Links
+        </button>
       </div>
 
       {/* Footer */}

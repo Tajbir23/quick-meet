@@ -43,7 +43,7 @@ const setupPresenceHandlers = (io, socket, onlineUsers) => {
   }));
 
   /**
-   * Typing indicator for group chat — GUARDED
+   * Typing indicator for group chat — GUARDED + input validation
    */
   socket.on('typing:group:start', guard.wrapHandler(socket, 'typing:group:start', ({ groupId }) => {
     if (!groupId || typeof groupId !== 'string' || groupId.length > 30) return;
