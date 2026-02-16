@@ -396,7 +396,9 @@ class P2PFileTransferService {
           if (this.onIncomingTransfer) {
             this.onIncomingTransfer({
               ...t,
-              isResume: true,
+              // Only set isResume for paused transfers (already accepted, partially transferred).
+              // Pending transfers need a fresh accept, NOT a resume.
+              isResume: t.status === 'paused',
               senderId: senderId,
               senderName: t.sender?.username || 'Unknown',
             });
@@ -493,6 +495,23 @@ class P2PFileTransferService {
       }
     });
 
+    // Server-side error (e.g. transfer not found, wrong status, sender offline)
+    socket.on('file-transfer:error', (data) => {
+      console.error(`[P2P] ❌ Server error for transfer ${data.transferId}: ${data.message}`);
+      const session = this.sessions.get(data.transferId);
+      if (session) {
+        session.status = 'failed';
+        session.error = data.message;
+        session.destroy();
+        this.sessions.delete(data.transferId);
+        this._notifyUpdate(data.transferId, session);
+      }
+      // Notify via onTransferError callback
+      if (this.onTransferError) {
+        this.onTransferError(data.transferId, data.message);
+      }
+    });
+
     this._socketListenersBound = true;
     this._boundSocketId = socket.id || 'pending';
 
@@ -517,6 +536,7 @@ class P2PFileTransferService {
       'file-transfer:peer-offline', 'file-transfer:pending-list', 'file-transfer:resume-request',
       'file-transfer:resume-info', 'file-transfer:offer', 'file-transfer:answer',
       'file-transfer:ice-candidate', 'file-transfer:progress-ack', 'file-transfer:sender-finished',
+      'file-transfer:error',
     ];
     events.forEach(e => socket.off(e));
   }

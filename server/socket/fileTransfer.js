@@ -456,7 +456,7 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
       const transfer = await FileTransfer.findOne({
         transferId,
         $or: [{ sender: socket.userId }, { receiver: socket.userId }],
-        status: { $in: ['transferring', 'paused', 'accepted'] },
+        status: { $in: ['transferring', 'paused', 'accepted', 'pending'] },
       });
 
       if (!transfer) {
@@ -645,10 +645,11 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
         return;
       }
 
-      const result = await FileTransfer.updateMany(
+      // Cancel ACTIVE transfers (transferring/accepted) for either role
+      const activeResult = await FileTransfer.updateMany(
         {
           $or: [{ sender: socket.userId }, { receiver: socket.userId }],
-          status: { $in: ['transferring', 'accepted', 'pending'] },
+          status: { $in: ['transferring', 'accepted'] },
         },
         {
           $set: {
@@ -659,8 +660,27 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
         }
       );
 
-      if (result.modifiedCount > 0) {
-        console.log(`📁 Cancelled ${result.modifiedCount} transfers for disconnected user ${socket.username}`);
+      // Cancel PENDING transfers only when SENDER disconnects.
+      // The file lives in sender's memory — if sender leaves, it's gone.
+      // Do NOT cancel when receiver disconnects — they may reconnect
+      // and accept via background notification.
+      const pendingSenderResult = await FileTransfer.updateMany(
+        {
+          sender: socket.userId,
+          status: 'pending',
+        },
+        {
+          $set: {
+            status: 'cancelled',
+            pausedAt: new Date(),
+            statusReason: 'Sender disconnected — file no longer available',
+          },
+        }
+      );
+
+      const total = activeResult.modifiedCount + pendingSenderResult.modifiedCount;
+      if (total > 0) {
+        console.log(`📁 Cancelled ${total} transfers for disconnected user ${socket.username} (active: ${activeResult.modifiedCount}, pending-sender: ${pendingSenderResult.modifiedCount})`);
       }
     } catch (err) {
       // Log but never crash — this is non-critical cleanup
