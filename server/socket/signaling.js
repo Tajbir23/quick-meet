@@ -45,7 +45,7 @@ const socketGuard = require('../security/SocketGuard');
 const securityLogger = require('../security/SecurityEventLogger');
 const { SEVERITY } = require('../security/SecurityEventLogger');
 const Message = require('../models/Message');
-const { storePendingNotification } = require('../controllers/pushController');
+const { storePendingNotification, clearPendingCallNotifications } = require('../controllers/pushController');
 
 /**
  * ============================================
@@ -245,6 +245,7 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
         const pending = pendingCalls.get(targetUserId);
         if (pending && pending.callerId === socket.userId) {
           pendingCalls.delete(targetUserId);
+          clearPendingCallNotifications(targetUserId);
           console.log(`📞 Pending call expired: ${socket.username} → ${targetUserId} (30s timeout)`);
           
           // NOW tell caller user is offline (after 30s wait)
@@ -278,6 +279,25 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
       isReconnect: isReconnect || false,
     });
 
+    // ALWAYS store a pending notification for native HTTP polling.
+    // Even though the user appears "online" (socket connected),
+    // the Android WebView may be paused — JS is frozen, socket
+    // events are buffered but not processed. The native BackgroundService
+    // polls /api/push/pending via raw HTTP (independent of WebView),
+    // so this ensures the call notification is ALWAYS shown.
+    if (!isReconnect) {
+      storePendingNotification(targetUserId, {
+        type: 'call',
+        title: `${socket.username} is calling...`,
+        body: `Incoming ${callType || 'audio'} call`,
+        data: {
+          callType: callType || 'audio',
+          callerId: socket.userId,
+          callerName: socket.username,
+        },
+      });
+    }
+
     io.to(targetSocketId).emit('call:offer', {
       callerId: socket.userId,
       callerName: socket.username,
@@ -292,6 +312,9 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
    * SECURITY: SDP sanitized
    */
   socket.on('call:answer', ({ callerId, answer }) => {
+    // Clear pending call notifications for the answerer (they answered, no need for native notification)
+    clearPendingCallNotifications(socket.userId);
+
     // Sanitize SDP answer
     if (answer && answer.sdp) {
       const sdpResult = sdpSanitizer.sanitizeSDP(answer.sdp, 'answer', socket.userId);
@@ -354,10 +377,11 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
   socket.on('call:reject', ({ callerId, reason, callType }) => {
     const callerSocketId = onlineUsers.get(callerId);
 
-    // Clear active call tracking and pending calls
+    // Clear active call tracking, pending calls, and pending notifications
     activeCalls.delete(socket.userId);
     activeCalls.delete(callerId);
     clearPendingCall(callerId);
+    clearPendingCallNotifications(socket.userId);
 
     if (callerSocketId) {
       console.log(`📞 Call rejected: ${socket.username} rejected call from ${callerId}`);

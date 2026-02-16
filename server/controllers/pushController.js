@@ -122,8 +122,25 @@ const pushHealth = (req, res) => {
   res.json({ success: true, time: Date.now() });
 };
 
+/**
+ * Clear all call-type pending notifications for a user.
+ * Called when a call is answered, rejected, or timed out.
+ */
+const clearPendingCallNotifications = (userId) => {
+  if (!userId) return;
+  const queue = pendingNotifications.get(userId);
+  if (!queue) return;
+  const filtered = queue.filter(n => n.type !== 'call');
+  if (filtered.length === 0) {
+    pendingNotifications.delete(userId);
+  } else {
+    pendingNotifications.set(userId, filtered);
+  }
+};
+
 module.exports = {
   storePendingNotification,
+  clearPendingCallNotifications,
   getPendingNotifications,
   pushHealth,
 };

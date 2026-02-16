@@ -153,6 +153,12 @@ const useSocket = () => {
         return;
       }
 
+      // If already in a call or already ringing from this caller, ignore duplicate
+      if (callStatus !== 'idle') {
+        console.log(`📞 Ignoring duplicate call:offer from ${callerName} — callStatus: ${callStatus}`);
+        return;
+      }
+
       console.log(`📞 Incoming call from ${callerName} (${callType})`);
 
       useCallStore.getState().setIncomingCall({
