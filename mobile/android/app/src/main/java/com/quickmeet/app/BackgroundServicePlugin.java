@@ -241,7 +241,7 @@ public class BackgroundServicePlugin extends Plugin {
     
     /**
      * Get and consume pending action from notification button presses
-     * Returns: { action: "answer_call" | "decline_call" | "accept_transfer" | "reject_transfer" | null }
+     * Returns: { action: "answer_call" | "decline_call" | "accept_transfer" | "reject_transfer" | null, data: "json" | null }
      */
     @PluginMethod()
     public void getPendingAction(PluginCall call) {
@@ -249,9 +249,12 @@ public class BackgroundServicePlugin extends Plugin {
         BackgroundService service = BackgroundService.getInstance();
         if (service != null) {
             String action = service.consumePendingAction();
+            String data = service.consumePendingActionData();
             result.put("action", action);
+            result.put("data", data);
         } else {
             result.put("action", null);
+            result.put("data", null);
         }
         call.resolve(result);
     }

@@ -138,9 +138,26 @@ const clearPendingCallNotifications = (userId) => {
   }
 };
 
+/**
+ * Clear all file_transfer-type pending notifications for a user.
+ * Called when a file transfer is accepted, rejected, or cancelled.
+ */
+const clearPendingFileTransferNotifications = (userId) => {
+  if (!userId) return;
+  const queue = pendingNotifications.get(userId);
+  if (!queue) return;
+  const filtered = queue.filter(n => n.type !== 'file_transfer');
+  if (filtered.length === 0) {
+    pendingNotifications.delete(userId);
+  } else {
+    pendingNotifications.set(userId, filtered);
+  }
+};
+
 module.exports = {
   storePendingNotification,
   clearPendingCallNotifications,
+  clearPendingFileTransferNotifications,
   getPendingNotifications,
   pushHealth,
 };

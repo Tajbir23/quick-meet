@@ -68,17 +68,47 @@ function App() {
             callStore.rejectCall();
           }
         },
-        onAcceptTransfer: () => {
+        onAcceptTransfer: (data) => {
           const ftStore = useFileTransferStore.getState();
           const pending = ftStore.incomingRequests;
+          
+          if (data?.transferId) {
+            // We have the transfer data from notification — try to match
+            const match = pending.find(r => r.transferId === data.transferId);
+            if (match) {
+              ftStore.acceptTransfer(match);
+              return;
+            }
+          }
+          
           if (pending.length > 0) {
             // Accept the most recent incoming transfer
             ftStore.acceptTransfer(pending[pending.length - 1]);
+          } else {
+            // Transfer request hasn't arrived via socket yet (reconnecting)
+            // Set flag so it auto-accepts when the request arrives
+            console.log('[App] Accept tapped but no pending transfer yet — setting autoAcceptPending');
+            useFileTransferStore.setState({ autoAcceptTransferId: data?.transferId || true });
+            // Safety timeout: clear after 30s
+            setTimeout(() => {
+              if (useFileTransferStore.getState().autoAcceptTransferId) {
+                useFileTransferStore.setState({ autoAcceptTransferId: null });
+              }
+            }, 30000);
           }
         },
-        onRejectTransfer: () => {
+        onRejectTransfer: (data) => {
           const ftStore = useFileTransferStore.getState();
           const pending = ftStore.incomingRequests;
+          
+          if (data?.transferId) {
+            const match = pending.find(r => r.transferId === data.transferId);
+            if (match) {
+              ftStore.rejectTransfer(match.transferId);
+              return;
+            }
+          }
+          
           if (pending.length > 0) {
             ftStore.rejectTransfer(pending[pending.length - 1].transferId);
           }

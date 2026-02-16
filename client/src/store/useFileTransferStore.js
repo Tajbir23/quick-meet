@@ -25,6 +25,9 @@ const useFileTransferStore = create((set, get) => ({
   showPanel: false,
   // Is initialized
   initialized: false,
+  // Auto-accept flag: set when user taps Accept on notification before socket delivers the request
+  // Can be `true` (accept any) or a specific transferId string
+  autoAcceptTransferId: null,
 
   /**
    * Initialize the P2P file transfer system
@@ -73,6 +76,19 @@ const useFileTransferStore = create((set, get) => ({
     };
 
     p2pFileTransfer.onIncomingTransfer = (data) => {
+      // Check if auto-accept is pending (user tapped Accept on notification)
+      const autoAccept = get().autoAcceptTransferId;
+      if (autoAccept && (autoAccept === true || autoAccept === data.transferId)) {
+        console.log(`[FileTransferStore] Auto-accepting transfer: ${data.transferId}`);
+        set({ autoAcceptTransferId: null });
+        // Small delay to ensure socket is ready
+        setTimeout(() => {
+          p2pFileTransfer.acceptTransfer(data);
+          dismissTransferNotification();
+        }, 500);
+        return;
+      }
+      
       set((state) => ({
         incomingRequests: [
           ...state.incomingRequests.filter(r => r.transferId !== data.transferId),
@@ -224,6 +240,7 @@ const useFileTransferStore = create((set, get) => ({
       incomingRequests: [],
       showPanel: false,
       initialized: false,
+      autoAcceptTransferId: null,
     });
   },
 }));

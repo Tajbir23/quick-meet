@@ -17,6 +17,7 @@
 
 const FileTransfer = require('../models/FileTransfer');
 const { socketGuard } = require('../security');
+const { storePendingNotification, clearPendingFileTransferNotifications } = require('../controllers/pushController');
 
 const setupFileTransferHandlers = (io, socket, onlineUsers) => {
 
@@ -120,6 +121,24 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
         });
       }
 
+      // ALWAYS store a pending notification for native polling.
+      // Even if receiver socket is connected, WebView JS may be suspended.
+      // The native BackgroundService polls for these every 5 seconds.
+      const sizeMB = (fileSize / 1048576).toFixed(1);
+      storePendingNotification(receiverId, {
+        type: 'file_transfer',
+        title: `📁 ${socket.username} wants to send a file`,
+        body: `${fileName} (${sizeMB} MB)`,
+        data: {
+          transferId,
+          senderId: socket.userId,
+          senderName: socket.username,
+          fileName,
+          fileSize,
+          fileMimeType,
+        },
+      });
+
       console.log(`📁 File transfer request: ${socket.username} → ${receiverId} | ${fileName} (${(fileSize / 1048576).toFixed(1)}MB)`);
     } catch (err) {
       console.error('file-transfer:request error:', err);
@@ -157,6 +176,9 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
       transfer.acceptedAt = new Date();
       await transfer.save();
 
+      // Clear file transfer pending notifications (accepted)
+      clearPendingFileTransferNotifications(socket.userId);
+
       // Notify sender to start DataChannel setup
       const senderId = transfer.sender.toString();
       const senderSocketId = onlineUsers.get(senderId);
@@ -190,6 +212,9 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
     try {
       const transfer = await FileTransfer.findOne({ transferId, receiver: socket.userId });
       if (!transfer) return;
+
+      // Clear file transfer pending notifications (rejected)
+      clearPendingFileTransferNotifications(socket.userId);
 
       transfer.status = 'cancelled';
       transfer.statusReason = reason || 'Rejected by receiver';

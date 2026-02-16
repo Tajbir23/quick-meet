@@ -50,19 +50,29 @@ public class NotificationActionReceiver extends BroadcastReceiver {
                 break;
 
             case ACTION_ACCEPT_TRANSFER:
-                // Launch app and signal accept
-                launchApp(context, "accept_transfer");
+                // NOTE: On Android 12+, the Accept button now uses PendingIntent.getActivity()
+                // and goes directly to MainActivity.onNewIntent() to avoid trampoline restriction.
+                // This BroadcastReceiver case is kept as a fallback for older Android versions.
                 if (service != null) {
                     service.dismissTransferNotification();
-                    service.setPendingAction("accept_transfer");
+                    // Read stored transfer data
+                    android.content.SharedPreferences prefs = context
+                        .getSharedPreferences("QuickMeetPrefs", android.content.Context.MODE_PRIVATE);
+                    String transferData = prefs.getString("last_transfer_data", null);
+                    service.setPendingAction("accept_transfer", transferData);
                 }
+                launchApp(context, "accept_transfer");
                 break;
 
             case ACTION_REJECT_TRANSFER:
                 // Signal reject without launching app
                 if (service != null) {
                     service.dismissTransferNotification();
-                    service.setPendingAction("reject_transfer");
+                    // Read stored transfer data for reject
+                    android.content.SharedPreferences rejectPrefs = context
+                        .getSharedPreferences("QuickMeetPrefs", android.content.Context.MODE_PRIVATE);
+                    String rejectTransferData = rejectPrefs.getString("last_transfer_data", null);
+                    service.setPendingAction("reject_transfer", rejectTransferData);
                 }
                 break;
 

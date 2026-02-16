@@ -197,6 +197,14 @@ public class MainActivity extends BridgeActivity {
                 service.setPendingAction("answer_call");
                 Log.i(TAG, "Answer action processed — pending action set");
                 break;
+            case "accept_transfer":
+                service.dismissTransferNotification();
+                // Read stored transfer data and pass it with the pending action
+                android.content.SharedPreferences prefs = getSharedPreferences("QuickMeetPrefs", MODE_PRIVATE);
+                String transferData = prefs.getString("last_transfer_data", null);
+                service.setPendingAction("accept_transfer", transferData);
+                Log.i(TAG, "Accept transfer action processed — pending action set");
+                break;
             default:
                 Log.d(TAG, "Unknown notification action: " + action);
                 break;

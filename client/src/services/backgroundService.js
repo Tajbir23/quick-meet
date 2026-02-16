@@ -213,6 +213,16 @@ const startActionPolling = () => {
       
       console.log(`[BackgroundService] Pending action received: ${action}`);
       
+      // Parse associated data (JSON string from native)
+      let actionData = null;
+      if (result?.data) {
+        try {
+          actionData = typeof result.data === 'string' ? JSON.parse(result.data) : result.data;
+        } catch (e) {
+          actionData = null;
+        }
+      }
+      
       switch (action) {
         case 'answer_call':
           if (_onAnswerCall) _onAnswerCall();
@@ -221,10 +231,10 @@ const startActionPolling = () => {
           if (_onDeclineCall) _onDeclineCall();
           break;
         case 'accept_transfer':
-          if (_onAcceptTransfer) _onAcceptTransfer();
+          if (_onAcceptTransfer) _onAcceptTransfer(actionData);
           break;
         case 'reject_transfer':
-          if (_onRejectTransfer) _onRejectTransfer();
+          if (_onRejectTransfer) _onRejectTransfer(actionData);
           break;
       }
     } catch (err) {

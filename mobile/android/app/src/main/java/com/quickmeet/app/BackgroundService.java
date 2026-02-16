@@ -93,6 +93,8 @@ public class BackgroundService extends Service {
     
     // Queue for pending notification actions (answer_call, decline_call, etc.)
     private volatile String pendingAction = null;
+    // Associated data for the pending action (e.g., transferId for file transfers)
+    private volatile String pendingActionData = null;
     
     // Polling thread
     private HandlerThread pollingThread;
@@ -325,9 +327,17 @@ public class BackgroundService extends Service {
         PendingIntent launchIntent = getLaunchPendingIntent();
         
         // Action: Accept Transfer
-        Intent acceptIntent = new Intent(this, NotificationActionReceiver.class);
+        // CRITICAL: Use PendingIntent.getActivity() NOT getBroadcast().
+        // Android 12+ blocks "notification trampolining" — a BroadcastReceiver
+        // triggered by notification action CANNOT call startActivity().
+        // So we launch MainActivity directly with the accept_transfer extra.
+        Intent acceptIntent = new Intent(this, MainActivity.class);
         acceptIntent.setAction(NotificationActionReceiver.ACTION_ACCEPT_TRANSFER);
-        PendingIntent acceptPending = PendingIntent.getBroadcast(
+        acceptIntent.putExtra("notification_action", "accept_transfer");
+        acceptIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent acceptPending = PendingIntent.getActivity(
             this, RC_ACCEPT_TRANSFER, acceptIntent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
@@ -521,12 +531,30 @@ public class BackgroundService extends Service {
     }
     
     /**
+     * Set a pending action with associated data (JSON string)
+     */
+    public void setPendingAction(String action, String data) {
+        this.pendingAction = action;
+        this.pendingActionData = data;
+        Log.i(TAG, "Pending action set: " + action + " (with data)");
+    }
+    
+    /**
      * Get and clear the pending action (polled from JS)
      */
     public String consumePendingAction() {
         String action = this.pendingAction;
         this.pendingAction = null;
         return action;
+    }
+    
+    /**
+     * Get and clear the pending action data (polled from JS)
+     */
+    public String consumePendingActionData() {
+        String data = this.pendingActionData;
+        this.pendingActionData = null;
+        return data;
     }
     
     /**
@@ -766,6 +794,34 @@ public class BackgroundService extends Service {
                         String callerName = callData != null ? callData.optString("callerName", title) : title;
                         String callType = callData != null ? callData.optString("callType", "audio") : "audio";
                         showCallNotification(callerName, callType);
+                        break;
+                    case "file_transfer":
+                        JSONObject ftData = notif.optJSONObject("data");
+                        String senderName = ftData != null ? ftData.optString("senderName", "Unknown") : "Unknown";
+                        String fileName = ftData != null ? ftData.optString("fileName", "file") : "file";
+                        long fileSize = ftData != null ? ftData.optLong("fileSize", 0) : 0;
+                        String transferId = ftData != null ? ftData.optString("transferId", "") : "";
+                        
+                        // Format file size for display
+                        String fileSizeStr;
+                        if (fileSize >= 1073741824) {
+                            fileSizeStr = String.format("%.1f GB", fileSize / 1073741824.0);
+                        } else if (fileSize >= 1048576) {
+                            fileSizeStr = String.format("%.1f MB", fileSize / 1048576.0);
+                        } else if (fileSize >= 1024) {
+                            fileSizeStr = String.format("%.0f KB", fileSize / 1024.0);
+                        } else {
+                            fileSizeStr = fileSize + " B";
+                        }
+                        
+                        // Store transfer data so Accept/Reject can reference it
+                        if (ftData != null) {
+                            SharedPreferences ftPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                            ftPrefs.edit().putString("last_transfer_data", ftData.toString()).apply();
+                        }
+                        
+                        showIncomingTransferNotification(senderName, fileName, fileSizeStr);
+                        Log.i(TAG, "📁 File transfer notification shown: " + fileName + " from " + senderName);
                         break;
                     case "message":
                     default:
