@@ -1341,7 +1341,26 @@ class P2PFileTransferService {
    */
   async _sendChunks(session) {
     const { file, dataChannel } = session;
-    if (!file || !dataChannel) return;
+
+    // Detailed entry diagnostics
+    this._emitDiag(session, 'send_start', {
+      side: 'sender',
+      hasFile: !!file,
+      fileType: file ? typeof file : 'N/A',
+      fileName: file?.name,
+      fileSize: file?.size,
+      hasDataChannel: !!dataChannel,
+      dcState: dataChannel?.readyState,
+      currentChunk: session.currentChunk,
+      totalChunks: session.totalChunks,
+      isPaused: session.isPaused,
+      sessionStatus: session.status,
+    });
+
+    if (!file || !dataChannel) {
+      console.error(`[P2P] ⚠️ _sendChunks early return: file=${!!file} dataChannel=${!!dataChannel}`);
+      return;
+    }
 
     // Read chunkSize/totalChunks from session LIVE (may have been adapted by SCTP maxMessageSize)
     while (session.currentChunk < session.totalChunks && !session.isPaused && session.status === 'transferring') {

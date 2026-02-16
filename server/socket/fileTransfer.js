@@ -46,6 +46,8 @@ const setupFileTransferHandlers = (io, socket, onlineUsers) => {
       extra = ` | mode=${data.mode} | totalChunks=${data.totalChunks}`;
     } else if (evt === 'first_chunk_received') {
       extra = ` | chunkIdx=${data.chunkIndex} | size=${data.chunkSize}`;
+    } else if (evt === 'send_start') {
+      extra = ` | hasFile=${data.hasFile} | fileType=${data.fileType} | fileName=${data.fileName} | fileSize=${data.fileSize} | hasDC=${data.hasDataChannel} | dcState=${data.dcState} | chunk=${data.currentChunk}/${data.totalChunks} | paused=${data.isPaused} | sessStatus=${data.sessionStatus}`;
     }
     console.log(`[FT DIAG] ${evt} | ${side} | ...${tid} | status=${data.status} | dc=${data.dc} | ice=${data.ice}${extra}`);
   });
