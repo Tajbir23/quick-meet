@@ -26,6 +26,7 @@ import {
   onSocketConnected,
   onSocketDisconnected,
   isInBackground,
+  notifyNewMessage,
 } from '../services/backgroundService';
 
 const useSocket = () => {
@@ -78,11 +79,20 @@ const useSocket = () => {
     socket.on('message:receive', ({ message, senderId }) => {
       useChatStore.getState().addReceivedMessage(senderId, message);
       playNotificationSound('message');
+      // Android: show notification when app is in background
+      const senderUser = useChatStore.getState().users?.find(u => u._id === senderId);
+      notifyNewMessage(
+        senderUser?.username || 'Someone',
+        message.content || (message.fileUrl ? '📎 File' : 'New message')
+      );
     });
 
     socket.on('message:group:receive', ({ message, groupId }) => {
       useChatStore.getState().addReceivedMessage(groupId, message);
       playNotificationSound('message');
+      // Android: show notification when app is in background
+      const senderName = message.sender?.username || 'Someone';
+      notifyNewMessage(senderName, message.content || (message.fileUrl ? '📎 File' : 'New message'));
     });
 
     // Typing indicators

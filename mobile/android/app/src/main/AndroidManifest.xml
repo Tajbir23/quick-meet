@@ -34,6 +34,31 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Boot Receiver: auto-start service when device boots -->
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Notification Action Receiver: handles answer/decline/accept/reject -->
+        <receiver
+            android:name=".NotificationActionReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.quickmeet.ACTION_ANSWER_CALL" />
+                <action android:name="com.quickmeet.ACTION_DECLINE_CALL" />
+                <action android:name="com.quickmeet.ACTION_ACCEPT_TRANSFER" />
+                <action android:name="com.quickmeet.ACTION_REJECT_TRANSFER" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

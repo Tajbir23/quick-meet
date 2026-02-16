@@ -23,6 +23,7 @@ import androidx.core.app.NotificationCompat;
  * - WebView JS execution is not suspended by Android
  * 
  * Shows a persistent notification in the notification bar.
+ * Like Messenger — always connected even when app is not open.
  */
 public class BackgroundService extends Service {
     private static final String TAG = "QM-BackgroundService";
@@ -31,15 +32,27 @@ public class BackgroundService extends Service {
     public static final String CHANNEL_BG = "quickmeet_background";
     public static final String CHANNEL_CALL = "quickmeet_calls";
     public static final String CHANNEL_TRANSFER = "quickmeet_transfer";
+    public static final String CHANNEL_MESSAGE = "quickmeet_messages";
     
     // Notification IDs
     public static final int NOTIFICATION_BG = 1001;
     public static final int NOTIFICATION_CALL = 1002;
     public static final int NOTIFICATION_TRANSFER = 1003;
+    public static final int NOTIFICATION_MESSAGE = 1004;
+    
+    // Pending intent request codes (must be unique)
+    private static final int RC_LAUNCH = 0;
+    private static final int RC_ANSWER = 1;
+    private static final int RC_DECLINE = 2;
+    private static final int RC_ACCEPT_TRANSFER = 3;
+    private static final int RC_REJECT_TRANSFER = 4;
     
     private PowerManager.WakeLock wakeLock;
     private static BackgroundService instance;
     private NotificationManager notificationManager;
+    
+    // Queue for pending notification actions (answer_call, decline_call, etc.)
+    private volatile String pendingAction = null;
     
     @Override
     public void onCreate() {
@@ -104,10 +117,26 @@ public class BackgroundService extends Service {
     }
     
     /**
-     * Show incoming call notification with high priority (heads-up)
+     * Show incoming call notification with Answer/Decline action buttons
      */
     public void showCallNotification(String callerName, String callType) {
-        PendingIntent pendingIntent = getLaunchPendingIntent();
+        PendingIntent launchIntent = getLaunchPendingIntent();
+        
+        // Action: Answer Call
+        Intent answerIntent = new Intent(this, NotificationActionReceiver.class);
+        answerIntent.setAction(NotificationActionReceiver.ACTION_ANSWER_CALL);
+        PendingIntent answerPending = PendingIntent.getBroadcast(
+            this, RC_ANSWER, answerIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+        
+        // Action: Decline Call
+        Intent declineIntent = new Intent(this, NotificationActionReceiver.class);
+        declineIntent.setAction(NotificationActionReceiver.ACTION_DECLINE_CALL);
+        PendingIntent declinePending = PendingIntent.getBroadcast(
+            this, RC_DECLINE, declineIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
         
         String title = "Incoming " + (callType != null && callType.equals("video") ? "Video" : "Voice") + " Call";
         String body = callerName + " is calling...";
@@ -116,25 +145,34 @@ public class BackgroundService extends Service {
             .setContentTitle(title)
             .setContentText(body)
             .setSmallIcon(android.R.drawable.ic_menu_call)
-            .setContentIntent(pendingIntent)
-            .setFullScreenIntent(pendingIntent, true) // Launches on lock screen
+            .setContentIntent(launchIntent)
+            .setFullScreenIntent(launchIntent, true)
             .setAutoCancel(false)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setVibrate(new long[]{0, 500, 200, 500, 200, 500})
+            .addAction(android.R.drawable.ic_menu_call, "\u2713 Answer", answerPending)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "\u2715 Decline", declinePending)
             .build();
         
         notificationManager.notify(NOTIFICATION_CALL, notification);
-        Log.i(TAG, "Call notification shown: " + callerName);
+        Log.i(TAG, "Call notification shown with actions: " + callerName);
     }
     
     /**
      * Show ongoing call notification (visible in notification panel, no sound/vibration)
-     * Replaces the incoming call notification with a calm ongoing one.
      */
     public void showOngoingCallNotification(String callerName, String callType) {
         PendingIntent pendingIntent = getLaunchPendingIntent();
+        
+        // Action: End Call
+        Intent declineIntent = new Intent(this, NotificationActionReceiver.class);
+        declineIntent.setAction(NotificationActionReceiver.ACTION_DECLINE_CALL);
+        PendingIntent endCallPending = PendingIntent.getBroadcast(
+            this, RC_DECLINE, declineIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
         
         String type = (callType != null && callType.equals("video")) ? "Video" : "Voice";
         String title = type + " Call";
@@ -147,11 +185,12 @@ public class BackgroundService extends Service {
             .setContentIntent(pendingIntent)
             .setAutoCancel(false)
             .setOngoing(true)
-            .setSilent(true) // No sound/vibration for ongoing call
+            .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setUsesChronometer(true) // Shows running timer
-            .setWhen(System.currentTimeMillis()) // Chrono start time
+            .setUsesChronometer(true)
+            .setWhen(System.currentTimeMillis())
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "End Call", endCallPending)
             .build();
         
         notificationManager.notify(NOTIFICATION_CALL, notification);
@@ -166,7 +205,7 @@ public class BackgroundService extends Service {
     }
     
     /**
-     * Show file transfer notification  
+     * Show file transfer progress notification (persistent until 100%)
      */
     public void showTransferNotification(String title, String body, int progress) {
         PendingIntent pendingIntent = getLaunchPendingIntent();
@@ -177,9 +216,9 @@ public class BackgroundService extends Service {
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentIntent(pendingIntent)
             .setAutoCancel(false)
-            .setOngoing(progress >= 0 && progress < 100)
-            .setSilent(progress > 0) // Only sound on first notification
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setOngoing(true) // Always ongoing — persistent until complete
+            .setSilent(true) // Silent to avoid spam during progress updates
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS);
         
         if (progress >= 0 && progress < 100) {
@@ -187,32 +226,73 @@ public class BackgroundService extends Service {
         } else if (progress == 100) {
             builder.setSmallIcon(android.R.drawable.stat_sys_download_done);
             builder.setAutoCancel(true);
-            builder.setOngoing(false);
+            builder.setOngoing(false); // Allow dismiss after completion
+            builder.setPriority(NotificationCompat.PRIORITY_DEFAULT);
+            builder.setProgress(0, 0, false);
         }
         
         notificationManager.notify(NOTIFICATION_TRANSFER, builder.build());
     }
     
     /**
-     * Show incoming file transfer request notification with high priority
+     * Show incoming file transfer request with Accept/Reject action buttons
      */
     public void showIncomingTransferNotification(String senderName, String fileName, String fileSize) {
-        PendingIntent pendingIntent = getLaunchPendingIntent();
+        PendingIntent launchIntent = getLaunchPendingIntent();
         
-        Notification notification = new NotificationCompat.Builder(this, CHANNEL_CALL) // Use call channel for high priority
+        // Action: Accept Transfer
+        Intent acceptIntent = new Intent(this, NotificationActionReceiver.class);
+        acceptIntent.setAction(NotificationActionReceiver.ACTION_ACCEPT_TRANSFER);
+        PendingIntent acceptPending = PendingIntent.getBroadcast(
+            this, RC_ACCEPT_TRANSFER, acceptIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+        
+        // Action: Reject Transfer
+        Intent rejectIntent = new Intent(this, NotificationActionReceiver.class);
+        rejectIntent.setAction(NotificationActionReceiver.ACTION_REJECT_TRANSFER);
+        PendingIntent rejectPending = PendingIntent.getBroadcast(
+            this, RC_REJECT_TRANSFER, rejectIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+        
+        Notification notification = new NotificationCompat.Builder(this, CHANNEL_CALL)
             .setContentTitle("Incoming File from " + senderName)
             .setContentText(fileName + " (" + fileSize + ")")
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentIntent(pendingIntent)
-            .setFullScreenIntent(pendingIntent, true)
-            .setAutoCancel(true)
+            .setContentIntent(launchIntent)
+            .setFullScreenIntent(launchIntent, true)
+            .setAutoCancel(false)
+            .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setVibrate(new long[]{0, 300, 150, 300})
+            .addAction(android.R.drawable.ic_menu_save, "\u2713 Accept", acceptPending)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "\u2715 Reject", rejectPending)
             .build();
         
         notificationManager.notify(NOTIFICATION_TRANSFER, notification);
-        Log.i(TAG, "Incoming transfer notification: " + fileName + " from " + senderName);
+        Log.i(TAG, "Incoming transfer notification with actions: " + fileName + " from " + senderName);
+    }
+    
+    /**
+     * Show message notification
+     */
+    public void showMessageNotification(String senderName, String message) {
+        PendingIntent pendingIntent = getLaunchPendingIntent();
+        
+        Notification notification = new NotificationCompat.Builder(this, CHANNEL_MESSAGE)
+            .setContentTitle(senderName)
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVibrate(new long[]{0, 200})
+            .build();
+        
+        notificationManager.notify(NOTIFICATION_MESSAGE, notification);
     }
     
     /**
@@ -223,10 +303,42 @@ public class BackgroundService extends Service {
     }
     
     /**
+     * Dismiss message notification
+     */
+    public void dismissMessageNotification() {
+        notificationManager.cancel(NOTIFICATION_MESSAGE);
+    }
+    
+    /**
+     * Set a pending action from notification button press
+     */
+    public void setPendingAction(String action) {
+        this.pendingAction = action;
+        Log.i(TAG, "Pending action set: " + action);
+    }
+    
+    /**
+     * Get and clear the pending action (polled from JS)
+     */
+    public String consumePendingAction() {
+        String action = this.pendingAction;
+        this.pendingAction = null;
+        return action;
+    }
+    
+    /**
      * Get the instance of the running service
      */
     public static BackgroundService getInstance() {
         return instance;
+    }
+    
+    /**
+     * Check if battery optimization is disabled for this app
+     */
+    public static boolean isBatteryOptimizationDisabled(Context context) {
+        PowerManager pm = (PowerManager) context.getSystemService(POWER_SERVICE);
+        return pm.isIgnoringBatteryOptimizations(context.getPackageName());
     }
     
     /**
@@ -259,20 +371,34 @@ public class BackgroundService extends Service {
             callChannel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
             notificationManager.createNotificationChannel(callChannel);
             
-            // Transfer channel - default priority
+            // Transfer channel - low priority (silent progress)
             NotificationChannel transferChannel = new NotificationChannel(
                 CHANNEL_TRANSFER,
                 "File Transfers",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_LOW
             );
             transferChannel.setDescription("File transfer progress and notifications");
             transferChannel.setShowBadge(true);
+            transferChannel.enableVibration(false);
             notificationManager.createNotificationChannel(transferChannel);
+            
+            // Message channel - high priority
+            NotificationChannel messageChannel = new NotificationChannel(
+                CHANNEL_MESSAGE,
+                "Messages",
+                NotificationManager.IMPORTANCE_HIGH
+            );
+            messageChannel.setDescription("New message notifications");
+            messageChannel.setShowBadge(true);
+            messageChannel.enableVibration(true);
+            messageChannel.setVibrationPattern(new long[]{0, 200});
+            notificationManager.createNotificationChannel(messageChannel);
         }
     }
     
     /**
-     * Acquire partial wake lock to keep CPU running
+     * Acquire partial wake lock with 4-hour timeout to prevent battery drain.
+     * Service is START_STICKY so Android will restart it if killed.
      */
     private void acquireWakeLock() {
         try {
@@ -281,8 +407,8 @@ public class BackgroundService extends Service {
                 PowerManager.PARTIAL_WAKE_LOCK, 
                 "QuickMeet::BackgroundWakeLock"
             );
-            wakeLock.acquire();
-            Log.i(TAG, "WakeLock acquired");
+            wakeLock.acquire(4 * 60 * 60 * 1000L); // 4 hour timeout
+            Log.i(TAG, "WakeLock acquired (4h timeout)");
         } catch (Exception e) {
             Log.e(TAG, "Failed to acquire WakeLock", e);
         }
@@ -295,14 +421,14 @@ public class BackgroundService extends Service {
         Intent intent = new Intent(this, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         return PendingIntent.getActivity(
-            this, 0, intent,
+            this, RC_LAUNCH, intent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
     }
     
     @Override
     public void onDestroy() {
-        Log.i(TAG, "BackgroundService destroyed");
+        Log.i(TAG, "BackgroundService destroyed — will be restarted by START_STICKY");
         if (wakeLock != null && wakeLock.isHeld()) {
             try {
                 wakeLock.release();

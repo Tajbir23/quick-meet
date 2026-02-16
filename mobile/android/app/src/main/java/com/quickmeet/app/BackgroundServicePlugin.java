@@ -1,7 +1,10 @@
 package com.quickmeet.app;
 
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.util.Log;
 
 import com.getcapacitor.JSObject;
@@ -16,12 +19,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  * Exposes the Android foreground service to JavaScript:
  * - start/stop the background service
  * - update notification content
- * - show call/transfer notifications
- * 
- * Usage from JS:
- *   import { registerPlugin } from '@capacitor/core';
- *   const BackgroundService = registerPlugin('BackgroundService');
- *   await BackgroundService.start({ title: '...', body: '...' });
+ * - show call/transfer/message notifications
+ * - handle notification action buttons (answer/decline/accept/reject)
+ * - request battery optimization bypass
  */
 @CapacitorPlugin(name = "BackgroundService")
 public class BackgroundServicePlugin extends Plugin {
@@ -29,8 +29,6 @@ public class BackgroundServicePlugin extends Plugin {
     
     /**
      * Start the foreground service
-     * @param title - Notification title
-     * @param body - Notification body text
      */
     @PluginMethod()
     public void start(PluginCall call) {
@@ -74,8 +72,6 @@ public class BackgroundServicePlugin extends Plugin {
     
     /**
      * Update the persistent background notification
-     * @param title - New notification title
-     * @param body - New notification body text
      */
     @PluginMethod()
     public void updateNotification(PluginCall call) {
@@ -90,9 +86,7 @@ public class BackgroundServicePlugin extends Plugin {
     }
     
     /**
-     * Show incoming call notification (high priority, heads-up)
-     * @param callerName - Name of the caller
-     * @param callType - "audio" or "video"
+     * Show incoming call notification with Answer/Decline buttons
      */
     @PluginMethod()
     public void showCallNotification(PluginCall call) {
@@ -107,10 +101,7 @@ public class BackgroundServicePlugin extends Plugin {
     }
     
     /**
-     * Show ongoing call notification (persistent, no sound)
-     * Shows in notification panel that a call is active.
-     * @param callerName - Name of the remote user
-     * @param callType - "audio" or "video"
+     * Show ongoing call notification with End Call button
      */
     @PluginMethod()
     public void showOngoingCallNotification(PluginCall call) {
@@ -125,7 +116,7 @@ public class BackgroundServicePlugin extends Plugin {
     }
     
     /**
-     * Dismiss the call notification (incoming or ongoing)
+     * Dismiss the call notification
      */
     @PluginMethod()
     public void dismissCallNotification(PluginCall call) {
@@ -137,10 +128,7 @@ public class BackgroundServicePlugin extends Plugin {
     }
     
     /**
-     * Show file transfer progress notification
-     * @param title - Notification title
-     * @param body - Notification body
-     * @param progress - 0-100 progress, or -1 for indeterminate
+     * Show file transfer progress notification (persistent until 100%)
      */
     @PluginMethod()
     public void showTransferNotification(PluginCall call) {
@@ -156,10 +144,7 @@ public class BackgroundServicePlugin extends Plugin {
     }
     
     /**
-     * Show incoming file transfer request notification (high priority)
-     * @param senderName - Name of the sender
-     * @param fileName - Name of the file
-     * @param fileSize - Human-readable file size
+     * Show incoming file transfer request with Accept/Reject buttons
      */
     @PluginMethod()
     public void showIncomingTransferNotification(PluginCall call) {
@@ -170,6 +155,21 @@ public class BackgroundServicePlugin extends Plugin {
         BackgroundService service = BackgroundService.getInstance();
         if (service != null) {
             service.showIncomingTransferNotification(senderName, fileName, fileSize);
+        }
+        call.resolve();
+    }
+    
+    /**
+     * Show message notification
+     */
+    @PluginMethod()
+    public void showMessageNotification(PluginCall call) {
+        String senderName = call.getString("senderName", "Unknown");
+        String message = call.getString("message", "");
+        
+        BackgroundService service = BackgroundService.getInstance();
+        if (service != null) {
+            service.showMessageNotification(senderName, message);
         }
         call.resolve();
     }
@@ -194,5 +194,69 @@ public class BackgroundServicePlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("running", BackgroundService.getInstance() != null);
         call.resolve(result);
+    }
+    
+    /**
+     * Get and consume pending action from notification button presses
+     * Returns: { action: "answer_call" | "decline_call" | "accept_transfer" | "reject_transfer" | null }
+     */
+    @PluginMethod()
+    public void getPendingAction(PluginCall call) {
+        JSObject result = new JSObject();
+        BackgroundService service = BackgroundService.getInstance();
+        if (service != null) {
+            String action = service.consumePendingAction();
+            result.put("action", action);
+        } else {
+            result.put("action", null);
+        }
+        call.resolve(result);
+    }
+    
+    /**
+     * Request battery optimization bypass
+     * Opens system settings to disable battery optimization for this app
+     */
+    @PluginMethod()
+    public void requestBatteryOptimization(PluginCall call) {
+        try {
+            PowerManager pm = (PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
+            if (pm != null && !pm.isIgnoringBatteryOptimizations(getContext().getPackageName())) {
+                Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(intent);
+                
+                JSObject result = new JSObject();
+                result.put("requested", true);
+                call.resolve(result);
+            } else {
+                JSObject result = new JSObject();
+                result.put("requested", false);
+                result.put("alreadyExempt", true);
+                call.resolve(result);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Battery optimization request failed", e);
+            call.reject("Failed: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Check if battery optimization is disabled for this app
+     */
+    @PluginMethod()
+    public void isBatteryOptimizationDisabled(PluginCall call) {
+        try {
+            PowerManager pm = (PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
+            boolean disabled = pm != null && pm.isIgnoringBatteryOptimizations(getContext().getPackageName());
+            JSObject result = new JSObject();
+            result.put("disabled", disabled);
+            call.resolve(result);
+        } catch (Exception e) {
+            JSObject result = new JSObject();
+            result.put("disabled", false);
+            call.resolve(result);
+        }
     }
 }

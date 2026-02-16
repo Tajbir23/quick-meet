@@ -4,11 +4,17 @@
  * ============================================
  * 
  * Manages the Android foreground service that keeps
- * Quick Meet running in background. Handles:
- * - Starting/stopping the foreground service
- * - Updating notification content based on app state
- * - Showing call/transfer notifications
- * - App state (foreground/background) detection
+ * Quick Meet running in background (like Messenger).
+ * 
+ * Features:
+ * - Persistent foreground service with notification
+ * - Auto-start on boot via BootReceiver
+ * - Battery optimization bypass request
+ * - Notification action buttons (Answer/Decline calls, Accept/Reject transfers)
+ * - Pending action polling (JS reads actions from notification buttons)
+ * - Message notifications when app is in background
+ * - File transfer progress (persistent until complete)
+ * - Call notifications (incoming + ongoing with chronometer)
  * 
  * On non-Android platforms, this is a no-op.
  */
@@ -19,6 +25,7 @@ let BackgroundServicePlugin = null;
 let AppPlugin = null;
 let _isInBackground = false;
 let _serviceRunning = false;
+let _actionPollTimer = null;
 let _currentState = {
   inCall: false,
   callType: null,
@@ -29,6 +36,12 @@ let _currentState = {
   transferDirection: null, // 'sending' | 'receiving'
 };
 
+// Callbacks for notification action buttons
+let _onAnswerCall = null;
+let _onDeclineCall = null;
+let _onAcceptTransfer = null;
+let _onRejectTransfer = null;
+
 /**
  * Initialize the background service
  * Call this once after user authentication
@@ -37,8 +50,6 @@ export const initBackgroundService = async () => {
   if (!isAndroid()) return;
   
   try {
-    // Use Capacitor native bridge directly (NOT ES module import)
-    // because @capacitor/* is externalized in vite.config.js
     const plugins = window.Capacitor?.Plugins;
     if (!plugins) {
       console.warn('[BackgroundService] Capacitor not available');
@@ -51,6 +62,9 @@ export const initBackgroundService = async () => {
     // Start the foreground service
     await startService();
     
+    // Request battery optimization bypass (shows system dialog once)
+    await requestBatteryOptimization();
+    
     // Listen for app state changes
     AppPlugin.addListener('appStateChange', handleAppStateChange);
     
@@ -58,6 +72,9 @@ export const initBackgroundService = async () => {
     AppPlugin.addListener('appUrlOpen', () => {
       _isInBackground = false;
     });
+    
+    // Start polling for pending actions from notification buttons
+    startActionPolling();
     
     console.log('[BackgroundService] Initialized successfully');
   } catch (err) {
@@ -91,12 +108,36 @@ export const stopService = async () => {
   if (!BackgroundServicePlugin) return;
   
   try {
+    stopActionPolling();
     await BackgroundServicePlugin.stop();
     _serviceRunning = false;
     _isInBackground = false;
     console.log('[BackgroundService] Service stopped');
   } catch (err) {
     console.warn('[BackgroundService] Stop failed:', err.message);
+  }
+};
+
+/**
+ * Request battery optimization bypass
+ * Shows system dialog to allow unrestricted background
+ */
+export const requestBatteryOptimization = async () => {
+  if (!BackgroundServicePlugin) return;
+  
+  try {
+    // First check if already exempt
+    const check = await BackgroundServicePlugin.isBatteryOptimizationDisabled();
+    if (check?.disabled) {
+      console.log('[BackgroundService] Battery optimization already disabled');
+      return;
+    }
+    
+    // Request bypass
+    const result = await BackgroundServicePlugin.requestBatteryOptimization();
+    console.log('[BackgroundService] Battery optimization request:', result);
+  } catch (err) {
+    console.warn('[BackgroundService] Battery optimization request failed:', err.message);
   }
 };
 
@@ -122,6 +163,70 @@ export const isInBackground = () => _isInBackground;
  * Check if the background service is running
  */
 export const isServiceRunning = () => _serviceRunning;
+
+// ========================================
+// Notification Action Polling
+// ========================================
+
+/**
+ * Start polling for pending actions from notification buttons.
+ * When user taps Answer/Decline/Accept/Reject on notification,
+ * the native side stores the action and JS polls for it.
+ */
+const startActionPolling = () => {
+  if (_actionPollTimer) return;
+  
+  _actionPollTimer = setInterval(async () => {
+    if (!BackgroundServicePlugin) return;
+    
+    try {
+      const result = await BackgroundServicePlugin.getPendingAction();
+      const action = result?.action;
+      if (!action) return;
+      
+      console.log(`[BackgroundService] Pending action received: ${action}`);
+      
+      switch (action) {
+        case 'answer_call':
+          if (_onAnswerCall) _onAnswerCall();
+          break;
+        case 'decline_call':
+          if (_onDeclineCall) _onDeclineCall();
+          break;
+        case 'accept_transfer':
+          if (_onAcceptTransfer) _onAcceptTransfer();
+          break;
+        case 'reject_transfer':
+          if (_onRejectTransfer) _onRejectTransfer();
+          break;
+      }
+    } catch (err) {
+      // Silent — service may not be running
+    }
+  }, 500); // Poll every 500ms
+};
+
+const stopActionPolling = () => {
+  if (_actionPollTimer) {
+    clearInterval(_actionPollTimer);
+    _actionPollTimer = null;
+  }
+};
+
+/**
+ * Register callback for notification action buttons
+ */
+export const setNotificationActionCallbacks = ({
+  onAnswerCall,
+  onDeclineCall,
+  onAcceptTransfer,
+  onRejectTransfer,
+}) => {
+  _onAnswerCall = onAnswerCall || null;
+  _onDeclineCall = onDeclineCall || null;
+  _onAcceptTransfer = onAcceptTransfer || null;
+  _onRejectTransfer = onRejectTransfer || null;
+};
 
 // ========================================
 // Notification Updates
@@ -162,7 +267,7 @@ const updateNotificationForCurrentState = async () => {
 // ========================================
 
 /**
- * Notify about incoming call (shows high-priority notification)
+ * Notify about incoming call (shows high-priority notification with Answer/Decline)
  */
 export const notifyIncomingCall = async (callerName, callType = 'audio') => {
   if (!BackgroundServicePlugin) return;
@@ -189,7 +294,7 @@ export const dismissCallNotification = async () => {
 };
 
 /**
- * Show ongoing call notification (visible in notification panel)
+ * Show ongoing call notification with End Call button
  */
 const showOngoingCallNotification = async (callerName, callType = 'audio') => {
   if (!BackgroundServicePlugin) return;
@@ -210,7 +315,6 @@ export const onCallStarted = async (callerName, callType) => {
   _currentState.callType = callType;
   _currentState.callerName = callerName;
   
-  // Replace incoming call notification with ongoing call notification
   await showOngoingCallNotification(callerName, callType);
   await updateNotificationForCurrentState();
 };
@@ -228,11 +332,28 @@ export const onCallEnded = async () => {
 };
 
 // ========================================
+// Message Notifications
+// ========================================
+
+/**
+ * Show message notification when app is in background
+ */
+export const notifyNewMessage = async (senderName, message) => {
+  if (!BackgroundServicePlugin || !_isInBackground) return;
+  
+  try {
+    await BackgroundServicePlugin.showMessageNotification({ senderName, message });
+  } catch (err) {
+    // Silent
+  }
+};
+
+// ========================================
 // File Transfer Notifications
 // ========================================
 
 /**
- * Notify about incoming file transfer request (high-priority notification)
+ * Notify about incoming file transfer request (high-priority with Accept/Reject)
  */
 export const notifyIncomingTransfer = async (senderName, fileName, fileSize) => {
   if (!BackgroundServicePlugin) return;
@@ -250,7 +371,7 @@ export const notifyIncomingTransfer = async (senderName, fileName, fileSize) => 
 };
 
 /**
- * Update file transfer progress notification
+ * Update file transfer progress notification (persistent until 100%)
  */
 export const updateTransferProgress = async (fileName, progress, direction = 'receiving') => {
   if (!BackgroundServicePlugin) return;
@@ -270,7 +391,6 @@ export const updateTransferProgress = async (fileName, progress, direction = 're
         progress: 100,
       });
       
-      // Clear transfer state
       _currentState.transferring = false;
       _currentState.transferProgress = -1;
       _currentState.transferFileName = null;
@@ -283,7 +403,6 @@ export const updateTransferProgress = async (fileName, progress, direction = 're
       });
     }
     
-    // Also update the persistent notification
     await updateNotificationForCurrentState();
   } catch (err) {
     // Silent
@@ -338,12 +457,15 @@ export default {
   initBackgroundService,
   startService,
   stopService,
+  requestBatteryOptimization,
   isInBackground,
   isServiceRunning,
+  setNotificationActionCallbacks,
   notifyIncomingCall,
   dismissCallNotification,
   onCallStarted,
   onCallEnded,
+  notifyNewMessage,
   notifyIncomingTransfer,
   updateTransferProgress,
   dismissTransferNotification,

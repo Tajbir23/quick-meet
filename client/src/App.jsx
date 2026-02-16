@@ -3,7 +3,9 @@ import { useEffect, useCallback } from 'react';
 import { RefreshCw } from 'lucide-react';
 import useAuthStore from './store/useAuthStore';
 import { onForceLogout } from './services/socket';
-import { initBackgroundService, stopService as stopBgService } from './services/backgroundService';
+import { initBackgroundService, stopService as stopBgService, setNotificationActionCallbacks } from './services/backgroundService';
+import useCallStore from './store/useCallStore';
+import useFileTransferStore from './store/useFileTransferStore';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import HomePage from './pages/HomePage';
@@ -19,7 +21,6 @@ import StatusBar from './components/Common/StatusBar';
 import FileTransferPanel from './components/FileTransfer/FileTransferPanel';
 import FileTransferIndicator from './components/FileTransfer/FileTransferIndicator';
 import IncomingFileTransfer from './components/FileTransfer/IncomingFileTransfer';
-import useFileTransferStore from './store/useFileTransferStore';
 
 function App() {
   const { checkAuth, isAuthenticated, isLoading, isOwner, handleForceLogout } = useAuthStore();
@@ -39,6 +40,37 @@ function App() {
   useEffect(() => {
     if (isAuthenticated) {
       initBackgroundService();
+
+      // Wire notification action buttons to store actions
+      setNotificationActionCallbacks({
+        onAnswerCall: () => {
+          const callStore = useCallStore.getState();
+          if (callStore.incomingCall) {
+            callStore.acceptCall();
+          }
+        },
+        onDeclineCall: () => {
+          const callStore = useCallStore.getState();
+          if (callStore.incomingCall) {
+            callStore.rejectCall();
+          }
+        },
+        onAcceptTransfer: () => {
+          const ftStore = useFileTransferStore.getState();
+          const pending = ftStore.incomingRequests;
+          if (pending.length > 0) {
+            // Accept the most recent incoming transfer
+            ftStore.acceptTransfer(pending[pending.length - 1]);
+          }
+        },
+        onRejectTransfer: () => {
+          const ftStore = useFileTransferStore.getState();
+          const pending = ftStore.incomingRequests;
+          if (pending.length > 0) {
+            ftStore.rejectTransfer(pending[pending.length - 1].transferId);
+          }
+        },
+      });
     } else {
       stopBgService();
     }
