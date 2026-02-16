@@ -107,7 +107,7 @@ public class MainActivity extends BridgeActivity {
      * This allows the WebView to continue processing WebRTC audio/video.
      */
     @Override
-    protected void onPause() {
+    public void onPause() {
         super.onPause();
         
         if (isCallActive()) {
@@ -128,7 +128,7 @@ public class MainActivity extends BridgeActivity {
      * We resume it again to ensure WebRTC stays active.
      */
     @Override
-    protected void onStop() {
+    public void onStop() {
         super.onStop();
         
         if (isCallActive()) {
@@ -147,7 +147,7 @@ public class MainActivity extends BridgeActivity {
      * When the app comes back to foreground, ensure WebView is fully resumed.
      */
     @Override
-    protected void onResume() {
+    public void onResume() {
         super.onResume();
         
         WebView webView = getBridge().getWebView();
