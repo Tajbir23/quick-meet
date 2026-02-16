@@ -66,7 +66,7 @@ jobs:
             let v = {};
             try { v = JSON.parse(fs.readFileSync(p,'utf8')); } catch(e) {}
             const now = new Date().toISOString();
-              ['web','desktop'].forEach(k => {
+              ['web','desktop','android'].forEach(k => {
               if (!v[k]) v[k] = {};
               v[k].version = '$NEW_VERSION';
               v[k].lastUpdated = now;

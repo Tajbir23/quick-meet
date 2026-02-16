@@ -8,12 +8,12 @@
     "lastUpdated": "2026-02-16T10:26:00.629Z"
   },
   "android": {
-    "version": "1.0.41",
+    "version": "1.0.50",
     "minVersion": "1.0.0",
-    "releaseNotes": "Self-hosted background notifications (no Firebase) — native HTTP polling keeps you connected even when app is closed",
-    "forceUpdate": false,
+    "releaseNotes": "Background call audio fix — audio keeps working when app is minimized or closed during a call",
+    "forceUpdate": true,
     "downloadUrl": "https://quickmeet.genuinesoftmart.store/api/updates/download/android",
-    "lastUpdated": "2026-02-16T12:00:00.000Z"
+    "lastUpdated": "2026-02-16T16:00:00.000Z"
   },
   "web": {
     "version": "1.0.50",
