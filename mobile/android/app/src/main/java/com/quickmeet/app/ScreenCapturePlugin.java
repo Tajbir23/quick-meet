@@ -18,45 +18,57 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 /**
  * ScreenCapturePlugin — Capacitor Plugin for Android Screen Share
- * 
- * Since Android WebView doesn't support getDisplayMedia(),
- * this plugin provides native MediaProjection-based screen capture.
- * 
+ *
+ * Captures actual screen content using native MediaProjection API
+ * and streams frames to JavaScript as base64 JPEG images.
+ *
  * Flow:
- * 1. JS calls ScreenCapture.start() 
- * 2. Plugin launches MediaProjection permission dialog
+ * 1. JS calls ScreenCapture.start()
+ * 2. Plugin sets up frame callback → launches MediaProjection permission
  * 3. On grant → starts ScreenCaptureService (foreground, mediaProjection type)
- * 4. Plugin injects JavaScript into WebView to create a MediaStream
- *    from the screen capture using the native MediaProjection
- * 5. JS calls ScreenCapture.stop() → stops the service
- * 
- * The key insight: Android WebView DOES support getUserMedia with
- * video constraints when the WebView gets a screen capture surface.
- * We use the MediaProjection to create a VirtualDisplay and then
- * use WebView.evaluateJavascript to notify the JS layer.
+ * 4. Service captures screen frames via ImageReader → JPEG → base64
+ * 5. Plugin emits "screenFrame" events to JS with base64 data
+ * 6. JS draws frames on a canvas → canvas.captureStream() → WebRTC
+ * 7. JS calls ScreenCapture.stop() → stops the service
  */
 @CapacitorPlugin(name = "ScreenCapture")
 public class ScreenCapturePlugin extends Plugin {
-    
+
     private static final String TAG = "QM-ScreenCapturePlugin";
-    private static final int SCREEN_CAPTURE_REQUEST = 1001;
-    
     private PluginCall savedCall;
+
+    @Override
+    public void load() {
+        super.load();
+        // Set up the frame callback so frames get emitted to JS
+        ScreenCaptureService.setFrameCallback(new ScreenCaptureService.FrameCallback() {
+            @Override
+            public void onFrame(String base64Frame, int width, int height) {
+                JSObject data = new JSObject();
+                data.put("frame", base64Frame);
+                data.put("width", width);
+                data.put("height", height);
+                notifyListeners("screenFrame", data);
+            }
+
+            @Override
+            public void onStopped() {
+                notifyListeners("screenStopped", new JSObject());
+            }
+        });
+    }
 
     /**
      * Request screen capture permission and start the service.
-     * The JS layer will be notified when ready.
      */
     @PluginMethod()
     public void start(PluginCall call) {
         Log.i(TAG, "Screen capture start requested");
-        
         savedCall = call;
-        
+
         try {
-            MediaProjectionManager projectionManager = 
-                (MediaProjectionManager) getContext().getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-            
+            MediaProjectionManager projectionManager =
+                    (MediaProjectionManager) getContext().getSystemService(Context.MEDIA_PROJECTION_SERVICE);
             Intent captureIntent = projectionManager.createScreenCaptureIntent();
             startActivityForResult(call, captureIntent, "handleScreenCaptureResult");
         } catch (Exception e) {
@@ -70,70 +82,59 @@ public class ScreenCapturePlugin extends Plugin {
      */
     @ActivityCallback
     private void handleScreenCaptureResult(PluginCall call, ActivityResult result) {
-        if (call == null) {
-            call = savedCall;
-        }
-        
+        if (call == null) call = savedCall;
+
         if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
             Log.i(TAG, "Screen capture permission granted");
-            
+
             try {
-                // Start the foreground service with the MediaProjection result
                 Intent serviceIntent = new Intent(getContext(), ScreenCaptureService.class);
                 serviceIntent.putExtra("resultCode", result.getResultCode());
                 serviceIntent.putExtra("resultData", result.getData());
-                
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     getContext().startForegroundService(serviceIntent);
                 } else {
                     getContext().startService(serviceIntent);
                 }
-                
-                // Notify JS that screen capture is ready
+
                 JSObject ret = new JSObject();
                 ret.put("success", true);
-                ret.put("message", "Screen capture service started");
-                
-                if (call != null) {
-                    call.resolve(ret);
-                }
+                ret.put("message", "Screen capture started with frame streaming");
+
+                if (call != null) call.resolve(ret);
             } catch (Exception e) {
                 Log.e(TAG, "Failed to start screen capture service", e);
-                if (call != null) {
-                    call.reject("Failed to start screen capture service: " + e.getMessage());
-                }
+                if (call != null) call.reject("Failed to start: " + e.getMessage());
             }
         } else {
             Log.i(TAG, "Screen capture permission denied by user");
-            if (call != null) {
-                call.reject("Screen capture permission denied");
-            }
+            if (call != null) call.reject("Screen capture permission denied");
         }
     }
 
     /**
-     * Stop screen capture
+     * Stop screen capture and frame streaming
      */
     @PluginMethod()
     public void stop(PluginCall call) {
         Log.i(TAG, "Screen capture stop requested");
-        
+
         try {
             ScreenCaptureService service = ScreenCaptureService.getInstance();
             if (service != null) {
                 service.stopCapture();
             }
-            
-            // Also stop the service intent
+
             Intent serviceIntent = new Intent(getContext(), ScreenCaptureService.class);
             getContext().stopService(serviceIntent);
-            
+
             JSObject ret = new JSObject();
             ret.put("success", true);
             call.resolve(ret);
         } catch (Exception e) {
             Log.e(TAG, "Failed to stop screen capture", e);
-            call.reject("Failed to stop screen capture: " + e.getMessage());
+            call.reject("Failed to stop: " + e.getMessage());
         }
     }
 
@@ -143,8 +144,8 @@ public class ScreenCapturePlugin extends Plugin {
     @PluginMethod()
     public void isActive(PluginCall call) {
         ScreenCaptureService service = ScreenCaptureService.getInstance();
-        boolean active = service != null && service.getMediaProjection() != null;
-        
+        boolean active = service != null && service.isCapturing();
+
         JSObject ret = new JSObject();
         ret.put("active", active);
         call.resolve(ret);

@@ -9,25 +9,37 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.graphics.Bitmap;
+import android.graphics.PixelFormat;
+import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
+import android.media.Image;
+import android.media.ImageReader;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
+import android.util.Base64;
+import android.util.DisplayMetrics;
 import android.util.Log;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+
 /**
  * Foreground Service for screen capture via MediaProjection.
- * 
- * Android requires a foreground service with type "mediaProjection"
- * to use MediaProjection API (Android 10+).
- * 
- * On Android 14+ (API 34), startForeground() MUST specify
- * FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or the app crashes.
+ *
+ * Captures actual screen frames using:
+ * MediaProjection → VirtualDisplay → ImageReader → Bitmap → JPEG → base64
+ *
+ * Frames are sent to JS via a callback (set by ScreenCapturePlugin)
+ * so they can be drawn on a canvas and streamed over WebRTC.
  */
 public class ScreenCaptureService extends Service {
 
@@ -35,11 +47,35 @@ public class ScreenCaptureService extends Service {
     private static final String CHANNEL_ID = "quickmeet_screen_capture";
     private static final int NOTIFICATION_ID = 9999;
 
+    // Frame capture settings
+    private static final int MAX_DIMENSION = 720;   // Scale longest side to this
+    private static final int JPEG_QUALITY = 45;      // JPEG quality (0-100)
+    private static final int FRAME_INTERVAL_MS = 250; // 4 fps
+
     private static ScreenCaptureService instance;
 
     private MediaProjection mediaProjection;
     private VirtualDisplay virtualDisplay;
+    private ImageReader imageReader;
+    private HandlerThread imageThread;
+    private Handler imageHandler;
     private boolean isCleaningUp = false;
+    private boolean isCapturing = false;
+    private long lastFrameTime = 0;
+    private int captureWidth;
+    private int captureHeight;
+
+    // Frame callback — set by ScreenCapturePlugin to emit frames to JS
+    public interface FrameCallback {
+        void onFrame(String base64Frame, int width, int height);
+        void onStopped();
+    }
+
+    private static FrameCallback frameCallback;
+
+    public static void setFrameCallback(FrameCallback callback) {
+        frameCallback = callback;
+    }
 
     public static ScreenCaptureService getInstance() {
         return instance;
@@ -55,10 +91,7 @@ public class ScreenCaptureService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // CRITICAL: Must call startForeground() IMMEDIATELY after startForegroundService()
-        // On Android 12+, failing to call startForeground() causes
-        // ForegroundServiceDidNotStartInTimeException → APP CRASH.
-        // So we call it BEFORE any validation.
+        // CRITICAL: Must call startForeground() IMMEDIATELY
         try {
             Notification notification = createNotification();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -73,15 +106,12 @@ public class ScreenCaptureService extends Service {
             return START_NOT_STICKY;
         }
 
-        // Now validate the intent data
         if (intent == null) {
             Log.e(TAG, "Null intent received");
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        // IMPORTANT: Activity.RESULT_OK == -1, Activity.RESULT_CANCELED == 0
-        // Use 0 (RESULT_CANCELED) as default so missing extra is treated as error
         int resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED);
         Intent resultData;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -91,13 +121,12 @@ public class ScreenCaptureService extends Service {
         }
 
         if (resultCode != Activity.RESULT_OK || resultData == null) {
-            Log.e(TAG, "Invalid MediaProjection result: code=" + resultCode + ", data=" + resultData);
+            Log.e(TAG, "Invalid MediaProjection result: code=" + resultCode);
             stopSelf();
             return START_NOT_STICKY;
         }
 
         try {
-            // Create MediaProjection AFTER startForeground
             MediaProjectionManager projectionManager =
                     (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
             mediaProjection = projectionManager.getMediaProjection(resultCode, resultData);
@@ -108,17 +137,22 @@ public class ScreenCaptureService extends Service {
                 return START_NOT_STICKY;
             }
 
-            // Register callback for when projection is stopped externally
             mediaProjection.registerCallback(new MediaProjection.Callback() {
                 @Override
                 public void onStop() {
                     Log.i(TAG, "MediaProjection stopped externally");
+                    if (frameCallback != null) {
+                        try { frameCallback.onStopped(); } catch (Exception e) {}
+                    }
                     cleanup();
                     stopSelf();
                 }
             }, null);
 
-            Log.i(TAG, "Screen capture service started successfully with MediaProjection");
+            // Start frame capture immediately
+            startFrameCapture();
+
+            Log.i(TAG, "Screen capture service started with frame capture");
         } catch (Exception e) {
             Log.e(TAG, "Failed to set up MediaProjection", e);
             stopSelf();
@@ -128,16 +162,122 @@ public class ScreenCaptureService extends Service {
     }
 
     /**
-     * Get the MediaProjection instance for creating a VirtualDisplay.
-     * Called by the WebView JavaScript layer via the plugin.
+     * Start capturing screen frames via ImageReader + VirtualDisplay.
      */
+    private void startFrameCapture() {
+        if (isCapturing || mediaProjection == null) return;
+
+        // Calculate capture dimensions preserving aspect ratio
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        int screenWidth = metrics.widthPixels;
+        int screenHeight = metrics.heightPixels;
+        int densityDpi = metrics.densityDpi;
+
+        float scale = (float) MAX_DIMENSION / Math.max(screenWidth, screenHeight);
+        if (scale > 1f) scale = 1f; // Don't upscale
+
+        captureWidth = Math.round(screenWidth * scale);
+        captureHeight = Math.round(screenHeight * scale);
+        // Ensure even dimensions
+        captureWidth = (captureWidth / 2) * 2;
+        captureHeight = (captureHeight / 2) * 2;
+
+        Log.i(TAG, "Capture dimensions: " + captureWidth + "x" + captureHeight
+                + " (screen: " + screenWidth + "x" + screenHeight + ")");
+
+        // Background thread for image processing
+        imageThread = new HandlerThread("QM-ScreenCapture");
+        imageThread.start();
+        imageHandler = new Handler(imageThread.getLooper());
+
+        // Create ImageReader
+        imageReader = ImageReader.newInstance(
+                captureWidth, captureHeight, PixelFormat.RGBA_8888, 2);
+
+        imageReader.setOnImageAvailableListener(reader -> {
+            // Frame rate throttle
+            long now = System.currentTimeMillis();
+            if (now - lastFrameTime < FRAME_INTERVAL_MS) {
+                Image image = reader.acquireLatestImage();
+                if (image != null) image.close();
+                return;
+            }
+            lastFrameTime = now;
+
+            Image image = reader.acquireLatestImage();
+            if (image == null) return;
+
+            try {
+                processFrame(image);
+            } catch (Exception e) {
+                Log.w(TAG, "Frame processing error: " + e.getMessage());
+            } finally {
+                image.close();
+            }
+        }, imageHandler);
+
+        // Create VirtualDisplay that renders to the ImageReader's Surface
+        virtualDisplay = mediaProjection.createVirtualDisplay(
+                "QuickMeetScreen",
+                captureWidth, captureHeight, densityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.getSurface(),
+                null, null
+        );
+
+        isCapturing = true;
+        Log.i(TAG, "Frame capture started: " + captureWidth + "x" + captureHeight
+                + " @" + (1000 / FRAME_INTERVAL_MS) + "fps, JPEG Q=" + JPEG_QUALITY);
+    }
+
+    /**
+     * Convert an Image from ImageReader to JPEG base64 and deliver via callback.
+     */
+    private void processFrame(Image image) {
+        if (frameCallback == null) return;
+
+        Image.Plane[] planes = image.getPlanes();
+        if (planes.length == 0) return;
+
+        ByteBuffer buffer = planes[0].getBuffer();
+        int pixelStride = planes[0].getPixelStride();
+        int rowStride = planes[0].getRowStride();
+        int rowPadding = rowStride - pixelStride * captureWidth;
+
+        // Create Bitmap from buffer (may have row padding)
+        int bitmapWidth = captureWidth + rowPadding / pixelStride;
+        Bitmap bitmap = Bitmap.createBitmap(bitmapWidth, captureHeight, Bitmap.Config.ARGB_8888);
+        bitmap.copyPixelsFromBuffer(buffer);
+
+        // Crop if there's row padding
+        Bitmap finalBitmap;
+        if (bitmapWidth != captureWidth) {
+            finalBitmap = Bitmap.createBitmap(bitmap, 0, 0, captureWidth, captureHeight);
+            bitmap.recycle();
+        } else {
+            finalBitmap = bitmap;
+        }
+
+        // Compress to JPEG
+        ByteArrayOutputStream baos = new ByteArrayOutputStream(captureWidth * captureHeight / 10);
+        finalBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, baos);
+        finalBitmap.recycle();
+
+        // Encode to base64
+        String base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+
+        // Deliver to callback (ScreenCapturePlugin will emit to JS)
+        frameCallback.onFrame(base64, captureWidth, captureHeight);
+    }
+
     public MediaProjection getMediaProjection() {
         return mediaProjection;
     }
 
-    /**
-     * Stop screen capture and clean up
-     */
+    public boolean isCapturing() {
+        return isCapturing;
+    }
+
     public void stopCapture() {
         Log.i(TAG, "Stopping screen capture");
         cleanup();
@@ -150,8 +290,9 @@ public class ScreenCaptureService extends Service {
     }
 
     private void cleanup() {
-        if (isCleaningUp) return; // Prevent double-cleanup crash
+        if (isCleaningUp) return;
         isCleaningUp = true;
+        isCapturing = false;
 
         try {
             if (virtualDisplay != null) {
@@ -160,6 +301,25 @@ public class ScreenCaptureService extends Service {
             }
         } catch (Exception e) {
             Log.w(TAG, "Error releasing VirtualDisplay: " + e.getMessage());
+        }
+
+        try {
+            if (imageReader != null) {
+                imageReader.close();
+                imageReader = null;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error closing ImageReader: " + e.getMessage());
+        }
+
+        try {
+            if (imageThread != null) {
+                imageThread.quitSafely();
+                imageThread = null;
+                imageHandler = null;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error stopping image thread: " + e.getMessage());
         }
 
         try {
@@ -177,6 +337,9 @@ public class ScreenCaptureService extends Service {
 
     @Override
     public void onDestroy() {
+        if (frameCallback != null) {
+            try { frameCallback.onStopped(); } catch (Exception e) {}
+        }
         cleanup();
         super.onDestroy();
         Log.i(TAG, "ScreenCaptureService destroyed");

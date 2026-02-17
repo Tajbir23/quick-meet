@@ -225,11 +225,11 @@ class WebRTCService {
    * 
    * Flow:
    * 1. Call native ScreenCapture.start() → requests MediaProjection permission
-   * 2. Native service starts with mediaProjection foreground type
-   * 3. We use getUserMedia with a special video source that Android's
-   *    MediaProjection provides through the system's screen capture API
-   * 4. On newer Android WebViews, we use a canvas-based fallback
-   *    that captures the screen content
+   * 2. Native service captures screen via MediaProjection → ImageReader
+   * 3. Frames are sent to JS as base64 JPEG via Capacitor events
+   * 4. JS draws frames on a canvas → canvas.captureStream() → WebRTC
+   * 
+   * This gives ACTUAL screen content (not a placeholder) over WebRTC.
    */
   async _startAndroidScreenShare() {
     const ScreenCapture = window.Capacitor?.Plugins?.ScreenCapture;
@@ -238,60 +238,83 @@ class WebRTCService {
     }
 
     try {
-      // Request permission and start native screen capture service
       console.log('🖥️ Requesting Android screen capture permission...');
       const result = await ScreenCapture.start();
       if (!result?.success) {
         throw new Error('Screen capture permission denied');
       }
 
-      console.log('🖥️ Android screen capture service started');
+      console.log('🖥️ Android screen capture service started, setting up frame receiver...');
 
-      // Give the native service a moment to fully initialize
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Try getDisplayMedia — on some Android WebView versions,
-      // it becomes available when a MediaProjection session is active
-      if (navigator.mediaDevices?.getDisplayMedia) {
-        try {
-          this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-          console.log('🖥️ Android screen share via getDisplayMedia');
-          return this.screenStream;
-        } catch (e) {
-          console.warn('getDisplayMedia unavailable in WebView:', e.message);
-        }
-      }
-
-      // Fallback: use a canvas-based stream as a visual indicator
-      // The native MediaProjection is active but we can't pipe it into WebRTC
-      // from the WebView. We create a placeholder stream that shows
-      // "Screen sharing active" text and send it over WebRTC.
-      console.log('🖥️ Using canvas fallback for Android screen share');
+      // Create canvas to draw received frames
       const canvas = document.createElement('canvas');
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.floor(window.innerWidth * dpr);
-      canvas.height = Math.floor(window.innerHeight * dpr);
+      // Initial size (will be updated when first frame arrives)
+      canvas.width = 720;
+      canvas.height = 1280;
       const ctx = canvas.getContext('2d');
 
-      // Initial render
-      this._renderScreenShareCanvas(ctx, canvas.width, canvas.height);
+      // Fill with dark background initially
+      ctx.fillStyle = '#111';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Create stream from canvas
-      this.screenStream = canvas.captureStream(10); // 10 fps
+      // Create stream from canvas — fps=0 means manual frame updates
+      // We'll call requestFrame() on the track after each draw
+      this.screenStream = canvas.captureStream(0);
 
-      // Periodic update
-      this._screenCaptureInterval = setInterval(() => {
-        this._renderScreenShareCanvas(ctx, canvas.width, canvas.height);
-      }, 2000);
+      // Reusable Image element for decoding base64 frames
+      const frameImg = new Image();
+      let frameReady = true;
 
+      // Listen for screen frames from native
+      this._screenFrameListener = await ScreenCapture.addListener('screenFrame', (data) => {
+        if (!frameReady || !data?.frame) return;
+        frameReady = false;
+
+        frameImg.onload = () => {
+          // Update canvas size if dimensions changed
+          if (canvas.width !== data.width || canvas.height !== data.height) {
+            canvas.width = data.width;
+            canvas.height = data.height;
+          }
+
+          // Draw the actual screen frame
+          ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height);
+
+          // Request the captureStream to emit this frame
+          const videoTrack = this.screenStream?.getVideoTracks()[0];
+          if (videoTrack && typeof videoTrack.requestFrame === 'function') {
+            videoTrack.requestFrame();
+          }
+
+          frameReady = true;
+        };
+
+        frameImg.onerror = () => {
+          frameReady = true;
+        };
+
+        frameImg.src = 'data:image/jpeg;base64,' + data.frame;
+      });
+
+      // Listen for native capture stop (e.g. user stops from notification)
+      this._screenStopListener = await ScreenCapture.addListener('screenStopped', () => {
+        console.log('🖥️ Native screen capture stopped');
+        // Trigger track ended so the UI can react
+        const videoTrack = this.screenStream?.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrack.stop();
+        }
+      });
+
+      // Wait briefly for first frame to arrive
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      console.log('🖥️ Android screen share active with real frame streaming');
       return this.screenStream;
     } catch (error) {
-      // Clean up native service on failure
-      try { 
-        await ScreenCapture.stop(); 
-      } catch (e) {
-        console.warn('Cleanup after screen share failure:', e);
-      }
+      // Clean up on failure
+      this._cleanupAndroidScreenShare();
+      try { await ScreenCapture.stop(); } catch (e) {}
       
       if (error.message?.includes('denied') || error.message?.includes('cancelled')) {
         throw new Error('Screen sharing was cancelled.');
@@ -301,50 +324,20 @@ class WebRTCService {
   }
 
   /**
-   * Render the screen share placeholder canvas
+   * Clean up Android screen share listeners and intervals
    */
-  _renderScreenShareCanvas(ctx, width, height) {
-    try {
-      // Dark background
-      ctx.fillStyle = '#1a1a2e';
-      ctx.fillRect(0, 0, width, height);
-
-      // Center content
-      const centerX = width / 2;
-      const centerY = height / 2;
-
-      // Icon-like circle
-      ctx.fillStyle = '#6366f1';
-      ctx.beginPath();
-      ctx.arc(centerX, centerY - 40, 50, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Monitor icon (simplified)
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(centerX - 25, centerY - 60, 50, 35);
-      ctx.fillStyle = '#1a1a2e';
-      ctx.fillRect(centerX - 22, centerY - 57, 44, 29);
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(centerX - 3, centerY - 25, 6, 10);
-      ctx.fillRect(centerX - 15, centerY - 17, 30, 3);
-
-      // Text
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 24px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Screen Sharing Active', centerX, centerY + 40);
-
-      ctx.fillStyle = '#a0a0b0';
-      ctx.font = '16px sans-serif';
-      ctx.fillText('Your screen is being shared', centerX, centerY + 70);
-
-      // Timestamp
-      const now = new Date().toLocaleTimeString();
-      ctx.fillStyle = '#606070';
-      ctx.font = '14px sans-serif';
-      ctx.fillText(now, centerX, centerY + 100);
-    } catch (e) {
-      // Canvas operations can fail silently
+  _cleanupAndroidScreenShare() {
+    if (this._screenFrameListener) {
+      this._screenFrameListener.remove();
+      this._screenFrameListener = null;
+    }
+    if (this._screenStopListener) {
+      this._screenStopListener.remove();
+      this._screenStopListener = null;
+    }
+    if (this._screenCaptureInterval) {
+      clearInterval(this._screenCaptureInterval);
+      this._screenCaptureInterval = null;
     }
   }
 
@@ -358,15 +351,16 @@ class WebRTCService {
       console.log('🖥️ Screen sharing stopped');
     }
 
-    // Stop Android native screen capture service
+    // Clean up Android native screen capture
     if (isAndroid()) {
+      this._cleanupAndroidScreenShare();
       const ScreenCapture = window.Capacitor?.Plugins?.ScreenCapture;
       if (ScreenCapture) {
         ScreenCapture.stop().catch(e => console.warn('Failed to stop native screen capture:', e));
       }
     }
 
-    // Clear canvas capture interval if any
+    // Clear canvas capture interval if any (non-Android fallback)
     if (this._screenCaptureInterval) {
       clearInterval(this._screenCaptureInterval);
       this._screenCaptureInterval = null;
