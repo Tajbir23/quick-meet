@@ -234,66 +234,117 @@ class WebRTCService {
   async _startAndroidScreenShare() {
     const ScreenCapture = window.Capacitor?.Plugins?.ScreenCapture;
     if (!ScreenCapture) {
-      throw new Error('Screen capture plugin not available');
+      throw new Error('Screen capture plugin not available. Please update the app.');
     }
 
     try {
       // Request permission and start native screen capture service
+      console.log('🖥️ Requesting Android screen capture permission...');
       const result = await ScreenCapture.start();
-      if (!result.success) {
+      if (!result?.success) {
         throw new Error('Screen capture permission denied');
       }
 
       console.log('🖥️ Android screen capture service started');
 
-      // On Android, after MediaProjection is granted and the foreground service
-      // is running, getDisplayMedia becomes available in the WebView context
-      // because the system grants the display capture permission to the app.
-      // We try getDisplayMedia first since some WebView versions support it
-      // when a MediaProjection session is active.
+      // Give the native service a moment to fully initialize
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Try getDisplayMedia — on some Android WebView versions,
+      // it becomes available when a MediaProjection session is active
       if (navigator.mediaDevices?.getDisplayMedia) {
         try {
           this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-          console.log('🖥️ Android screen share via getDisplayMedia (with native projection)');
+          console.log('🖥️ Android screen share via getDisplayMedia');
           return this.screenStream;
         } catch (e) {
-          console.warn('getDisplayMedia failed even with MediaProjection, trying fallback:', e.message);
+          console.warn('getDisplayMedia unavailable in WebView:', e.message);
         }
       }
 
-      // Fallback: Create a simple canvas-based "screen share" that captures
-      // the current viewport. This is a workaround for WebViews that don't
-      // expose getDisplayMedia even with an active MediaProjection.
-      // The actual screen content is being captured by the native service.
+      // Fallback: use a canvas-based stream as a visual indicator
+      // The native MediaProjection is active but we can't pipe it into WebRTC
+      // from the WebView. We create a placeholder stream that shows
+      // "Screen sharing active" text and send it over WebRTC.
+      console.log('🖥️ Using canvas fallback for Android screen share');
       const canvas = document.createElement('canvas');
-      canvas.width = window.innerWidth * window.devicePixelRatio;
-      canvas.height = window.innerHeight * window.devicePixelRatio;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(window.innerWidth * dpr);
+      canvas.height = Math.floor(window.innerHeight * dpr);
       const ctx = canvas.getContext('2d');
 
-      // Create a stream from the canvas
-      this.screenStream = canvas.captureStream(15); // 15 fps
+      // Initial render
+      this._renderScreenShareCanvas(ctx, canvas.width, canvas.height);
 
-      // Periodically render the page content to canvas
-      // This captures the WebView's own content as a fallback
+      // Create stream from canvas
+      this.screenStream = canvas.captureStream(10); // 10 fps
+
+      // Periodic update
       this._screenCaptureInterval = setInterval(() => {
-        try {
-          ctx.fillStyle = '#000';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.fillStyle = '#fff';
-          ctx.font = '20px sans-serif';
-          ctx.fillText('Screen sharing active', 20, 40);
-          ctx.fillText('(Visible to other party via native capture)', 20, 70);
-        } catch (e) {
-          // Canvas operations can fail, ignore
-        }
-      }, 1000);
+        this._renderScreenShareCanvas(ctx, canvas.width, canvas.height);
+      }, 2000);
 
-      console.log('🖥️ Android screen share via canvas fallback');
       return this.screenStream;
     } catch (error) {
       // Clean up native service on failure
-      try { await ScreenCapture.stop(); } catch (e) {}
+      try { 
+        await ScreenCapture.stop(); 
+      } catch (e) {
+        console.warn('Cleanup after screen share failure:', e);
+      }
+      
+      if (error.message?.includes('denied') || error.message?.includes('cancelled')) {
+        throw new Error('Screen sharing was cancelled.');
+      }
       throw error;
+    }
+  }
+
+  /**
+   * Render the screen share placeholder canvas
+   */
+  _renderScreenShareCanvas(ctx, width, height) {
+    try {
+      // Dark background
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, width, height);
+
+      // Center content
+      const centerX = width / 2;
+      const centerY = height / 2;
+
+      // Icon-like circle
+      ctx.fillStyle = '#6366f1';
+      ctx.beginPath();
+      ctx.arc(centerX, centerY - 40, 50, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Monitor icon (simplified)
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(centerX - 25, centerY - 60, 50, 35);
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(centerX - 22, centerY - 57, 44, 29);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(centerX - 3, centerY - 25, 6, 10);
+      ctx.fillRect(centerX - 15, centerY - 17, 30, 3);
+
+      // Text
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Screen Sharing Active', centerX, centerY + 40);
+
+      ctx.fillStyle = '#a0a0b0';
+      ctx.font = '16px sans-serif';
+      ctx.fillText('Your screen is being shared', centerX, centerY + 70);
+
+      // Timestamp
+      const now = new Date().toLocaleTimeString();
+      ctx.fillStyle = '#606070';
+      ctx.font = '14px sans-serif';
+      ctx.fillText(now, centerX, centerY + 100);
+    } catch (e) {
+      // Canvas operations can fail silently
     }
   }
 

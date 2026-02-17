@@ -7,36 +7,26 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.hardware.display.DisplayManager;
+import android.content.pm.ServiceInfo;
 import android.hardware.display.VirtualDisplay;
-import android.media.MediaRecorder;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.IBinder;
-import android.util.DisplayMetrics;
 import android.util.Log;
-import android.view.WindowManager;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.ServiceCompat;
 
 /**
  * Foreground Service for screen capture via MediaProjection.
  * 
  * Android requires a foreground service with type "mediaProjection"
- * to use MediaProjection API (especially on Android 10+).
+ * to use MediaProjection API (Android 10+).
  * 
- * This service:
- * 1. Starts as a foreground service with a notification ("Sharing screen...")
- * 2. Creates a MediaProjection from the result intent
- * 3. Creates a VirtualDisplay that captures the screen
- * 4. The VirtualDisplay surface is provided by the WebView's WebRTC
- *    via a Surface passed from the ScreenCapturePlugin
- * 
- * Lifecycle:
- * - Started by ScreenCapturePlugin after user grants MediaProjection permission
- * - Stopped when screen share ends (user clicks stop, or call ends)
+ * On Android 14+ (API 34), startForeground() MUST specify
+ * FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or the app crashes.
  */
 public class ScreenCaptureService extends Service {
 
@@ -48,8 +38,7 @@ public class ScreenCaptureService extends Service {
 
     private MediaProjection mediaProjection;
     private VirtualDisplay virtualDisplay;
-    private int resultCode;
-    private Intent resultData;
+    private boolean isCleaningUp = false;
 
     public static ScreenCaptureService getInstance() {
         return instance;
@@ -66,44 +55,68 @@ public class ScreenCaptureService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) {
+            Log.e(TAG, "Null intent received");
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        resultCode = intent.getIntExtra("resultCode", -1);
-        resultData = intent.getParcelableExtra("resultData");
+        int resultCode = intent.getIntExtra("resultCode", -1);
+        Intent resultData;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            resultData = intent.getParcelableExtra("resultData", Intent.class);
+        } else {
+            resultData = intent.getParcelableExtra("resultData");
+        }
 
         if (resultCode == -1 || resultData == null) {
-            Log.e(TAG, "Invalid MediaProjection result");
+            Log.e(TAG, "Invalid MediaProjection result: code=" + resultCode + ", data=" + resultData);
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        // Start as foreground service IMMEDIATELY (before creating MediaProjection)
-        startForeground(NOTIFICATION_ID, createNotification());
-
-        // Create MediaProjection
-        MediaProjectionManager projectionManager =
-                (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        mediaProjection = projectionManager.getMediaProjection(resultCode, resultData);
-
-        if (mediaProjection == null) {
-            Log.e(TAG, "Failed to create MediaProjection");
-            stopSelf();
-            return START_NOT_STICKY;
-        }
-
-        // Register callback for when projection is stopped externally
-        mediaProjection.registerCallback(new MediaProjection.Callback() {
-            @Override
-            public void onStop() {
-                Log.i(TAG, "MediaProjection stopped externally");
-                cleanup();
-                stopSelf();
+        try {
+            // Start as foreground service IMMEDIATELY
+            // Android 14+ (API 34) REQUIRES foregroundServiceType in startForeground()
+            Notification notification = createNotification();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // Android 14+: must specify FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                startForeground(NOTIFICATION_ID, notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10-13: also specify type (recommended)
+                startForeground(NOTIFICATION_ID, notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
             }
-        }, null);
 
-        Log.i(TAG, "Screen capture service started with MediaProjection");
+            // Create MediaProjection AFTER startForeground
+            MediaProjectionManager projectionManager =
+                    (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+            mediaProjection = projectionManager.getMediaProjection(resultCode, resultData);
+
+            if (mediaProjection == null) {
+                Log.e(TAG, "Failed to create MediaProjection");
+                stopSelf();
+                return START_NOT_STICKY;
+            }
+
+            // Register callback for when projection is stopped externally
+            mediaProjection.registerCallback(new MediaProjection.Callback() {
+                @Override
+                public void onStop() {
+                    Log.i(TAG, "MediaProjection stopped externally");
+                    cleanup();
+                    stopSelf();
+                }
+            }, null);
+
+            Log.i(TAG, "Screen capture service started successfully with MediaProjection");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start foreground service", e);
+            stopSelf();
+        }
+
         return START_NOT_STICKY;
     }
 
@@ -121,20 +134,38 @@ public class ScreenCaptureService extends Service {
     public void stopCapture() {
         Log.i(TAG, "Stopping screen capture");
         cleanup();
-        stopForeground(true);
+        try {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
+        } catch (Exception e) {
+            Log.w(TAG, "Error stopping foreground: " + e.getMessage());
+        }
         stopSelf();
     }
 
     private void cleanup() {
-        if (virtualDisplay != null) {
-            virtualDisplay.release();
-            virtualDisplay = null;
+        if (isCleaningUp) return; // Prevent double-cleanup crash
+        isCleaningUp = true;
+
+        try {
+            if (virtualDisplay != null) {
+                virtualDisplay.release();
+                virtualDisplay = null;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error releasing VirtualDisplay: " + e.getMessage());
         }
-        if (mediaProjection != null) {
-            mediaProjection.stop();
-            mediaProjection = null;
+
+        try {
+            if (mediaProjection != null) {
+                mediaProjection.stop();
+                mediaProjection = null;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error stopping MediaProjection: " + e.getMessage());
         }
+
         instance = null;
+        isCleaningUp = false;
     }
 
     @Override
