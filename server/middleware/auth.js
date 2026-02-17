@@ -4,22 +4,22 @@
  * ============================================
  * 
  * ZERO-TRUST SECURITY UPGRADES:
- * 1. Short-lived access tokens (15 min default)
+ * 1. Short-lived access tokens (7 day default — balanced for chat app UX)
  * 2. Refresh token rotation (new refresh token per use)
- * 3. Token binding with device fingerprint
+ * 3. Token binding with device fingerprint (non-fatal mismatch)
  * 4. Session revocation support
  * 5. Concurrent session limits
  * 6. Forced logout on anomaly
  * 7. Password change invalidation
  * 
  * TOKEN ARCHITECTURE:
- * ┌─────────────┐  15 min TTL  ┌─────────────┐
+ * ┌─────────────┐  7 day TTL   ┌─────────────┐
  * │ Access Token │──────────►   │  Protected   │
  * │   (JWT)      │  every req   │   Route      │
  * └──────┬──────┘              └─────────────┘
  *        │ expired?
  *        ▼
- * ┌─────────────┐  7 day TTL   ┌─────────────┐
+ * ┌─────────────┐ 30 day TTL   ┌─────────────┐
  * │Refresh Token│──────────►   │ New Access + │
  * │(httpOnly DB)│  /refresh    │ New Refresh  │
  * └─────────────┘              └─────────────┘
@@ -33,8 +33,10 @@ const { SEVERITY } = require('../security/SecurityEventLogger');
 const intrusionDetector = require('../security/IntrusionDetector');
 
 // Token durations
-const ACCESS_TOKEN_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || '15m';
-const REFRESH_TOKEN_EXPIRY_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRY_DAYS) || 7;
+// WHY 7d: Chat apps need long sessions — 15m caused constant logouts.
+// Refresh token extends to 30 days for persistent login across app updates.
+const ACCESS_TOKEN_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || '7d';
+const REFRESH_TOKEN_EXPIRY_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRY_DAYS) || 30;
 
 /**
  * Protect routes — requires valid JWT access token
@@ -142,21 +144,20 @@ const protect = async (req, res, next) => {
     }
 
     // Verify device fingerprint if present in token
+    // WHY non-fatal: Fingerprint can change legitimately after app updates,
+    // browser updates, or screen rotation. Hard rejection caused constant logouts.
+    // We log a warning for monitoring but allow the request to proceed.
     if (decoded.fp && req.headers['x-device-fingerprint']) {
       const currentFP = req.headers['x-device-fingerprint'];
       const cryptoService = require('../security/CryptoService');
       const hashedFP = cryptoService.hashFingerprint(currentFP);
       if (decoded.fp !== hashedFP) {
-        securityLogger.authEvent('device_fingerprint_mismatch', SEVERITY.ALERT, {
+        securityLogger.authEvent('device_fingerprint_mismatch', SEVERITY.WARN, {
           userId: user._id.toString(),
           ip: req.ip,
-          message: 'Token used from different device — possible token theft',
+          message: 'Fingerprint changed — possible app update or device change (non-fatal)',
         });
-        return res.status(401).json({
-          success: false,
-          message: 'Security validation failed — please log in again',
-          code: 'DEVICE_MISMATCH',
-        });
+        // Don't reject — allow request but log for monitoring
       }
     }
 
@@ -175,7 +176,7 @@ const protect = async (req, res, next) => {
  * Generate short-lived JWT access token
  * 
  * SECURITY:
- * - 15 minute expiry (limits token theft window)
+ * - 7 day expiry (balanced for chat app UX vs security)
  * - Includes device fingerprint hash
  * - Includes issued-at for password change detection
  */

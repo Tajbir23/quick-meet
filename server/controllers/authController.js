@@ -4,7 +4,7 @@
  * ============================================
  * 
  * SECURITY UPGRADES:
- * - Short-lived access tokens (15 min)
+ * - Short-lived access tokens (7 day)
  * - Refresh token rotation (new token on every refresh)
  * - Device fingerprint binding
  * - Brute force protection (progressive lockout)
@@ -122,7 +122,7 @@ const signup = async (req, res) => {
         user: user.toSafeObject(),
         accessToken,
         refreshToken,
-        expiresIn: 900, // 15 minutes in seconds
+        expiresIn: 7 * 24 * 3600, // 7 days in seconds
       },
     });
   } catch (error) {
@@ -297,7 +297,7 @@ const login = async (req, res) => {
         user: user.toSafeObject(),
         accessToken,
         refreshToken,
-        expiresIn: 900, // 15 minutes
+        expiresIn: 7 * 24 * 3600, // 7 days in seconds
       },
     });
   } catch (error) {
@@ -377,7 +377,7 @@ const refreshAccessToken = async (req, res) => {
       data: {
         accessToken: newAccessToken,
         refreshToken: newRefreshToken,
-        expiresIn: 900,
+        expiresIn: 7 * 24 * 3600, // 7 days in seconds
       },
     });
   } catch (error) {

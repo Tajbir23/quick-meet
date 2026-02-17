@@ -38,19 +38,24 @@ const processQueue = (error, token = null) => {
 };
 
 /**
- * Generate a simple device fingerprint for token binding
- * WHY: Prevents stolen tokens from being used on different devices
+ * Generate a stable device fingerprint for token binding
+ * 
+ * WHY NO userAgent: It contains the app version string, so every update
+ * changes the fingerprint → forces logout. Only use properties that stay
+ * constant across app updates, browser updates, and page reloads.
+ * 
+ * Uses: language, screen dimensions, color depth, timezone, CPU cores, platform
  */
 const getDeviceFingerprint = () => {
   const nav = window.navigator;
   const screen = window.screen;
   const raw = [
-    nav.userAgent,
     nav.language,
     screen.colorDepth,
     screen.width + 'x' + screen.height,
     Intl.DateTimeFormat().resolvedOptions().timeZone,
     nav.hardwareConcurrency || 'unknown',
+    nav.platform || 'unknown',
   ].join('|');
   return raw;
 };
@@ -154,12 +159,36 @@ api.interceptors.response.use(
       }
     }
 
-    // For other 401s (invalid credentials, account locked, etc.) — don't auto-refresh
+    // For other 401s — check if we should force logout or try refresh
     if (error.response?.status === 401 &&
         error.response?.data?.code !== 'TOKEN_EXPIRED') {
-      // Check if we should force logout (force-logout flag, etc.)
-      if (error.response?.data?.code === 'FORCE_LOGOUT' ||
-          error.response?.data?.code === 'ACCOUNT_LOCKED') {
+      const code = error.response?.data?.code;
+
+      // DEVICE_MISMATCH: fingerprint changed (app update, browser update)
+      // Try refreshing with new fingerprint instead of force logout
+      if (code === 'DEVICE_MISMATCH' && !originalRequest._retry) {
+        originalRequest._retry = true;
+        const refreshToken = localStorage.getItem('refreshToken');
+        if (refreshToken) {
+          try {
+            const response = await axios.post(`${API_URL}/auth/refresh`, {
+              refreshToken,
+              deviceFingerprint: getDeviceFingerprint(),
+            });
+            const { accessToken, refreshToken: newRefreshToken } = response.data.data;
+            localStorage.setItem('accessToken', accessToken);
+            localStorage.setItem('refreshToken', newRefreshToken);
+            originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+            return api(originalRequest);
+          } catch (_) {
+            forceLogout();
+            return Promise.reject(error);
+          }
+        }
+      }
+
+      // Hard force logout codes
+      if (code === 'FORCE_LOGOUT' || code === 'ACCOUNT_LOCKED') {
         forceLogout();
       }
     }
