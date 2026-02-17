@@ -92,6 +92,21 @@ const messageSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  // ─── PIN METADATA ────────────────────────────
+  isPinned: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+  pinnedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+  pinnedAt: {
+    type: Date,
+    default: null,
+  },
   // Read receipts
   read: {
     type: Boolean,
@@ -115,6 +130,9 @@ const messageSchema = new mongoose.Schema({
 messageSchema.index({ sender: 1, receiver: 1, createdAt: -1 });
 messageSchema.index({ group: 1, createdAt: -1 });
 messageSchema.index({ createdAt: -1 });
+// Pinned messages indexes
+messageSchema.index({ sender: 1, receiver: 1, isPinned: 1, pinnedAt: -1 });
+messageSchema.index({ group: 1, isPinned: 1, pinnedAt: -1 });
 
 /**
  * Static method: Get conversation between two users

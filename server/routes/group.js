@@ -7,6 +7,8 @@ const {
   joinGroup,
   leaveGroup,
   addMember,
+  removeMember,
+  changeMemberRole,
   getAllGroups,
 } = require('../controllers/groupController');
 const { protect } = require('../middleware/auth');
@@ -22,5 +24,7 @@ router.get('/:id', getGroupById);
 router.post('/:id/join', joinGroup);
 router.post('/:id/leave', leaveGroup);
 router.post('/:id/add-member', addMember);
+router.post('/:id/remove-member', removeMember);
+router.put('/:id/change-role', changeMemberRole);
 
 module.exports = router;

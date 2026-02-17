@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, memo } from 'react';
-import { Download, FileText, Loader2, Phone, Video, PhoneMissed, PhoneOff, PhoneIncoming, PhoneOutgoing, Trash2, Forward, MoreVertical, User as UserIcon } from 'lucide-react';
+import { Download, FileText, Loader2, Phone, Video, PhoneMissed, PhoneOff, PhoneIncoming, PhoneOutgoing, Trash2, Forward, MoreVertical, User as UserIcon, Pin, PinOff } from 'lucide-react';
 import { getInitials, stringToColor, formatMessageTime, isImageFile, formatFileSize, formatDuration } from '../../utils/helpers';
 import { SERVER_URL } from '../../utils/constants';
 import ImagePreview from '../Common/ImagePreview';
 
-const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onViewProfile }) => {
+const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onViewProfile, onPin }) => {
   const [downloading, setDownloading] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -236,6 +236,14 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
                     <Forward size={14} />
                     Forward
                   </button>
+                  {/* Pin / Unpin */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowMenu(false); onPin && onPin(message); }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-dark-200 hover:bg-dark-600 transition-colors"
+                  >
+                    {message.isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+                    {message.isPinned ? 'Unpin' : 'Pin'}
+                  </button>
                   {/* View Profile (only for others' messages) */}
                   {!isMine && (
                     <button
@@ -319,10 +327,15 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
               </>
             )}
 
-            {/* Timestamp */}
-            <p className={`text-[10px] mt-1 ${isMine ? 'text-primary-200/70' : 'text-dark-500'} text-right`}>
-              {message.isDeleted ? 'Deleted' : formatMessageTime(message.createdAt)}
-            </p>
+            {/* Timestamp + Pin indicator */}
+            <div className={`flex items-center gap-1.5 mt-1 ${isMine ? 'justify-end' : 'justify-end'}`}>
+              {message.isPinned && (
+                <Pin size={10} className={`${isMine ? 'text-primary-200/70' : 'text-amber-400/70'}`} />
+              )}
+              <p className={`text-[10px] ${isMine ? 'text-primary-200/70' : 'text-dark-500'}`}>
+                {message.isDeleted ? 'Deleted' : formatMessageTime(message.createdAt)}
+              </p>
+            </div>
           </div>
         </div>
       </div>

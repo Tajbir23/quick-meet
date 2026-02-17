@@ -113,6 +113,20 @@ const useSocket = () => {
     });
 
     // ============================================
+    // PIN / UNPIN EVENTS
+    // ============================================
+
+    socket.on('message:pinned', ({ message, chatId, chatType, pinnedByUsername }) => {
+      console.log(`📌 ${pinnedByUsername} pinned a message in ${chatType} ${chatId}`);
+      useChatStore.getState().handleRemotePin(chatId, message);
+    });
+
+    socket.on('message:unpinned', ({ messageId, chatId, chatType, unpinnedByUsername }) => {
+      console.log(`📌 ${unpinnedByUsername} unpinned a message in ${chatType} ${chatId}`);
+      useChatStore.getState().handleRemoteUnpin(chatId, messageId);
+    });
+
+    // ============================================
     // GROUP MEMBER EVENTS
     // ============================================
 
@@ -126,6 +140,27 @@ const useSocket = () => {
         });
         playNotificationSound('message');
       }
+    });
+
+    socket.on('group:member-removed', ({ groupId, removedUserId, removedUsername, removedBy }) => {
+      console.log(`👥 ${removedBy} removed ${removedUsername} from group ${groupId}`);
+
+      // If I was removed, remove group from my list and leave room
+      if (removedUserId === user?._id) {
+        useGroupStore.getState().fetchMyGroups();
+        useChatStore.getState().clearActiveChat();
+        socket.emit('group:leave-room', { groupId });
+        playNotificationSound('message');
+      } else {
+        // Someone else was removed, refresh group data
+        useGroupStore.getState().fetchMyGroups();
+      }
+    });
+
+    socket.on('group:role-changed', ({ groupId, userId: changedUserId, username, oldRole, newRole, changedBy }) => {
+      console.log(`👥 ${changedBy} changed ${username}'s role to ${newRole} in group ${groupId}`);
+      // Refresh groups to reflect role changes
+      useGroupStore.getState().fetchMyGroups();
     });
 
     // ============================================
@@ -533,7 +568,11 @@ const useSocket = () => {
       socket.off('typing:stop');
       socket.off('typing:group:start');
       socket.off('typing:group:stop');
+      socket.off('message:pinned');
+      socket.off('message:unpinned');
       socket.off('group:member-added');
+      socket.off('group:member-removed');
+      socket.off('group:role-changed');
       socket.off('call:offer');
       socket.off('call:answer');
       socket.off('call:ice-candidate');

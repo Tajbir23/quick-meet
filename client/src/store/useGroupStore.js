@@ -133,7 +133,7 @@ const useGroupStore = create((set, get) => ({
   },
 
   /**
-   * Add a member to group (admin only)
+   * Add a member to group (admin & moderator only)
    */
   addMember: async (groupId, userId) => {
     try {
@@ -151,6 +151,55 @@ const useGroupStore = create((set, get) => ({
       return {
         success: false,
         message: error.response?.data?.message || 'Failed to add member',
+      };
+    }
+  },
+
+  /**
+   * Remove a member from group (role-based)
+   * - Admin can remove anyone
+   * - Moderator can remove regular members
+   */
+  removeMember: async (groupId, userId) => {
+    try {
+      const res = await api.post(`/groups/${groupId}/remove-member`, { userId });
+
+      // Update group in store
+      set((state) => ({
+        myGroups: state.myGroups.map(g =>
+          g._id === groupId ? res.data.data.group : g
+        ),
+      }));
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to remove member',
+      };
+    }
+  },
+
+  /**
+   * Change a member's role (admin only)
+   * @param {string} role - 'admin' | 'moderator' | 'member'
+   */
+  changeMemberRole: async (groupId, userId, role) => {
+    try {
+      const res = await api.put(`/groups/${groupId}/change-role`, { userId, role });
+
+      // Update group in store
+      set((state) => ({
+        myGroups: state.myGroups.map(g =>
+          g._id === groupId ? res.data.data.group : g
+        ),
+      }));
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to change role',
       };
     }
   },

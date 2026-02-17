@@ -3,6 +3,7 @@ import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
+import PinnedMessages from './PinnedMessages';
 import Header from '../Layout/Header';
 import GroupChat from '../Group/GroupChat';
 import ForwardMessageModal from '../Common/ForwardMessageModal';
@@ -22,6 +23,9 @@ const ChatWindow = () => {
   const isLoadingMessages = useChatStore(s => s.isLoadingMessages);
   const typingUsers = useChatStore(s => s.typingUsers);
   const markAsRead = useChatStore(s => s.markAsRead);
+  const showPinnedPanel = useChatStore(s => s.showPinnedPanel);
+  const pinMessage = useChatStore(s => s.pinMessage);
+  const unpinMessage = useChatStore(s => s.unpinMessage);
   const user = useAuthStore(s => s.user);
   const containerRef = useRef(null);
   const [pagination, setPagination] = useState(null);
@@ -53,6 +57,33 @@ const ChatWindow = () => {
     setForwardMessage(message);
   };
 
+  // Pin / Unpin handler
+  const handlePinMessage = async (message) => {
+    try {
+      if (message.isPinned) {
+        await unpinMessage(message._id, activeChat.id, activeChat.type);
+        toast.success('Message unpinned');
+      } else {
+        await pinMessage(message._id, activeChat.id, activeChat.type);
+        toast.success('Message pinned');
+      }
+    } catch {
+      toast.error(message.isPinned ? 'Failed to unpin' : 'Failed to pin');
+    }
+  };
+
+  // Scroll to a specific message (used by PinnedMessages panel)
+  const scrollToMessage = (messageId) => {
+    const el = containerRef.current;
+    if (!el) return;
+    const msgEl = el.querySelector(`[data-message-id="${messageId}"]`);
+    if (msgEl) {
+      msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      msgEl.classList.add('bg-amber-500/10');
+      setTimeout(() => msgEl.classList.remove('bg-amber-500/10'), 2000);
+    }
+  };
+
   // View profile handler
   const handleViewProfile = (sender) => {
     const userId = typeof sender === 'object' ? (sender._id || sender.id) : sender;
@@ -71,6 +102,7 @@ const ChatWindow = () => {
       }
     }
     setShowGroupInfo(false); // Close group info when switching chats
+    useChatStore.getState().closePinnedPanel(); // Close pinned panel when switching chats
   }, [activeChat?.id]);
 
   // Auto scroll to bottom on new messages
@@ -163,7 +195,7 @@ const ChatWindow = () => {
           const showDateSep = shouldShowDateSeparator(msg.createdAt, prevDate);
 
           return (
-            <div key={msg._id || index}>
+            <div key={msg._id || index} data-message-id={msg._id} className="transition-colors duration-500 rounded-lg">
               {showDateSep && (
                 <div className="flex items-center justify-center py-4">
                   <div className="flex-1 border-t border-dark-700/50" />
@@ -180,6 +212,7 @@ const ChatWindow = () => {
                 onDelete={handleDeleteMessage}
                 onForward={handleForwardMessage}
                 onViewProfile={handleViewProfile}
+                onPin={handlePinMessage}
               />
             </div>
           );
@@ -222,6 +255,15 @@ const ChatWindow = () => {
         <GroupChat
           groupId={activeChat.id}
           onClose={() => setShowGroupInfo(false)}
+        />
+      )}
+
+      {/* Pinned messages panel */}
+      {showPinnedPanel && activeChat && (
+        <PinnedMessages
+          chatId={activeChat.id}
+          chatType={activeChat.type}
+          onScrollToMessage={scrollToMessage}
         />
       )}
 

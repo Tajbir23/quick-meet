@@ -26,6 +26,8 @@ const useChatStore = create((set, get) => ({
   onlineUsers: [],     // [{ userId, socketId }]
   users: [],           // All users
   isLoadingMessages: false,
+  pinnedMessages: {},  // { chatId: [pinnedMessage, ...] }
+  showPinnedPanel: false,
 
   // ============================================
   // USER MANAGEMENT
@@ -276,6 +278,119 @@ const useChatStore = create((set, get) => ({
     } catch (error) {
       console.error('Failed to mark as read:', error);
     }
+  },
+
+  // ============================================
+  // PIN / UNPIN MESSAGES
+  // ============================================
+
+  togglePinnedPanel: () => set((state) => ({ showPinnedPanel: !state.showPinnedPanel })),
+  closePinnedPanel: () => set({ showPinnedPanel: false }),
+
+  fetchPinnedMessages: async (chatId, chatType = 'user') => {
+    try {
+      const res = await api.get(`/messages/pinned/${chatId}?type=${chatType}`);
+      set((state) => ({
+        pinnedMessages: {
+          ...state.pinnedMessages,
+          [chatId]: res.data.data.messages,
+        },
+      }));
+    } catch (error) {
+      console.error('Failed to fetch pinned messages:', error);
+    }
+  },
+
+  pinMessage: async (messageId, chatId, chatType) => {
+    try {
+      const res = await api.put(`/messages/${messageId}/pin`);
+      const pinnedMsg = res.data.data.message;
+
+      // Update messages list — mark as pinned
+      set((state) => ({
+        messages: {
+          ...state.messages,
+          [chatId]: (state.messages[chatId] || []).map(m =>
+            m._id === messageId ? { ...m, isPinned: true, pinnedBy: pinnedMsg.pinnedBy, pinnedAt: pinnedMsg.pinnedAt } : m
+          ),
+        },
+        pinnedMessages: {
+          ...state.pinnedMessages,
+          [chatId]: [pinnedMsg, ...(state.pinnedMessages[chatId] || [])],
+        },
+      }));
+
+      // Broadcast via socket
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('message:pin', { message: pinnedMsg, chatId, chatType });
+      }
+
+      return pinnedMsg;
+    } catch (error) {
+      console.error('Failed to pin message:', error);
+      throw error;
+    }
+  },
+
+  unpinMessage: async (messageId, chatId, chatType) => {
+    try {
+      await api.put(`/messages/${messageId}/unpin`);
+
+      // Update messages list — mark as unpinned
+      set((state) => ({
+        messages: {
+          ...state.messages,
+          [chatId]: (state.messages[chatId] || []).map(m =>
+            m._id === messageId ? { ...m, isPinned: false, pinnedBy: null, pinnedAt: null } : m
+          ),
+        },
+        pinnedMessages: {
+          ...state.pinnedMessages,
+          [chatId]: (state.pinnedMessages[chatId] || []).filter(m => m._id !== messageId),
+        },
+      }));
+
+      // Broadcast via socket
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('message:unpin', { messageId, chatId, chatType });
+      }
+    } catch (error) {
+      console.error('Failed to unpin message:', error);
+      throw error;
+    }
+  },
+
+  // Called when receiving real-time pin/unpin from other users
+  handleRemotePin: (chatId, message) => {
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [chatId]: (state.messages[chatId] || []).map(m =>
+          m._id === message._id ? { ...m, isPinned: true, pinnedBy: message.pinnedBy, pinnedAt: message.pinnedAt } : m
+        ),
+      },
+      pinnedMessages: {
+        ...state.pinnedMessages,
+        [chatId]: [message, ...(state.pinnedMessages[chatId] || []).filter(m => m._id !== message._id)],
+      },
+    }));
+  },
+
+  handleRemoteUnpin: (chatId, messageId) => {
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [chatId]: (state.messages[chatId] || []).map(m =>
+          m._id === messageId ? { ...m, isPinned: false, pinnedBy: null, pinnedAt: null } : m
+        ),
+      },
+      pinnedMessages: {
+        ...state.pinnedMessages,
+        [chatId]: (state.pinnedMessages[chatId] || []).filter(m => m._id !== messageId),
+      },
+    }));
   },
 }));
 

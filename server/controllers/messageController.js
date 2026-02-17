@@ -404,6 +404,147 @@ const deleteMessage = async (req, res) => {
   }
 };
 
+// ─── PIN / UNPIN MESSAGES ───────────────────────────────────
+
+/**
+ * PUT /api/messages/:messageId/pin
+ * Pin a message — unlimited pins allowed per chat/group
+ */
+const pinMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ success: false, message: 'Message not found' });
+    }
+
+    // Verify the user is a participant of this conversation
+    if (message.group) {
+      const group = await Group.findById(message.group);
+      if (!group || !group.isMember(req.user._id)) {
+        return res.status(403).json({ success: false, message: 'You are not a member of this group' });
+      }
+    } else {
+      const isParticipant =
+        message.sender.toString() === req.user._id.toString() ||
+        (message.receiver && message.receiver.toString() === req.user._id.toString());
+      if (!isParticipant) {
+        return res.status(403).json({ success: false, message: 'You are not part of this conversation' });
+      }
+    }
+
+    if (message.isPinned) {
+      return res.status(400).json({ success: false, message: 'Message is already pinned' });
+    }
+
+    message.isPinned = true;
+    message.pinnedBy = req.user._id;
+    message.pinnedAt = new Date();
+    await message.save();
+
+    await message.populate('sender', 'username avatar');
+    await message.populate('pinnedBy', 'username avatar');
+    if (message.receiver) await message.populate('receiver', 'username avatar');
+
+    const messageResponse = message.toObject();
+    if (messageResponse.encrypted && messageResponse.encryptionIV && messageResponse.encryptionTag) {
+      messageResponse.content = decryptContent(messageResponse);
+    }
+    delete messageResponse.encryptionIV;
+    delete messageResponse.encryptionTag;
+
+    res.json({ success: true, data: { message: messageResponse } });
+  } catch (error) {
+    securityLogger.log('WARN', 'SYSTEM', 'Pin message error', { error: error.message });
+    res.status(500).json({ success: false, message: 'Server error pinning message' });
+  }
+};
+
+/**
+ * PUT /api/messages/:messageId/unpin
+ * Unpin a message
+ */
+const unpinMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ success: false, message: 'Message not found' });
+    }
+
+    // Verify the user is a participant
+    if (message.group) {
+      const group = await Group.findById(message.group);
+      if (!group || !group.isMember(req.user._id)) {
+        return res.status(403).json({ success: false, message: 'You are not a member of this group' });
+      }
+    } else {
+      const isParticipant =
+        message.sender.toString() === req.user._id.toString() ||
+        (message.receiver && message.receiver.toString() === req.user._id.toString());
+      if (!isParticipant) {
+        return res.status(403).json({ success: false, message: 'You are not part of this conversation' });
+      }
+    }
+
+    if (!message.isPinned) {
+      return res.status(400).json({ success: false, message: 'Message is not pinned' });
+    }
+
+    message.isPinned = false;
+    message.pinnedBy = null;
+    message.pinnedAt = null;
+    await message.save();
+
+    res.json({ success: true, message: 'Message unpinned' });
+  } catch (error) {
+    securityLogger.log('WARN', 'SYSTEM', 'Unpin message error', { error: error.message });
+    res.status(500).json({ success: false, message: 'Server error unpinning message' });
+  }
+};
+
+/**
+ * GET /api/messages/pinned/:chatId?type=user|group
+ * Get all pinned messages for a chat (1-to-1) or group
+ */
+const getPinnedMessages = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const chatType = req.query.type || 'user';
+
+    let query;
+    if (chatType === 'group') {
+      const group = await Group.findById(chatId);
+      if (!group || !group.isMember(req.user._id)) {
+        return res.status(403).json({ success: false, message: 'You are not a member of this group' });
+      }
+      query = { group: chatId, isPinned: true };
+    } else {
+      query = {
+        isPinned: true,
+        group: null,
+        $or: [
+          { sender: req.user._id, receiver: chatId },
+          { sender: chatId, receiver: req.user._id },
+        ],
+      };
+    }
+
+    const messages = await Message.find(query)
+      .sort({ pinnedAt: -1 })
+      .populate('sender', 'username avatar')
+      .populate('pinnedBy', 'username avatar')
+      .populate('receiver', 'username avatar');
+
+    const decrypted = decryptMessages(messages);
+
+    res.json({ success: true, data: { messages: decrypted } });
+  } catch (error) {
+    securityLogger.log('WARN', 'SYSTEM', 'Get pinned messages error', { error: error.message });
+    res.status(500).json({ success: false, message: 'Server error fetching pinned messages' });
+  }
+};
+
 module.exports = {
   sendMessage,
   sendGroupMessage,
@@ -412,4 +553,7 @@ module.exports = {
   markAsRead,
   getUnreadCounts,
   deleteMessage,
+  pinMessage,
+  unpinMessage,
+  getPinnedMessages,
 };

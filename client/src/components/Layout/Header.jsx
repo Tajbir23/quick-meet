@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import {
-  Phone, Video, ArrowLeft, Users, Info, Shield, FolderUp
+  Phone, Video, ArrowLeft, Users, Info, Shield, FolderUp, Pin
 } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useCallStore from '../../store/useCallStore';
@@ -17,6 +17,8 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
   const activeChat = useChatStore(s => s.activeChat);
   const clearActiveChat = useChatStore(s => s.clearActiveChat);
   const isUserOnline = useChatStore(s => s.isUserOnline);
+  const showPinnedPanel = useChatStore(s => s.showPinnedPanel);
+  const togglePinnedPanel = useChatStore(s => s.togglePinnedPanel);
   const { startCall, startGroupCall, callStatus } = useCallStore();
   const { activeGroupCalls } = useGroupStore();
   const user = useAuthStore(s => s.user);
@@ -195,6 +197,17 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
             </button>
           </>
         )}
+        <button
+          onClick={togglePinnedPanel}
+          className={`btn-icon transition-colors ${
+            showPinnedPanel
+              ? 'text-amber-400 bg-amber-500/10'
+              : 'text-white hover:text-amber-400 hover:bg-amber-500/10'
+          }`}
+          title="Pinned messages"
+        >
+          <Pin size={20} />
+        </button>
         <button
           onClick={handleAudioCall}
           className="btn-icon text-white hover:text-primary-400 hover:bg-primary-500/10"

@@ -1,9 +1,14 @@
 /**
  * ============================================
- * Group Controller
+ * Group Controller — Role-Based Access Control
  * ============================================
  * 
- * Handles: Create group, join, leave, get groups, get members
+ * Handles: Create, join, leave, add/remove member, change role, get groups
+ * 
+ * ROLES:
+ * - admin:     Full control — invite, remove anyone, promote/demote, delete group
+ * - moderator: Can invite members and remove regular members
+ * - member:    Can chat and join calls only, cannot invite or remove
  * 
  * GROUP CALL LIMITATION:
  * Mesh topology means each peer connects to every other peer.
@@ -15,6 +20,8 @@
 const Group = require('../models/Group');
 const User = require('../models/User');
 const Message = require('../models/Message');
+
+const { ROLES } = Group;
 
 /**
  * POST /api/groups
@@ -31,15 +38,20 @@ const createGroup = async (req, res) => {
       });
     }
 
-    // Create group with creator as admin and first member
-    const memberIds = [req.user._id];
+    // Build members array with roles
+    const memberEntries = [
+      { user: req.user._id, role: ROLES.ADMIN },
+    ];
 
-    // Add initial members if provided
+    // Add initial members if provided (as regular members)
     if (members && Array.isArray(members)) {
+      const addedIds = new Set([req.user._id.toString()]);
       for (const memberId of members) {
+        if (addedIds.has(memberId.toString())) continue;
         const user = await User.findById(memberId);
-        if (user && !memberIds.includes(memberId)) {
-          memberIds.push(memberId);
+        if (user) {
+          memberEntries.push({ user: memberId, role: ROLES.MEMBER });
+          addedIds.add(memberId.toString());
         }
       }
     }
@@ -48,10 +60,10 @@ const createGroup = async (req, res) => {
       name,
       description: description || '',
       admin: req.user._id,
-      members: memberIds,
+      members: memberEntries,
     });
 
-    await group.populate('members', 'username avatar isOnline');
+    await group.populate('members.user', 'username avatar isOnline');
     await group.populate('admin', 'username avatar');
 
     // Create system message for group creation
@@ -83,10 +95,10 @@ const createGroup = async (req, res) => {
 const getMyGroups = async (req, res) => {
   try {
     const groups = await Group.find({
-      members: req.user._id,
+      'members.user': req.user._id,
       isActive: true,
     })
-      .populate('members', 'username avatar isOnline')
+      .populate('members.user', 'username avatar isOnline')
       .populate('admin', 'username avatar')
       .sort({ updatedAt: -1 });
 
@@ -110,7 +122,7 @@ const getMyGroups = async (req, res) => {
 const getGroupById = async (req, res) => {
   try {
     const group = await Group.findById(req.params.id)
-      .populate('members', 'username avatar isOnline lastSeen')
+      .populate('members.user', 'username avatar isOnline lastSeen')
       .populate('admin', 'username avatar');
 
     if (!group) {
@@ -135,7 +147,7 @@ const getGroupById = async (req, res) => {
 
 /**
  * POST /api/groups/:id/join
- * Join a group
+ * Join a group (as regular member)
  */
 const joinGroup = async (req, res) => {
   try {
@@ -169,7 +181,7 @@ const joinGroup = async (req, res) => {
       });
     }
 
-    group.members.push(req.user._id);
+    group.members.push({ user: req.user._id, role: ROLES.MEMBER });
     await group.save();
 
     // System message
@@ -180,7 +192,7 @@ const joinGroup = async (req, res) => {
       type: 'system',
     });
 
-    await group.populate('members', 'username avatar isOnline');
+    await group.populate('members.user', 'username avatar isOnline');
     await group.populate('admin', 'username avatar');
 
     res.json({
@@ -219,14 +231,17 @@ const leaveGroup = async (req, res) => {
       });
     }
 
-    // If admin leaves, transfer admin to first remaining member
+    // If admin leaves, transfer admin to the next moderator, or first remaining member
     if (group.isAdmin(req.user._id)) {
       const remainingMembers = group.members.filter(
-        m => m.toString() !== req.user._id.toString()
+        m => (m.user?._id || m.user).toString() !== req.user._id.toString()
       );
 
       if (remainingMembers.length > 0) {
-        group.admin = remainingMembers[0];
+        // Prefer a moderator for succession, else first member
+        const successor = remainingMembers.find(m => m.role === ROLES.MODERATOR) || remainingMembers[0];
+        successor.role = ROLES.ADMIN;
+        group.admin = successor.user?._id || successor.user;
       } else {
         // Last member leaving — deactivate group
         group.isActive = false;
@@ -235,7 +250,7 @@ const leaveGroup = async (req, res) => {
 
     // Remove user from members
     group.members = group.members.filter(
-      m => m.toString() !== req.user._id.toString()
+      m => (m.user?._id || m.user).toString() !== req.user._id.toString()
     );
 
     await group.save();
@@ -265,7 +280,7 @@ const leaveGroup = async (req, res) => {
 
 /**
  * POST /api/groups/:id/add-member
- * Add a member to group (admin only)
+ * Add a member to group (admin & moderator only)
  */
 const addMember = async (req, res) => {
   try {
@@ -279,10 +294,11 @@ const addMember = async (req, res) => {
       });
     }
 
-    if (!group.isMember(req.user._id)) {
+    // Check role-based permission: only admin & moderator can invite
+    if (!group.canInvite(req.user._id)) {
       return res.status(403).json({
         success: false,
-        message: 'Only group members can add new members',
+        message: 'Only admin and moderators can add members',
       });
     }
 
@@ -308,7 +324,7 @@ const addMember = async (req, res) => {
       });
     }
 
-    group.members.push(userId);
+    group.members.push({ user: userId, role: ROLES.MEMBER });
     await group.save();
 
     await Message.create({
@@ -318,7 +334,7 @@ const addMember = async (req, res) => {
       type: 'system',
     });
 
-    await group.populate('members', 'username avatar isOnline');
+    await group.populate('members.user', 'username avatar isOnline');
 
     // Notify the added user via socket so they see the group immediately
     const io = req.app.get('io');
@@ -334,7 +350,6 @@ const addMember = async (req, res) => {
       io.to(`group:${group._id}`).emit('group:member-added', eventData);
 
       // Also emit directly to the added user's socket (they're not in the room yet)
-      // Find their socketId from the connected sockets
       const sockets = await io.fetchSockets();
       const targetSocket = sockets.find(s => s.userId === userId);
       if (targetSocket) {
@@ -359,6 +374,192 @@ const addMember = async (req, res) => {
 };
 
 /**
+ * POST /api/groups/:id/remove-member
+ * Remove a member from group (role-based)
+ * - Admin can remove anyone
+ * - Moderator can remove regular members only
+ * - Member cannot remove anyone
+ */
+const removeMember = async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const group = await Group.findById(req.params.id);
+
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        message: 'Group not found',
+      });
+    }
+
+    if (!group.canRemove(req.user._id, userId)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to remove this member',
+      });
+    }
+
+    const userToRemove = await User.findById(userId);
+    const removedUsername = userToRemove?.username || 'Unknown';
+
+    // Remove from members
+    group.members = group.members.filter(
+      m => (m.user?._id || m.user).toString() !== userId.toString()
+    );
+    await group.save();
+
+    // System message
+    await Message.create({
+      sender: req.user._id,
+      group: group._id,
+      content: `${req.user.username} removed ${removedUsername} from the group`,
+      type: 'system',
+    });
+
+    await group.populate('members.user', 'username avatar isOnline');
+
+    // Notify via socket
+    const io = req.app.get('io');
+    if (io) {
+      const eventData = {
+        groupId: group._id.toString(),
+        removedUserId: userId,
+        removedUsername,
+        removedBy: req.user.username,
+      };
+
+      io.to(`group:${group._id}`).emit('group:member-removed', eventData);
+
+      // Notify the removed user directly
+      const sockets = await io.fetchSockets();
+      const targetSocket = sockets.find(s => s.userId === userId);
+      if (targetSocket) {
+        targetSocket.emit('group:member-removed', eventData);
+        targetSocket.leave(`group:${group._id}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Member removed successfully',
+      data: { group },
+    });
+  } catch (error) {
+    console.error('Remove member error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error removing member',
+    });
+  }
+};
+
+/**
+ * PUT /api/groups/:id/change-role
+ * Change a member's role (admin only)
+ * Body: { userId, role: 'admin' | 'moderator' | 'member' }
+ */
+const changeMemberRole = async (req, res) => {
+  try {
+    const { userId, role } = req.body;
+    const group = await Group.findById(req.params.id);
+
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        message: 'Group not found',
+      });
+    }
+
+    // Only admin can change roles
+    if (!group.canChangeRole(req.user._id)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only admin can change member roles',
+      });
+    }
+
+    if (!Object.values(ROLES).includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid role. Must be one of: ${Object.values(ROLES).join(', ')}`,
+      });
+    }
+
+    // Cannot change own role
+    if (req.user._id.toString() === userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot change your own role',
+      });
+    }
+
+    const member = group.members.find(
+      m => (m.user?._id || m.user).toString() === userId.toString()
+    );
+
+    if (!member) {
+      return res.status(404).json({
+        success: false,
+        message: 'User is not a member of this group',
+      });
+    }
+
+    const oldRole = member.role;
+    member.role = role;
+
+    // If promoting to admin, transfer admin field too
+    if (role === ROLES.ADMIN) {
+      // Demote current admin to moderator
+      const currentAdmin = group.members.find(
+        m => (m.user?._id || m.user).toString() === req.user._id.toString()
+      );
+      if (currentAdmin) currentAdmin.role = ROLES.MODERATOR;
+      group.admin = userId;
+    }
+
+    await group.save();
+
+    const targetUser = await User.findById(userId);
+    const targetName = targetUser?.username || 'Unknown';
+
+    await Message.create({
+      sender: req.user._id,
+      group: group._id,
+      content: `${req.user.username} changed ${targetName}'s role from ${oldRole} to ${role}`,
+      type: 'system',
+    });
+
+    await group.populate('members.user', 'username avatar isOnline');
+    await group.populate('admin', 'username avatar');
+
+    // Notify via socket
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`group:${group._id}`).emit('group:role-changed', {
+        groupId: group._id.toString(),
+        userId,
+        username: targetName,
+        oldRole,
+        newRole: role,
+        changedBy: req.user.username,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Role changed to ${role}`,
+      data: { group },
+    });
+  } catch (error) {
+    console.error('Change role error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error changing role',
+    });
+  }
+};
+
+/**
  * GET /api/groups/all
  * Get all available groups (for discovery/joining)
  */
@@ -373,7 +574,7 @@ const getAllGroups = async (req, res) => {
     const groupsWithCount = groups.map(g => ({
       ...g.toObject(),
       memberCount: g.members.length,
-      isMember: g.members.some(m => m.toString() === req.user._id.toString()),
+      isMember: g.members.some(m => (m.user?._id || m.user).toString() === req.user._id.toString()),
     }));
 
     res.json({
@@ -396,5 +597,7 @@ module.exports = {
   joinGroup,
   leaveGroup,
   addMember,
+  removeMember,
+  changeMemberRole,
   getAllGroups,
 };

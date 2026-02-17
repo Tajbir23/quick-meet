@@ -100,6 +100,66 @@ const setupChatHandlers = (io, socket, onlineUsers) => {
       });
     }
   }));
+
+  /**
+   * Pin message broadcast — GUARDED
+   * Notifies the other user (1-to-1) or the group room about a pinned message
+   */
+  socket.on('message:pin', guard.wrapHandler(socket, 'message:pin', ({ message, chatId, chatType }) => {
+    if (!message || !chatId || !chatType) return;
+    if (typeof chatId !== 'string' || chatId.length > 30) return;
+
+    if (chatType === 'group') {
+      socket.to(`group:${chatId}`).emit('message:pinned', {
+        message,
+        chatId,
+        chatType,
+        pinnedByUserId: socket.userId,
+        pinnedByUsername: socket.username,
+      });
+    } else {
+      const receiverSocketId = onlineUsers.get(chatId);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit('message:pinned', {
+          message,
+          chatId: socket.userId,
+          chatType: 'user',
+          pinnedByUserId: socket.userId,
+          pinnedByUsername: socket.username,
+        });
+      }
+    }
+  }));
+
+  /**
+   * Unpin message broadcast — GUARDED
+   */
+  socket.on('message:unpin', guard.wrapHandler(socket, 'message:unpin', ({ messageId, chatId, chatType }) => {
+    if (!messageId || !chatId || !chatType) return;
+    if (typeof chatId !== 'string' || chatId.length > 30) return;
+    if (typeof messageId !== 'string' || messageId.length > 30) return;
+
+    if (chatType === 'group') {
+      socket.to(`group:${chatId}`).emit('message:unpinned', {
+        messageId,
+        chatId,
+        chatType,
+        unpinnedByUserId: socket.userId,
+        unpinnedByUsername: socket.username,
+      });
+    } else {
+      const receiverSocketId = onlineUsers.get(chatId);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit('message:unpinned', {
+          messageId,
+          chatId: socket.userId,
+          chatType: 'user',
+          unpinnedByUserId: socket.userId,
+          unpinnedByUsername: socket.username,
+        });
+      }
+    }
+  }));
 };
 
 module.exports = setupChatHandlers;

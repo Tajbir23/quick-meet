@@ -8,6 +8,9 @@ const {
   markAsRead,
   getUnreadCounts,
   deleteMessage,
+  pinMessage,
+  unpinMessage,
+  getPinnedMessages,
 } = require('../controllers/messageController');
 const { protect } = require('../middleware/auth');
 const { apiLimiter, messageLimiter } = require('../middleware/rateLimiter');
@@ -18,6 +21,12 @@ router.use(apiLimiter);
 // 1-to-1 messages (send is additionally rate-limited for spam prevention)
 router.post('/', messageLimiter, sendMessage);
 router.get('/unread/count', getUnreadCounts);
+
+// Pinned messages — must be before /:messageId and /:userId routes
+router.get('/pinned/:chatId', getPinnedMessages);
+router.put('/:messageId/pin', pinMessage);
+router.put('/:messageId/unpin', unpinMessage);
+
 router.delete('/:messageId', deleteMessage);
 router.get('/:userId', getConversation);
 router.put('/read/:userId', markAsRead);
