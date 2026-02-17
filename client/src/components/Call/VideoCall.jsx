@@ -110,7 +110,7 @@ const VideoCall = () => {
       </div>
 
       {/* Video area */}
-      <div className="flex-1 relative bg-dark-900">
+      <div className="flex-1 relative bg-dark-900 min-h-0 overflow-hidden">
         {/* Remote speaking glow bar at top */}
         {remoteSpeaking && !remoteAudioMuted && (
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-400/0 via-emerald-400 to-emerald-400/0 z-10 animate-pulse" />
