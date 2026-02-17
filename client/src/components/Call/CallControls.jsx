@@ -13,7 +13,6 @@ import {
 import useCallStore from '../../store/useCallStore';
 import DeviceSelector from './DeviceSelector';
 import toast from 'react-hot-toast';
-import { isNative } from '../../utils/platform';
 
 const CallControls = ({ compact = false }) => {
   const {
@@ -31,11 +30,6 @@ const CallControls = ({ compact = false }) => {
   const [showDeviceSelector, setShowDeviceSelector] = useState(false);
 
   const handleScreenShare = async () => {
-    // Screen share is not possible on mobile native apps (Android/iOS WebView limitation)
-    if (isNative()) {
-      toast.error('Screen sharing is not available on mobile devices');
-      return;
-    }
     try {
       await toggleScreenShare();
     } catch (err) {
