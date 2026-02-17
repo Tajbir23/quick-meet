@@ -760,7 +760,8 @@ class WebRTCService {
 
   /**
    * Toggle local video (on/off)
-   * @returns {boolean} New enabled state
+   * If no video track exists, acquires a new camera track.
+   * @returns {boolean|Promise<boolean>} New enabled state
    */
   toggleVideo() {
     if (!this.localStream) return false;
@@ -771,7 +772,70 @@ class WebRTCService {
       console.log(`📹 Video ${videoTrack.enabled ? 'on' : 'off'}`);
       return videoTrack.enabled;
     }
-    return false;
+
+    // No video track exists — need to acquire camera
+    // Return a promise so the caller can await
+    return this._acquireVideoTrack();
+  }
+
+  /**
+   * Acquire a new camera video track and add it to the local stream
+   * and all active peer connections.
+   * Called when toggleVideo is pressed but no video track exists
+   * (e.g., call started as audio-only or camera failed initially).
+   */
+  async _acquireVideoTrack() {
+    try {
+      console.log('📹 Acquiring new camera track...');
+      const cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: MEDIA_CONSTRAINTS.video,
+      });
+      const newVideoTrack = cameraStream.getVideoTracks()[0];
+      if (!newVideoTrack) {
+        console.error('📹 No video track from getUserMedia');
+        return false;
+      }
+
+      // Add the video track to the existing local stream
+      this.localStream.addTrack(newVideoTrack);
+      console.log('📹 Camera track added to local stream');
+
+      // Add/replace video track in all peer connections
+      for (const [peerId, pc] of this.peerConnections) {
+        try {
+          // First try to find an existing video transceiver to replace
+          const videoTransceiver = pc.getTransceivers().find(
+            t => t.sender?.track?.kind === 'video' ||
+                 t.receiver?.track?.kind === 'video'
+          );
+
+          if (videoTransceiver && videoTransceiver.sender) {
+            await videoTransceiver.sender.replaceTrack(newVideoTrack);
+            console.log(`📹 Replaced video track for ${peerId}`);
+          } else {
+            // No existing video transceiver — add new track
+            pc.addTrack(newVideoTrack, this.localStream);
+            console.log(`📹 Added new video track for ${peerId}`);
+          }
+        } catch (err) {
+          console.error(`📹 Failed to add video track to ${peerId}:`, err);
+        }
+      }
+
+      return true;
+    } catch (error) {
+      console.error('📹 Failed to acquire camera:', error);
+      if (error.name === 'NotAllowedError') {
+        throw new Error('Camera permission denied. Please allow access.');
+      }
+      if (error.name === 'NotFoundError') {
+        throw new Error('No camera found. Please connect a camera.');
+      }
+      if (error.name === 'NotReadableError') {
+        throw new Error('Camera is in use by another application.');
+      }
+      return false;
+    }
   }
 
   /**

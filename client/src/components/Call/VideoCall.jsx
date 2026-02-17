@@ -35,12 +35,12 @@ const VideoCall = () => {
   const localSpeaking = useSpeakingDetector(localStream);
   const remoteSpeaking = useSpeakingDetector(remoteStream);
 
-  // Attach local stream (re-run on maximize too)
+  // Attach local stream (re-run on maximize too, and when video enabled changes)
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
     }
-  }, [localStream, isMinimized]);
+  }, [localStream, isMinimized, isVideoEnabled]);
 
   // Attach remote stream (re-run on maximize too)
   useEffect(() => {

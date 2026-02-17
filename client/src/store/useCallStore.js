@@ -392,23 +392,31 @@ const useCallStore = create((set, get) => ({
     }
   },
 
-  toggleVideo: () => {
-    const enabled = webrtcService.toggleVideo();
-    const { remoteUser, isGroupCall, groupId } = get();
-    const socket = getSocket();
+  toggleVideo: async () => {
+    try {
+      const result = webrtcService.toggleVideo();
+      // toggleVideo may return a Promise if acquiring new camera
+      const enabled = (result instanceof Promise) ? await result : result;
+      const { remoteUser, isGroupCall, groupId } = get();
+      const socket = getSocket();
 
-    set({ isVideoEnabled: enabled });
+      // Update local stream reference (may have new video track)
+      set({ isVideoEnabled: enabled, localStream: webrtcService.localStream });
 
-    if (socket) {
-      if (isGroupCall) {
-        socket.emit('group-call:toggle-media', { groupId, kind: 'video', enabled });
-      } else if (remoteUser) {
-        socket.emit('call:toggle-media', {
-          targetUserId: remoteUser.userId,
-          kind: 'video',
-          enabled,
-        });
+      if (socket) {
+        if (isGroupCall) {
+          socket.emit('group-call:toggle-media', { groupId, kind: 'video', enabled });
+        } else if (remoteUser) {
+          socket.emit('call:toggle-media', {
+            targetUserId: remoteUser.userId,
+            kind: 'video',
+            enabled,
+          });
+        }
       }
+    } catch (error) {
+      console.error('Toggle video error:', error);
+      // Don't throw - just log, camera may not be available
     }
   },
 
