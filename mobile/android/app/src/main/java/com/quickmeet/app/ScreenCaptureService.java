@@ -48,9 +48,9 @@ public class ScreenCaptureService extends Service {
     private static final int NOTIFICATION_ID = 9999;
 
     // Frame capture settings
-    private static final int MAX_DIMENSION = 720;   // Scale longest side to this
-    private static final int JPEG_QUALITY = 45;      // JPEG quality (0-100)
-    private static final int FRAME_INTERVAL_MS = 250; // 4 fps
+    private static final int MAX_DIMENSION = 480;   // Scale longest side to this
+    private static final int JPEG_QUALITY = 30;      // JPEG quality (lower = faster)
+    private static final int FRAME_INTERVAL_MS = 20; // 50 fps
 
     private static ScreenCaptureService instance;
 
