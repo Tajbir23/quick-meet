@@ -1,5 +1,6 @@
 package com.quickmeet.app;
 
+import android.app.Activity;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -54,13 +55,34 @@ public class ScreenCaptureService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // CRITICAL: Must call startForeground() IMMEDIATELY after startForegroundService()
+        // On Android 12+, failing to call startForeground() causes
+        // ForegroundServiceDidNotStartInTimeException → APP CRASH.
+        // So we call it BEFORE any validation.
+        try {
+            Notification notification = createNotification();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start foreground", e);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        // Now validate the intent data
         if (intent == null) {
             Log.e(TAG, "Null intent received");
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        int resultCode = intent.getIntExtra("resultCode", -1);
+        // IMPORTANT: Activity.RESULT_OK == -1, Activity.RESULT_CANCELED == 0
+        // Use 0 (RESULT_CANCELED) as default so missing extra is treated as error
+        int resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED);
         Intent resultData;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             resultData = intent.getParcelableExtra("resultData", Intent.class);
@@ -68,28 +90,13 @@ public class ScreenCaptureService extends Service {
             resultData = intent.getParcelableExtra("resultData");
         }
 
-        if (resultCode == -1 || resultData == null) {
+        if (resultCode != Activity.RESULT_OK || resultData == null) {
             Log.e(TAG, "Invalid MediaProjection result: code=" + resultCode + ", data=" + resultData);
             stopSelf();
             return START_NOT_STICKY;
         }
 
         try {
-            // Start as foreground service IMMEDIATELY
-            // Android 14+ (API 34) REQUIRES foregroundServiceType in startForeground()
-            Notification notification = createNotification();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                // Android 14+: must specify FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-                startForeground(NOTIFICATION_ID, notification,
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Android 10-13: also specify type (recommended)
-                startForeground(NOTIFICATION_ID, notification,
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-            } else {
-                startForeground(NOTIFICATION_ID, notification);
-            }
-
             // Create MediaProjection AFTER startForeground
             MediaProjectionManager projectionManager =
                     (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
@@ -113,7 +120,7 @@ public class ScreenCaptureService extends Service {
 
             Log.i(TAG, "Screen capture service started successfully with MediaProjection");
         } catch (Exception e) {
-            Log.e(TAG, "Failed to start foreground service", e);
+            Log.e(TAG, "Failed to set up MediaProjection", e);
             stopSelf();
         }
 
