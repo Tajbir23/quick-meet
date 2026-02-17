@@ -135,6 +135,27 @@ function createWindow() {
     return allowed.includes(permission);
   });
 
+  // ─── Screen Share (Electron 28+) ──────────────────────
+  // Required: without this, getDisplayMedia() throws "Not supported" in Electron
+  const { desktopCapturer } = require('electron');
+  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 320, height: 240 },
+      });
+      if (sources.length > 0) {
+        // Grant the first screen source (Chromium will show its own picker)
+        callback({ video: sources[0] });
+      } else {
+        callback({});
+      }
+    } catch (err) {
+      console.error('Screen share handler error:', err);
+      callback({});
+    }
+  });
+
   // Accept SSL certificates
   session.defaultSession.setCertificateVerifyProc((request, callback) => {
     callback(0);
