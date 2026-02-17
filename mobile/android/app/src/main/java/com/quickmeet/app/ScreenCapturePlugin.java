@@ -20,16 +20,18 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  * ScreenCapturePlugin — Capacitor Plugin for Android Screen Share
  *
  * Captures actual screen content using native MediaProjection API
- * and streams frames to JavaScript as base64 JPEG images.
+ * and streams raw binary JPEG frames via a local WebSocket server.
  *
  * Flow:
  * 1. JS calls ScreenCapture.start()
- * 2. Plugin sets up frame callback → launches MediaProjection permission
+ * 2. Plugin launches MediaProjection permission dialog
  * 3. On grant → starts ScreenCaptureService (foreground, mediaProjection type)
- * 4. Service captures screen frames via ImageReader → JPEG → base64
- * 5. Plugin emits "screenFrame" events to JS with base64 data
- * 6. JS draws frames on a canvas → canvas.captureStream() → WebRTC
- * 7. JS calls ScreenCapture.stop() → stops the service
+ * 4. Service captures screen frames via ImageReader → JPEG bytes
+ * 5. Service sends raw JPEG via WebSocket (ScreenShareServer on localhost)
+ * 6. Plugin returns the WebSocket port to JS
+ * 7. JS connects to ws://127.0.0.1:PORT, receives binary frames
+ * 8. JS draws frames on canvas → canvas.captureStream() → WebRTC
+ * 9. JS calls ScreenCapture.stop() → stops the service
  */
 @CapacitorPlugin(name = "ScreenCapture")
 public class ScreenCapturePlugin extends Plugin {
@@ -40,22 +42,8 @@ public class ScreenCapturePlugin extends Plugin {
     @Override
     public void load() {
         super.load();
-        // Set up the frame callback so frames get emitted to JS
-        ScreenCaptureService.setFrameCallback(new ScreenCaptureService.FrameCallback() {
-            @Override
-            public void onFrame(String base64Frame, int width, int height) {
-                JSObject data = new JSObject();
-                data.put("frame", base64Frame);
-                data.put("width", width);
-                data.put("height", height);
-                notifyListeners("screenFrame", data);
-            }
-
-            @Override
-            public void onStopped() {
-                notifyListeners("screenStopped", new JSObject());
-            }
-        });
+        // No frame callback needed — frames go via WebSocket
+        Log.i(TAG, "ScreenCapturePlugin loaded (WebSocket mode)");
     }
 
     /**
@@ -98,11 +86,23 @@ public class ScreenCapturePlugin extends Plugin {
                     getContext().startService(serviceIntent);
                 }
 
-                JSObject ret = new JSObject();
-                ret.put("success", true);
-                ret.put("message", "Screen capture started with frame streaming");
-
-                if (call != null) call.resolve(ret);
+                // Poll for service WebSocket port (service starts async via Intent)
+                final PluginCall finalCall = call;
+                new Thread(() -> {
+                    for (int i = 0; i < 50; i++) { // up to 5 seconds
+                        ScreenCaptureService svc = ScreenCaptureService.getInstance();
+                        if (svc != null && svc.getServerPort() > 0) {
+                            JSObject ret = new JSObject();
+                            ret.put("success", true);
+                            ret.put("port", svc.getServerPort());
+                            ret.put("message", "Screen capture started with WebSocket streaming");
+                            if (finalCall != null) finalCall.resolve(ret);
+                            return;
+                        }
+                        try { Thread.sleep(100); } catch (InterruptedException e) { break; }
+                    }
+                    if (finalCall != null) finalCall.reject("Timeout: screen capture service did not start");
+                }, "QM-WaitForPort").start();
             } catch (Exception e) {
                 Log.e(TAG, "Failed to start screen capture service", e);
                 if (call != null) call.reject("Failed to start: " + e.getMessage());

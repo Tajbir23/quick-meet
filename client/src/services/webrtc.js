@@ -240,15 +240,15 @@ class WebRTCService {
     try {
       console.log('🖥️ Requesting Android screen capture permission...');
       const result = await ScreenCapture.start();
-      if (!result?.success) {
-        throw new Error('Screen capture permission denied');
+      if (!result?.success || !result?.port) {
+        throw new Error('Screen capture permission denied or no port returned');
       }
 
-      console.log('🖥️ Android screen capture service started, setting up frame receiver...');
+      const wsPort = result.port;
+      console.log(`🖥️ Screen capture service started, connecting WebSocket on port ${wsPort}...`);
 
       // Create canvas to draw received frames
       const canvas = document.createElement('canvas');
-      // Initial size (will be updated when first frame arrives)
       canvas.width = 720;
       canvas.height = 1280;
       const ctx = canvas.getContext('2d');
@@ -257,28 +257,42 @@ class WebRTCService {
       ctx.fillStyle = '#111';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Create stream from canvas — fps=0 means manual frame updates
-      // We'll call requestFrame() on the track after each draw
+      // Create stream from canvas — fps=0 means manual frame updates via requestFrame()
       this.screenStream = canvas.captureStream(0);
 
-      // Reusable Image element for decoding base64 frames
-      const frameImg = new Image();
+      // Connect to native WebSocket server for binary JPEG frames
+      // This is MUCH faster than Capacitor bridge + base64:
+      // - Raw binary (no 33% base64 overhead)
+      // - No JSON serialization
+      // - No Capacitor event bus overhead
+      const ws = new WebSocket(`ws://127.0.0.1:${wsPort}`);
+      ws.binaryType = 'arraybuffer';
+      this._screenShareWs = ws;
+
       let frameReady = true;
 
-      // Listen for screen frames from native
-      this._screenFrameListener = await ScreenCapture.addListener('screenFrame', (data) => {
-        if (!frameReady || !data?.frame) return;
+      ws.onopen = () => {
+        console.log('🖥️ WebSocket connected to screen capture server');
+      };
+
+      ws.onmessage = (event) => {
+        if (!frameReady || !event.data) return;
         frameReady = false;
 
-        frameImg.onload = () => {
-          // Update canvas size if dimensions changed
-          if (canvas.width !== data.width || canvas.height !== data.height) {
-            canvas.width = data.width;
-            canvas.height = data.height;
+        // event.data is ArrayBuffer (raw JPEG bytes)
+        const blob = new Blob([event.data], { type: 'image/jpeg' });
+
+        // createImageBitmap decodes off the main thread — ideal for 50fps
+        createImageBitmap(blob).then(bitmap => {
+          // Update canvas size if frame dimensions changed
+          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
           }
 
           // Draw the actual screen frame
-          ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height);
+          ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          bitmap.close(); // Free GPU memory
 
           // Request the captureStream to emit this frame
           const videoTrack = this.screenStream?.getVideoTracks()[0];
@@ -287,29 +301,44 @@ class WebRTCService {
           }
 
           frameReady = true;
-        };
-
-        frameImg.onerror = () => {
+        }).catch(() => {
           frameReady = true;
-        };
+        });
+      };
 
-        frameImg.src = 'data:image/jpeg;base64,' + data.frame;
-      });
+      ws.onerror = (err) => {
+        console.warn('🖥️ Screen share WebSocket error:', err);
+      };
 
-      // Listen for native capture stop (e.g. user stops from notification)
-      this._screenStopListener = await ScreenCapture.addListener('screenStopped', () => {
-        console.log('🖥️ Native screen capture stopped');
-        // Trigger track ended so the UI can react
+      ws.onclose = () => {
+        console.log('🖥️ Screen share WebSocket closed');
+        // If still expected to be sharing, signal track ended
         const videoTrack = this.screenStream?.getVideoTracks()[0];
-        if (videoTrack) {
+        if (videoTrack && videoTrack.readyState === 'live') {
           videoTrack.stop();
         }
+      };
+
+      // Wait for WebSocket to connect and first frames to arrive
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          if (ws.readyState !== WebSocket.OPEN) {
+            reject(new Error('WebSocket connection timeout'));
+          } else {
+            resolve();
+          }
+        }, 3000);
+
+        ws.addEventListener('open', () => {
+          // Wait a bit more for first frame
+          setTimeout(() => {
+            clearTimeout(timeout);
+            resolve();
+          }, 500);
+        }, { once: true });
       });
 
-      // Wait briefly for first frame to arrive
-      await new Promise(resolve => setTimeout(resolve, 800));
-
-      console.log('🖥️ Android screen share active with real frame streaming');
+      console.log('🖥️ Android screen share active with WebSocket binary streaming');
       return this.screenStream;
     } catch (error) {
       // Clean up on failure
@@ -324,9 +353,15 @@ class WebRTCService {
   }
 
   /**
-   * Clean up Android screen share listeners and intervals
+   * Clean up Android screen share WebSocket and resources
    */
   _cleanupAndroidScreenShare() {
+    if (this._screenShareWs) {
+      try {
+        this._screenShareWs.close();
+      } catch (e) {}
+      this._screenShareWs = null;
+    }
     if (this._screenFrameListener) {
       this._screenFrameListener.remove();
       this._screenFrameListener = null;
