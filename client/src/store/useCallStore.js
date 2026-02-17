@@ -394,9 +394,7 @@ const useCallStore = create((set, get) => ({
 
   toggleVideo: async () => {
     try {
-      const result = webrtcService.toggleVideo();
-      // toggleVideo may return a Promise if acquiring new camera
-      const enabled = (result instanceof Promise) ? await result : result;
+      const enabled = await webrtcService.toggleVideo();
       const { remoteUser, isGroupCall, groupId } = get();
       const socket = getSocket();
 
@@ -426,12 +424,31 @@ const useCallStore = create((set, get) => ({
 
     try {
       if (isScreenSharing) {
-        // Stop screen share, revert to camera (or null for audio-only calls)
+        // Stop screen share, revert to camera
         webrtcService.stopScreenShare();
 
-        // Revert video track in peer connections to camera (or null if audio-only)
-        const cameraTrack = webrtcService.localStream?.getVideoTracks()[0] || null;
-        await webrtcService.replaceVideoTrack(cameraTrack, false);
+        // Check if camera track survived screen share (may be stale on some devices)
+        let cameraTrack = webrtcService.localStream?.getVideoTracks()[0] || null;
+
+        if (cameraTrack && cameraTrack.readyState !== 'live') {
+          // Camera track ended/stale during screen share — clean up
+          cameraTrack.stop();
+          webrtcService.localStream?.removeTrack(cameraTrack);
+          cameraTrack = null;
+        }
+
+        if (!cameraTrack && get().isVideoEnabled) {
+          // Camera was on but track died — re-acquire fresh camera
+          try {
+            await webrtcService._acquireVideoTrack();
+          } catch (e) {
+            console.warn('Failed to re-acquire camera after screen share:', e);
+            await webrtcService.replaceVideoTrack(null, false);
+          }
+        } else {
+          // Replace with camera track (or null for audio-only)
+          await webrtcService.replaceVideoTrack(cameraTrack, false);
+        }
 
         // Revert local video to camera stream
         set({ isScreenSharing: false, localStream: webrtcService.localStream });

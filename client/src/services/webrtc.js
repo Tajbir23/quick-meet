@@ -789,21 +789,50 @@ class WebRTCService {
 
   /**
    * Toggle local video (on/off)
-   * If no video track exists, acquires a new camera track.
-   * @returns {boolean|Promise<boolean>} New enabled state
+   * 
+   * WHY stop/re-acquire instead of track.enabled:
+   * Setting track.enabled = false just sends black frames but keeps the
+   * camera hardware locked. On many devices (especially Android WebView
+   * and some mobile browsers), re-enabling the track produces FROZEN
+   * frames because the encoder stalls. Stopping the track entirely
+   * releases the camera hardware, and getUserMedia gives a fresh track.
+   * 
+   * @returns {Promise<boolean>} New enabled state
    */
-  toggleVideo() {
+  async toggleVideo() {
     if (!this.localStream) return false;
 
     const videoTrack = this.localStream.getVideoTracks()[0];
-    if (videoTrack) {
-      videoTrack.enabled = !videoTrack.enabled;
-      console.log(`📹 Video ${videoTrack.enabled ? 'on' : 'off'}`);
-      return videoTrack.enabled;
+
+    if (videoTrack && videoTrack.readyState === 'live') {
+      // Camera is ON → turn it OFF
+      // Stop the track entirely to release camera hardware
+      videoTrack.stop();
+      this.localStream.removeTrack(videoTrack);
+
+      // Set sender track to null in all PCs (remote sees black)
+      for (const [peerId, pc] of this.peerConnections) {
+        try {
+          const vt = pc.getTransceivers().find(
+            t => t.sender?.track?.kind === 'video' || t.receiver?.track?.kind === 'video'
+          );
+          if (vt?.sender) {
+            await vt.sender.replaceTrack(null);
+          }
+        } catch (e) {
+          console.warn(`Failed to clear video for ${peerId}:`, e);
+        }
+      }
+
+      console.log('📹 Video off (track stopped & camera released)');
+      return false;
     }
 
-    // No video track exists — need to acquire camera
-    // Return a promise so the caller can await
+    // No live video track → clean up any stale/ended track, then acquire fresh camera
+    if (videoTrack) {
+      videoTrack.stop();
+      this.localStream.removeTrack(videoTrack);
+    }
     return this._acquireVideoTrack();
   }
 
@@ -815,7 +844,16 @@ class WebRTCService {
    */
   async _acquireVideoTrack() {
     try {
-      console.log('📹 Acquiring new camera track...');
+      console.log('📹 Acquiring fresh camera track...');
+
+      // Clean up any existing stale/ended video tracks first
+      if (this.localStream) {
+        this.localStream.getVideoTracks().forEach(t => {
+          t.stop();
+          this.localStream.removeTrack(t);
+        });
+      }
+
       const cameraStream = await navigator.mediaDevices.getUserMedia({
         video: MEDIA_CONSTRAINTS.video,
       });
@@ -827,7 +865,7 @@ class WebRTCService {
 
       // Add the video track to the existing local stream
       this.localStream.addTrack(newVideoTrack);
-      console.log('📹 Camera track added to local stream');
+      console.log('📹 Fresh camera track added to local stream');
 
       // Add/replace video track in all peer connections
       for (const [peerId, pc] of this.peerConnections) {
