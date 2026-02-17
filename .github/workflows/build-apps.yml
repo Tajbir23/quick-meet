@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 # Ensure only one build runs at a time
 concurrency:
   group: build-release
@@ -269,9 +272,9 @@ jobs:
           prerelease: false
           files: release-assets/*
           fail_on_unmatched_files: false
-          token: ${{ github.token }}
+          make_latest: true
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ====================================================
   # DEPLOY TO VPS (after release is created)
