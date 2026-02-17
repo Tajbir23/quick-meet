@@ -423,7 +423,7 @@ const useCallStore = create((set, get) => ({
 
         // Revert video track in peer connections to camera (or null if audio-only)
         const cameraTrack = webrtcService.localStream?.getVideoTracks()[0] || null;
-        await webrtcService.replaceVideoTrack(cameraTrack);
+        await webrtcService.replaceVideoTrack(cameraTrack, false);
 
         // Revert local video to camera stream
         set({ isScreenSharing: false, localStream: webrtcService.localStream });
@@ -443,7 +443,11 @@ const useCallStore = create((set, get) => ({
         const screenStream = await webrtcService.startScreenShare();
         const screenTrack = screenStream.getVideoTracks()[0];
 
-        await webrtcService.replaceVideoTrack(screenTrack);
+        if (!screenTrack) {
+          throw new Error('No video track from screen capture');
+        }
+
+        await webrtcService.replaceVideoTrack(screenTrack, true);
 
         // Handle when user stops sharing via browser UI
         screenTrack.onended = () => {

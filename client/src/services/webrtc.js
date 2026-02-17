@@ -188,7 +188,7 @@ class WebRTCService {
   async startScreenShare() {
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-        throw new Error('Screen sharing is not supported in your browser.');
+        throw new Error('Screen sharing is not supported in this browser/app. Use a desktop browser instead.');
       }
 
       try {
@@ -196,13 +196,11 @@ class WebRTCService {
       } catch (constraintErr) {
         // Fallback: some browsers reject advanced constraints
         console.warn('Retrying screen share with basic constraints:', constraintErr.message);
-        this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
       }
 
-      // When user stops sharing via browser UI (clicking "Stop sharing")
-      this.screenStream.getVideoTracks()[0].onended = () => {
-        this.stopScreenShare();
-      };
+      // Note: onended handler is set by the caller (useCallStore.toggleScreenShare)
+      // to properly revert both WebRTC and UI state.
 
       console.log('🖥️ Screen sharing started');
       return this.screenStream;
@@ -210,6 +208,7 @@ class WebRTCService {
       if (error.name === 'NotAllowedError') {
         throw new Error('Screen sharing was cancelled.');
       }
+      console.error('Screen share error:', error.name, error.message);
       throw error;
     }
   }
@@ -634,42 +633,53 @@ class WebRTCService {
    * - Seamless switch
    * - Remote peer sees the new track automatically
    */
-  async replaceVideoTrack(newTrack) {
+  async replaceVideoTrack(newTrack, isScreenShare = false) {
     for (const [peerId, pc] of this.peerConnections) {
       try {
-        // Find video transceiver — it always exists because we add one in createPeerConnection
+        // Find video transceiver — check both sender and receiver track kind
         const videoTransceiver = pc.getTransceivers().find(
-          t => t.receiver?.track?.kind === 'video'
+          t => t.sender?.track?.kind === 'video' ||
+               t.receiver?.track?.kind === 'video'
         );
 
         if (videoTransceiver && videoTransceiver.sender) {
           await videoTransceiver.sender.replaceTrack(newTrack);
-          console.log(`🔄 Replaced video track for ${peerId}`);
+          console.log(`🔄 Replaced video track for ${peerId} (screen: ${isScreenShare})`);
 
-          // Optimize encoding for screen share (low latency)
-          if (newTrack) {
-            // Tell browser this is screen content (text/detail priority over motion)
-            if (newTrack.contentHint !== undefined) {
-              newTrack.contentHint = 'detail';
-            }
-
-            // Set bitrate limits for lower latency
-            try {
-              const params = videoTransceiver.sender.getParameters();
-              if (!params.encodings || params.encodings.length === 0) {
-                params.encodings = [{}];
+          // Optimize encoding based on content type
+          try {
+            const params = videoTransceiver.sender.getParameters();
+            if (params.encodings && params.encodings.length > 0) {
+              if (isScreenShare) {
+                // Screen share: prioritize sharpness over framerate
+                if (newTrack && newTrack.contentHint !== undefined) {
+                  newTrack.contentHint = 'detail';
+                }
+                params.encodings[0].maxBitrate = 2500000; // 2.5 Mbps for screen
+              } else {
+                // Camera: prioritize motion, remove bitrate cap
+                if (newTrack && newTrack.contentHint !== undefined) {
+                  newTrack.contentHint = 'motion';
+                }
+                delete params.encodings[0].maxBitrate;
               }
-              params.encodings[0].maxBitrate = 1500000; // 1.5 Mbps max
-              params.degradationPreference = 'maintain-resolution'; // keep text sharp
               await videoTransceiver.sender.setParameters(params);
-              console.log(`⚡ Screen share encoding optimized for ${peerId}`);
-            } catch (encErr) {
-              // setParameters not supported in all browsers, safe to ignore
-              console.warn('Could not set encoding params:', encErr.message);
             }
+          } catch (encErr) {
+            // setParameters not supported in all browsers, safe to ignore
+            console.warn('Could not set encoding params:', encErr.message);
           }
         } else {
-          console.warn(`No video transceiver found for ${peerId}`);
+          // Last resort: find any sender that could carry video
+          const videoSender = pc.getSenders().find(
+            s => !s.track || s.track.kind === 'video'
+          );
+          if (videoSender) {
+            await videoSender.replaceTrack(newTrack);
+            console.log(`🔄 Replaced video track via sender fallback for ${peerId}`);
+          } else {
+            console.warn(`No video transceiver or sender found for ${peerId}`);
+          }
         }
       } catch (err) {
         console.error(`Failed to replace video track for ${peerId}:`, err);

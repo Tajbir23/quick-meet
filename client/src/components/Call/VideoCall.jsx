@@ -22,6 +22,7 @@ const VideoCall = () => {
     callDuration,
     isVideoEnabled,
     isAudioEnabled,
+    isScreenSharing,
     iceState,
     isMinimized,
     remoteAudioMuted,
@@ -161,7 +162,7 @@ const VideoCall = () => {
             }`}
             onClick={() => setIsLocalLarge(!isLocalLarge)}
           >
-            {isVideoEnabled ? (
+            {(isVideoEnabled || isScreenSharing) ? (
               <video
                 ref={localVideoRef}
                 autoPlay

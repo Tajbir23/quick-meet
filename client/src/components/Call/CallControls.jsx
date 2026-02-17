@@ -33,7 +33,7 @@ const CallControls = ({ compact = false }) => {
     try {
       await toggleScreenShare();
     } catch (err) {
-      toast.error('Screen sharing failed');
+      toast.error(err?.message || 'Screen sharing failed');
     }
   };
 
