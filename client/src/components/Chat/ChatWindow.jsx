@@ -8,8 +8,8 @@ import Header from '../Layout/Header';
 import GroupChat from '../Group/GroupChat';
 import ForwardMessageModal from '../Common/ForwardMessageModal';
 import UserProfileModal from '../Common/UserProfileModal';
-import { formatDateSeparator, shouldShowDateSeparator } from '../../utils/helpers';
-import { ChevronDown } from 'lucide-react';
+import { formatDateSeparator, shouldShowDateSeparator, formatMessageTime } from '../../utils/helpers';
+import { ChevronDown, Pin, X, ChevronUp } from 'lucide-react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 
@@ -24,6 +24,8 @@ const ChatWindow = () => {
   const typingUsers = useChatStore(s => s.typingUsers);
   const markAsRead = useChatStore(s => s.markAsRead);
   const showPinnedPanel = useChatStore(s => s.showPinnedPanel);
+  const pinnedMessages = useChatStore(s => s.pinnedMessages);
+  const fetchPinnedMessages = useChatStore(s => s.fetchPinnedMessages);
   const pinMessage = useChatStore(s => s.pinMessage);
   const unpinMessage = useChatStore(s => s.unpinMessage);
   const user = useAuthStore(s => s.user);
@@ -33,6 +35,8 @@ const ChatWindow = () => {
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [forwardMessage, setForwardMessage] = useState(null);
   const [viewProfileUser, setViewProfileUser] = useState(null);
+  const [pinnedPreviewIndex, setPinnedPreviewIndex] = useState(0);
+  const [pinnedBarDismissed, setPinnedBarDismissed] = useState(false);
 
   // Delete message handler
   const handleDeleteMessage = async (messageId) => {
@@ -103,6 +107,12 @@ const ChatWindow = () => {
     }
     setShowGroupInfo(false); // Close group info when switching chats
     useChatStore.getState().closePinnedPanel(); // Close pinned panel when switching chats
+    setPinnedPreviewIndex(0);
+    setPinnedBarDismissed(false);
+    // Fetch pinned messages for the preview bar
+    if (activeChat) {
+      fetchPinnedMessages(activeChat.id, activeChat.type);
+    }
   }, [activeChat?.id]);
 
   // Auto scroll to bottom on new messages
@@ -118,6 +128,32 @@ const ChatWindow = () => {
   const chatMessages = messages[activeChat.id] || [];
   const typing = typingUsers[activeChat.id];
   const isTyping = typing && Object.keys(typing).length > 0;
+
+  // Pinned preview bar data
+  const currentPinnedList = Array.isArray(pinnedMessages[activeChat?.id]) ? pinnedMessages[activeChat.id] : [];
+  const hasPinnedMessages = currentPinnedList && currentPinnedList.length > 0 && !pinnedBarDismissed;
+  const safeIndex = hasPinnedMessages ? pinnedPreviewIndex % currentPinnedList.length : 0;
+  const currentPinnedMsg = hasPinnedMessages && currentPinnedList[safeIndex] ? currentPinnedList[safeIndex] : null;
+
+  // Cycle through pinned messages (Telegram-style)
+  const handlePinnedBarClick = () => {
+    if (!currentPinnedMsg) return;
+    scrollToMessage(currentPinnedMsg._id);
+    if (hasPinnedMessages && currentPinnedList.length > 1) {
+      setPinnedPreviewIndex((prev) => (prev + 1) % currentPinnedList.length);
+    }
+  };
+
+  const getPinnedPreviewText = (msg) => {
+    if (!msg) return '';
+    if (typeof msg.content === 'string' && msg.content.length > 0) return msg.content.length > 80 ? msg.content.substring(0, 80) + '...' : msg.content;
+    if (msg.fileUrl) {
+      const isImage = msg.fileMimeType && msg.fileMimeType.startsWith('image/');
+      return isImage ? '📷 Photo' : `📎 ${msg.fileName || 'File'}`;
+    }
+    if (msg.type === 'call') return '📞 Call';
+    return 'Pinned message';
+  };
 
   // Load more messages (scroll to top)
   const handleScroll = () => {
@@ -157,6 +193,50 @@ const ChatWindow = () => {
 
       {/* Messages column */}
       <div className="flex-1 flex flex-col min-w-0">
+
+      {/* Telegram-style pinned message preview bar */}
+      {hasPinnedMessages && currentPinnedMsg && typeof currentPinnedMsg === 'object' && (
+        <div className="flex-shrink-0 flex items-center gap-2 px-3 md:px-4 py-2 bg-dark-800/90 border-b border-dark-700/50 backdrop-blur-sm cursor-pointer hover:bg-dark-750 transition-colors group/pin"
+          onClick={handlePinnedBarClick}
+        >
+          {/* Left accent line + pin icon */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="w-0.5 h-8 bg-primary-500 rounded-full" />
+            <Pin size={14} className="text-primary-400 flex-shrink-0" />
+          </div>
+
+          {/* Content */}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-primary-400">
+                Pinned Message{currentPinnedList.length > 1 ? ` #${(safeIndex + 1)}` : ''}
+              </span>
+              {currentPinnedList.length > 1 && (
+                <span className="text-[10px] text-dark-500">of {currentPinnedList.length}</span>
+              )}
+            </div>
+            <p className="text-[12px] text-dark-300 truncate leading-snug mt-0.5">
+              {getPinnedPreviewText(currentPinnedMsg)}
+            </p>
+          </div>
+
+          {/* Cycle / Close buttons */}
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            {currentPinnedList.length > 1 && (
+              <div className="w-5 h-5 rounded-full flex items-center justify-center text-dark-400 opacity-0 group-hover/pin:opacity-100 transition-opacity">
+                <ChevronUp size={14} />
+              </div>
+            )}
+            <button
+              onClick={(e) => { e.stopPropagation(); setPinnedBarDismissed(true); }}
+              className="w-5 h-5 rounded-full flex items-center justify-center text-dark-500 hover:text-dark-300 opacity-0 group-hover/pin:opacity-100 transition-opacity"
+              title="Dismiss"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Messages area (Flexible height, scrollable) */}
       <div
