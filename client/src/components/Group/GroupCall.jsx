@@ -102,7 +102,7 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false, isScreenSha
           autoPlay
           playsInline
           muted={isLocal || isMuted}
-          className="w-full h-full object-cover"
+          className={`w-full h-full ${isLocal ? 'object-cover' : 'object-contain bg-black'}`}
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-dark-800 to-dark-900">

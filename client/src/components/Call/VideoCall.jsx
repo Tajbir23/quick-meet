@@ -123,7 +123,7 @@ const VideoCall = () => {
             ref={remoteVideoRef}
             autoPlay
             playsInline
-            className={`w-full h-full object-cover ${isLocalLarge ? 'absolute top-16 right-3 w-28 h-40 md:w-48 md:h-36 rounded-2xl z-20 shadow-2xl cursor-pointer border-2 border-dark-700/50' : ''}`}
+            className={`w-full h-full object-contain bg-black ${isLocalLarge ? 'absolute top-16 right-3 w-28 h-40 md:w-48 md:h-36 rounded-2xl z-20 shadow-2xl cursor-pointer border-2 border-dark-700/50 object-cover' : ''}`}
             onClick={() => isLocalLarge && setIsLocalLarge(false)}
           />
         ) : (
