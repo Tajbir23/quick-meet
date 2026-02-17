@@ -35,14 +35,17 @@ const VideoCall = () => {
   const localSpeaking = useSpeakingDetector(localStream);
   const remoteSpeaking = useSpeakingDetector(remoteStream);
 
-  // Attach local stream (re-run on maximize too, and when video enabled changes)
+  // Attach local stream — must re-run when video element is remounted
+  // (the <video> is conditionally rendered, so toggling video/screen share
+  //  destroys and recreates the element → needs fresh srcObject + play())
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.play().catch(() => {});
     }
-  }, [localStream, isMinimized, isVideoEnabled]);
+  }, [localStream, isMinimized, isVideoEnabled, isScreenSharing]);
 
-  // Attach remote stream (re-run on maximize too)
+  // Attach remote stream — re-run on maximize and when remote stream changes
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
@@ -55,7 +58,7 @@ const VideoCall = () => {
         document.addEventListener('click', playOnClick);
       });
     }
-  }, [remoteStream, isMinimized]);
+  }, [remoteStream, isMinimized, isScreenSharing]);
 
   const isConnecting = callStatus === CALL_STATUS.CALLING || callStatus === CALL_STATUS.RECONNECTING;
   const isConnected = callStatus === CALL_STATUS.CONNECTED;

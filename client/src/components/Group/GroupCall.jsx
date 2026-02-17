@@ -69,11 +69,20 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false, isScreenSha
     };
   }, [stream, checkVideoActive]);
 
+  // For local stream, check enabled (we control it) rather than muted
+  const showVideo = isLocal
+    ? stream?.getVideoTracks().some(t => t.enabled)
+    : hasVideo;
+
+  // Re-run when showVideo changes: the <video> element is conditionally
+  // rendered, so toggling video off destroys it. When toggled back on, a
+  // fresh <video> element is created and needs srcObject + play().
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(() => {});
     }
-  }, [stream]);
+  }, [stream, showVideo]);
 
   // Always attach stream to hidden audio element for audio-only scenarios
   useEffect(() => {
@@ -81,11 +90,6 @@ const VideoTile = ({ stream, name, isMuted = false, isLocal = false, isScreenSha
       audioRef.current.srcObject = stream;
     }
   }, [stream, isLocal]);
-
-  // For local stream, check enabled (we control it) rather than muted
-  const showVideo = isLocal
-    ? stream?.getVideoTracks().some(t => t.enabled)
-    : hasVideo;
 
   return (
     <div className={`relative bg-dark-800 rounded-2xl overflow-hidden h-full w-full transition-shadow duration-300 ${
