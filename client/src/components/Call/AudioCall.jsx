@@ -8,6 +8,7 @@ import { useEffect, useRef } from 'react';
 import { MicOff } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
 import CallControls from './CallControls';
+import PingIndicator from './PingIndicator';
 import useSpeakingDetector from '../../hooks/useSpeakingDetector';
 import { getInitials, stringToColor, formatDuration } from '../../utils/helpers';
 import { CALL_STATUS } from '../../utils/constants';
@@ -153,7 +154,7 @@ const AudioCall = () => {
           </div>
         )}
 
-        {/* ICE state */}
+        {/* ICE state + Ping */}
         <div className="flex items-center gap-2 mt-6 bg-dark-800/50 rounded-full px-3 py-1.5 backdrop-blur-sm">
           <span className={`w-2 h-2 rounded-full ${
             iceState === 'connected' || iceState === 'completed' ? 'bg-emerald-400' :
@@ -161,6 +162,9 @@ const AudioCall = () => {
             iceState === 'failed' ? 'bg-red-400' : 'bg-dark-400'
           }`} />
           <span className="text-xs text-dark-400 capitalize">{iceState}</span>
+          {/* Ping indicator */}
+          <span className="w-px h-3 bg-dark-600 mx-0.5" />
+          <PingIndicator variant="inline" />
         </div>
       </div>
 

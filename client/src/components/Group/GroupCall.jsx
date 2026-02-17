@@ -17,6 +17,7 @@ import { Users, PhoneOff, Monitor, MicOff } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
 import useAuthStore from '../../store/useAuthStore';
 import CallControls from '../Call/CallControls';
+import PingIndicator from '../Call/PingIndicator';
 import useSpeakingDetector from '../../hooks/useSpeakingDetector';
 import { getInitials, stringToColor, formatDuration } from '../../utils/helpers';
 
@@ -201,14 +202,17 @@ const GroupCall = () => {
           </div>
         </div>
 
-        {/* Quick end button */}
-        <button
-          onClick={endCall}
-          className="px-4 py-2 rounded-full bg-red-500 hover:bg-red-600 active:bg-red-700 text-white text-sm font-medium flex items-center gap-2 transition-colors shadow-lg shadow-red-500/20"
-        >
-          <PhoneOff size={14} />
-          <span className="hidden xs:inline">Leave</span>
-        </button>
+        {/* Ping + Quick end button */}
+        <div className="flex items-center gap-2">
+          <PingIndicator variant="inline" />
+          <button
+            onClick={endCall}
+            className="px-4 py-2 rounded-full bg-red-500 hover:bg-red-600 active:bg-red-700 text-white text-sm font-medium flex items-center gap-2 transition-colors shadow-lg shadow-red-500/20"
+          >
+            <PhoneOff size={14} />
+            <span className="hidden xs:inline">Leave</span>
+          </button>
+        </div>
       </div>
 
       {/* Video grid */}

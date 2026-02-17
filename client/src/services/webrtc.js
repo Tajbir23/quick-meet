@@ -1168,6 +1168,28 @@ class WebRTCService {
   // ============================================
 
   /**
+   * Get average peer RTT across all active connections (in ms).
+   * Uses WebRTC candidate-pair stats → currentRoundTripTime.
+   * Returns null if no connected peers or stats unavailable.
+   */
+  async getPeerRTT() {
+    const rtts = [];
+    for (const [peerId, pc] of this.peerConnections) {
+      if (pc.connectionState !== 'connected' && pc.iceConnectionState !== 'connected' && pc.iceConnectionState !== 'completed') continue;
+      try {
+        const stats = await pc.getStats();
+        stats.forEach(report => {
+          if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.currentRoundTripTime != null) {
+            rtts.push(Math.round(report.currentRoundTripTime * 1000)); // seconds → ms
+          }
+        });
+      } catch (_) { /* ignore */ }
+    }
+    if (rtts.length === 0) return null;
+    return Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length);
+  }
+
+  /**
    * Get connection statistics for debugging
    */
   async getStats(peerId) {

@@ -9,6 +9,7 @@ import { Maximize2, Minimize2, MicOff } from 'lucide-react';
 import { useState } from 'react';
 import useCallStore from '../../store/useCallStore';
 import CallControls from './CallControls';
+import PingIndicator from './PingIndicator';
 import useSpeakingDetector from '../../hooks/useSpeakingDetector';
 import { getInitials, stringToColor, formatDuration } from '../../utils/helpers';
 import { CALL_STATUS } from '../../utils/constants';
@@ -85,7 +86,7 @@ const VideoCall = () => {
             </div>
           </div>
 
-          {/* ICE state */}
+          {/* ICE state + Ping */}
           <div className="flex items-center gap-1.5 bg-black/30 rounded-full px-2.5 py-1 backdrop-blur-sm">
             {/* Remote mute indicator */}
             {remoteAudioMuted && (
@@ -109,6 +110,9 @@ const VideoCall = () => {
               iceState === 'failed' ? 'bg-red-400' : 'bg-dark-400'
             }`} />
             <span className="text-[10px] text-white/60 capitalize">{iceState}</span>
+            {/* Ping indicator */}
+            <span className="w-px h-3 bg-white/20 mx-0.5" />
+            <PingIndicator variant="inline" />
           </div>
         </div>
       </div>

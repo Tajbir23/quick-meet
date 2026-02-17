@@ -102,6 +102,15 @@ const setupPresenceHandlers = (io, socket, onlineUsers) => {
   socket.on('heartbeat', guard.wrapHandler(socket, 'heartbeat', () => {
     socket.emit('heartbeat:ack', { timestamp: new Date().toISOString() });
   }));
+
+  /**
+   * Ping check — echoes client timestamp for RTT measurement
+   * Client sends { t: Date.now() }, server echoes it back immediately.
+   * Client measures: Date.now() - t = round-trip time.
+   */
+  socket.on('ping:check', guard.wrapHandler(socket, 'ping:check', (data) => {
+    socket.emit('ping:result', { t: data?.t });
+  }));
 };
 
 module.exports = setupPresenceHandlers;

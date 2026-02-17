@@ -39,6 +39,10 @@ const useCallStore = create((set, get) => ({
   callTimer: null,
   iceState: 'new',
 
+  // Network ping (RTT in ms)
+  networkPing: null,     // { server: ms, peer: ms }
+  pingTimer: null,
+
   // Remote user media state (1-to-1 calls)
   remoteAudioMuted: false,
   remoteVideoMuted: false,
@@ -249,6 +253,9 @@ const useCallStore = create((set, get) => ({
       clearInterval(callTimer);
     }
 
+    // Stop ping monitor
+    get().stopPingMonitor();
+
     // Close all WebRTC connections
     webrtcService.closeAllConnections();
 
@@ -273,6 +280,8 @@ const useCallStore = create((set, get) => ({
       incomingGroupCall: null,
       isMinimized: false,
       iceState: 'new',
+      networkPing: null,
+      pingTimer: null,
       remoteAudioMuted: false,
       remoteVideoMuted: false,
       isGroupCall: false,
@@ -772,6 +781,7 @@ const useCallStore = create((set, get) => ({
         if (get().callStatus !== CALL_STATUS.CONNECTED) {
           set({ callStatus: CALL_STATUS.CONNECTED });
           get().startCallTimer();
+          get().startPingMonitor();
         }
       }
 
@@ -946,6 +956,71 @@ const useCallStore = create((set, get) => ({
     }, 1000);
 
     set({ callTimer: timer });
+  },
+
+  /**
+   * Start network ping monitor — measures RTT every 3 seconds.
+   * Measures:
+   *   1. Server RTT: Socket.io ping (emit timestamp → echo)
+   *   2. Peer RTT: WebRTC candidate-pair currentRoundTripTime
+   */
+  startPingMonitor: () => {
+    const { pingTimer } = get();
+    if (pingTimer) clearInterval(pingTimer);
+
+    // Track pending server ping
+    let pendingPingTime = null;
+
+    // Listen for server ping response
+    const socket = getSocket();
+    const onPingResult = (data) => {
+      if (pendingPingTime && data?.t === pendingPingTime) {
+        const serverRtt = Date.now() - pendingPingTime;
+        pendingPingTime = null;
+
+        // Also get peer RTT from WebRTC stats
+        webrtcService.getPeerRTT().then(peerRtt => {
+          set({ networkPing: { server: serverRtt, peer: peerRtt } });
+        });
+      }
+    };
+
+    if (socket) {
+      socket.on('ping:result', onPingResult);
+    }
+
+    // Measure immediately, then every 3 seconds
+    const measure = () => {
+      const s = getSocket();
+      if (s) {
+        pendingPingTime = Date.now();
+        s.emit('ping:check', { t: pendingPingTime });
+      } else {
+        // No socket — just measure peer RTT
+        webrtcService.getPeerRTT().then(peerRtt => {
+          set({ networkPing: { server: null, peer: peerRtt } });
+        });
+      }
+    };
+
+    measure();
+    const timer = setInterval(measure, 3000);
+
+    // Store timer and cleanup ref
+    set({ pingTimer: timer, _pingCleanup: () => {
+      const s = getSocket();
+      if (s) s.off('ping:result', onPingResult);
+    }});
+  },
+
+  /**
+   * Stop network ping monitor
+   */
+  stopPingMonitor: () => {
+    const { pingTimer, _pingCleanup } = get();
+    if (pingTimer) clearInterval(pingTimer);
+    if (_pingCleanup) _pingCleanup();
+    set({ pingTimer: null, networkPing: null, _pingCleanup: null });
   },
 }));
 

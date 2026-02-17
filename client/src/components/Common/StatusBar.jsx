@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
 import useFileTransferStore from '../../store/useFileTransferStore';
+import PingIndicator from '../Call/PingIndicator';
 import { formatDuration } from '../../utils/helpers';
 import { CALL_STATUS } from '../../utils/constants';
 
@@ -107,6 +108,9 @@ const StatusBar = () => {
             <span className="text-[11px] text-emerald-400 font-mono tabular-nums flex-shrink-0">
               {statusLabel}
             </span>
+
+            {/* Ping */}
+            <PingIndicator variant="compact" />
 
             {/* Quick controls */}
             <div className="flex items-center gap-1 ml-1 flex-shrink-0">
