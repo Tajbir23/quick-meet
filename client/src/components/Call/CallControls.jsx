@@ -13,7 +13,6 @@ import {
 import useCallStore from '../../store/useCallStore';
 import DeviceSelector from './DeviceSelector';
 import toast from 'react-hot-toast';
-import { isNative } from '../../utils/platform';
 
 const CallControls = ({ compact = false }) => {
   const {
@@ -86,20 +85,18 @@ const CallControls = ({ compact = false }) => {
         </button>
       )}
 
-      {/* Screen share - hidden on mobile native apps (no getDisplayMedia support) */}
-      {!isNative() && (
-        <button
-          onClick={handleScreenShare}
-          className={`${btnBase} rounded-full flex items-center justify-center transition-all ${
-            isScreenSharing
-              ? 'bg-primary-500/20 text-primary-400 ring-2 ring-primary-400/30'
-              : 'bg-dark-700/80 hover:bg-dark-600 text-white backdrop-blur-sm'
-          }`}
-          title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
-        >
-          {isScreenSharing ? <MonitorOff size={iconSize} /> : <Monitor size={iconSize} />}
-        </button>
-      )}
+      {/* Screen share */}
+      <button
+        onClick={handleScreenShare}
+        className={`${btnBase} rounded-full flex items-center justify-center transition-all ${
+          isScreenSharing
+            ? 'bg-primary-500/20 text-primary-400 ring-2 ring-primary-400/30'
+            : 'bg-dark-700/80 hover:bg-dark-600 text-white backdrop-blur-sm'
+        }`}
+        title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
+      >
+        {isScreenSharing ? <MonitorOff size={iconSize} /> : <Monitor size={iconSize} />}
+      </button>
 
       {/* Minimize call */}
       <button
