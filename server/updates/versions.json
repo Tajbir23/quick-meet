@@ -1,25 +1,25 @@
 {
   "desktop": {
-    "version": "1.0.100",
+    "version": "1.0.101",
     "minVersion": "1.0.0",
     "releaseNotes": "Self-hosted background notifications, Firebase removed",
     "forceUpdate": true,
     "downloadUrl": "https://quickmeet.genuinesoftmart.store/api/updates/download/desktop",
-    "lastUpdated": "2026-02-18T16:13:44.599Z"
+    "lastUpdated": "2026-02-18T16:20:50.306Z"
   },
   "android": {
-    "version": "1.0.100",
+    "version": "1.0.101",
     "minVersion": "1.0.0",
     "releaseNotes": "Background call audio fix — audio keeps working when app is minimized or closed during a call",
     "forceUpdate": true,
     "downloadUrl": "https://quickmeet.genuinesoftmart.store/api/updates/download/android",
-    "lastUpdated": "2026-02-18T16:13:44.599Z"
+    "lastUpdated": "2026-02-18T16:20:50.306Z"
   },
   "web": {
-    "version": "1.0.100",
+    "version": "1.0.101",
     "minVersion": "1.0.0",
     "releaseNotes": "Self-hosted background notifications, Firebase removed",
     "forceUpdate": false,
-    "lastUpdated": "2026-02-18T16:13:44.599Z"
+    "lastUpdated": "2026-02-18T16:20:50.306Z"
   }
 }
