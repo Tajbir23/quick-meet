@@ -313,4 +313,112 @@ const updatePrivacy = async (req, res) => {
   }
 };
 
-module.exports = { getUsers, getActiveUsers, searchUsers, getUserById, updateProfile, updateSecurity, updatePrivacy };
+// ══════════════════════════════════════════
+// USER-TO-USER BLOCKING
+// ══════════════════════════════════════════
+
+/**
+ * POST /api/users/:id/block
+ * Block a user — prevents messages and calls in both directions
+ */
+const blockUser = async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    const myId = req.user._id;
+
+    if (targetId === myId.toString()) {
+      return res.status(400).json({ success: false, message: 'You cannot block yourself' });
+    }
+
+    // Verify target user exists
+    const target = await User.findById(targetId);
+    if (!target) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Add to blockedUsers if not already blocked
+    await User.findByIdAndUpdate(myId, {
+      $addToSet: { blockedUsers: targetId },
+    });
+
+    res.json({
+      success: true,
+      message: `${target.username} has been blocked`,
+    });
+  } catch (error) {
+    console.error('Block user error:', error);
+    res.status(500).json({ success: false, message: 'Server error blocking user' });
+  }
+};
+
+/**
+ * POST /api/users/:id/unblock
+ * Unblock a previously blocked user
+ */
+const unblockUser = async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    const myId = req.user._id;
+
+    await User.findByIdAndUpdate(myId, {
+      $pull: { blockedUsers: targetId },
+    });
+
+    res.json({
+      success: true,
+      message: 'User unblocked',
+    });
+  } catch (error) {
+    console.error('Unblock user error:', error);
+    res.status(500).json({ success: false, message: 'Server error unblocking user' });
+  }
+};
+
+/**
+ * GET /api/users/blocked
+ * Get list of users I have blocked
+ */
+const getBlockedUsers = async (req, res) => {
+  try {
+    const me = await User.findById(req.user._id)
+      .populate('blockedUsers', 'username avatar isOnline lastSeen');
+
+    res.json({
+      success: true,
+      data: { blockedUsers: me.blockedUsers || [] },
+    });
+  } catch (error) {
+    console.error('Get blocked users error:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching blocked users' });
+  }
+};
+
+/**
+ * GET /api/users/:id/block-status
+ * Check if there's a block between me and another user
+ * Returns: { iBlockedThem, theyBlockedMe }
+ */
+const getBlockStatus = async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    const myId = req.user._id;
+
+    const [me, them] = await Promise.all([
+      User.findById(myId).select('blockedUsers'),
+      User.findById(targetId).select('blockedUsers'),
+    ]);
+
+    const iBlockedThem = me?.blockedUsers?.some(id => id.toString() === targetId) || false;
+    const theyBlockedMe = them?.blockedUsers?.some(id => id.toString() === myId.toString()) || false;
+
+    res.json({
+      success: true,
+      data: { iBlockedThem, theyBlockedMe },
+    });
+  } catch (error) {
+    console.error('Get block status error:', error);
+    res.status(500).json({ success: false, message: 'Server error checking block status' });
+  }
+};
+
+module.exports = { getUsers, getActiveUsers, searchUsers, getUserById, updateProfile, updateSecurity, updatePrivacy, blockUser, unblockUser, getBlockedUsers, getBlockStatus };

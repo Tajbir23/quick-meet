@@ -9,12 +9,13 @@
 
 import { useState, useEffect } from 'react';
 import {
-  X, MessageCircle, Mail, Calendar, Clock, Shield, Loader2
+  X, MessageCircle, Mail, Calendar, Clock, Shield, Loader2, Ban
 } from 'lucide-react';
 import api from '../../services/api';
 import { SERVER_URL } from '../../utils/constants';
 import { getInitials, stringToColor, formatLastSeen } from '../../utils/helpers';
 import useChatStore from '../../store/useChatStore';
+import toast from 'react-hot-toast';
 
 const UserProfileModal = ({ userId, onClose }) => {
   const [profile, setProfile] = useState(null);
@@ -22,6 +23,10 @@ const UserProfileModal = ({ userId, onClose }) => {
   const setActiveChat = useChatStore(s => s.setActiveChat);
   const isUserOnline = useChatStore(s => s.isUserOnline);
   const userLastSeen = useChatStore(s => s.userLastSeen);
+  const blockStatus = useChatStore(s => s.blockStatus);
+  const blockUserAction = useChatStore(s => s.blockUser);
+  const unblockUserAction = useChatStore(s => s.unblockUser);
+  const fetchBlockStatus = useChatStore(s => s.fetchBlockStatus);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -29,6 +34,8 @@ const UserProfileModal = ({ userId, onClose }) => {
         const id = typeof userId === 'object' ? (userId._id || userId.id) : userId;
         const res = await api.get(`/users/${id}`);
         setProfile(res.data.data.user);
+        // Fetch block status
+        fetchBlockStatus(id);
       } catch (err) {
         console.error('Failed to fetch profile:', err);
       } finally {
@@ -146,6 +153,40 @@ const UserProfileModal = ({ userId, onClose }) => {
               <MessageCircle size={16} />
               Send Message
             </button>
+
+            {/* Block / Unblock button */}
+            {(() => {
+              const bs = blockStatus[profile._id];
+              const blocked = bs?.iBlockedThem || false;
+              return (
+                <button
+                  onClick={async () => {
+                    if (blocked) {
+                      const r = await unblockUserAction(profile._id);
+                      if (r.success) {
+                        toast.success('User unblocked');
+                        fetchBlockStatus(profile._id);
+                      }
+                    } else {
+                      if (!window.confirm(`Block ${profile.username}? They won't be able to message or call you.`)) return;
+                      const r = await blockUserAction(profile._id);
+                      if (r.success) {
+                        toast.success(`${profile.username} blocked`);
+                        fetchBlockStatus(profile._id);
+                      }
+                    }
+                  }}
+                  className={`w-full flex items-center justify-center gap-2 py-2.5 mt-2 rounded-xl text-sm font-medium transition-colors ${
+                    blocked
+                      ? 'bg-dark-700 hover:bg-dark-600 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-dark-700 hover:bg-red-500/20 text-red-400 border border-red-500/20'
+                  }`}
+                >
+                  <Ban size={16} />
+                  {blocked ? 'Unblock User' : 'Block User'}
+                </button>
+              );
+            })()}
           </div>
         ) : (
           <div className="p-8 text-center">

@@ -14,6 +14,7 @@
 
 const { socketGuard, securityLogger } = require('../security');
 const { storePendingNotification } = require('../controllers/pushController');
+const User = require('../models/User');
 
 const MAX_MESSAGE_PAYLOAD = 10000; // 10KB max for socket message payloads
 
@@ -31,6 +32,19 @@ const setupChatHandlers = (io, socket, onlineUsers) => {
     if (typeof message === 'object' && JSON.stringify(message).length > MAX_MESSAGE_PAYLOAD) {
       securityLogger.log('WARN', 'SOCKET', 'Oversized message payload rejected', { userId: socket.userId });
       return;
+    }
+
+    // Block check — don't deliver if either user blocked the other
+    try {
+      const [sender, receiver] = await Promise.all([
+        User.findById(socket.userId).select('blockedUsers').lean(),
+        User.findById(receiverId).select('blockedUsers').lean(),
+      ]);
+      const iBlockedThem = sender?.blockedUsers?.some(id => id.toString() === receiverId);
+      const theyBlockedMe = receiver?.blockedUsers?.some(id => id.toString() === socket.userId);
+      if (iBlockedThem || theyBlockedMe) return;
+    } catch (err) {
+      // If block check fails, still deliver (fail-open for messages)
     }
 
     const receiverSocketId = onlineUsers.get(receiverId);

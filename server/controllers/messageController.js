@@ -136,6 +136,17 @@ const sendMessage = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Receiver not found' });
     }
 
+    // Check user-to-user block (either direction)
+    const sender = await User.findById(req.user._id).select('blockedUsers');
+    const iBlockedThem = sender?.blockedUsers?.some(id => id.toString() === receiverId) || false;
+    const theyBlockedMe = receiver?.blockedUsers?.some(id => id.toString() === req.user._id.toString()) || false;
+    if (iBlockedThem) {
+      return res.status(403).json({ success: false, message: 'You have blocked this user. Unblock to send messages.' });
+    }
+    if (theyBlockedMe) {
+      return res.status(403).json({ success: false, message: 'You cannot send messages to this user' });
+    }
+
     // Sanitize and encrypt content
     const sanitized = sanitizeText(content || '');
     const encData = encryptContent(sanitized);

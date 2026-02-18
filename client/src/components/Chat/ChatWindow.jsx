@@ -39,6 +39,10 @@ const ChatWindow = () => {
   const user = useAuthStore(s => s.user);
   const toggleReaction = useChatStore(s => s.toggleReaction);
   const setReplyTo = useChatStore(s => s.setReplyTo);
+  const blockStatus = useChatStore(s => s.blockStatus);
+  const fetchBlockStatus = useChatStore(s => s.fetchBlockStatus);
+  const blockUserAction = useChatStore(s => s.blockUser);
+  const unblockUserAction = useChatStore(s => s.unblockUser);
   const containerRef = useRef(null);
   const loadingMoreRef = useRef(false);
   const prevMsgCountRef = useRef(0);
@@ -155,6 +159,10 @@ const ChatWindow = () => {
     if (activeChat) {
       fetchPinnedMessages(activeChat.id, activeChat.type);
     }
+    // Fetch block status for 1-to-1 chats
+    if (activeChat && activeChat.type === 'user') {
+      fetchBlockStatus(activeChat.id);
+    }
   }, [activeChat?.id]);
 
   // Auto scroll to bottom only for NEW messages (not when loading older pages)
@@ -184,6 +192,12 @@ const ChatWindow = () => {
   const chatMessages = messages[activeChat.id] || [];
   const typing = typingUsers[activeChat.id];
   const isTyping = typing && Object.keys(typing).length > 0;
+
+  // Block status for 1-to-1 chats
+  const currentBlockStatus = activeChat?.type === 'user' ? blockStatus[activeChat.id] : null;
+  const iBlockedThem = currentBlockStatus?.iBlockedThem || false;
+  const theyBlockedMe = currentBlockStatus?.theyBlockedMe || false;
+  const isBlockedEitherWay = iBlockedThem || theyBlockedMe;
 
   // Pinned preview bar data — defensive
   const currentPinnedList = (pinnedMessages && activeChat && Array.isArray(pinnedMessages[activeChat.id]))
@@ -439,6 +453,28 @@ const ChatWindow = () => {
               <Trash2 size={16} />
               Delete ({Object.keys(selectedMessages).length})
             </button>
+          </div>
+        ) : isBlockedEitherWay ? (
+          <div className="border-t border-dark-700 bg-dark-800 px-4 py-3">
+            {iBlockedThem ? (
+              <div className="flex items-center justify-between">
+                <p className="text-dark-400 text-sm">You blocked this user</p>
+                <button
+                  onClick={async () => {
+                    const result = await unblockUserAction(activeChat.id);
+                    if (result.success) {
+                      toast.success('User unblocked');
+                      fetchBlockStatus(activeChat.id);
+                    }
+                  }}
+                  className="px-4 py-1.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-sm font-medium transition-colors"
+                >
+                  Unblock
+                </button>
+              </div>
+            ) : (
+              <p className="text-dark-400 text-sm text-center">You can't send messages to this user</p>
+            )}
           </div>
         ) : (
           <MessageInput />

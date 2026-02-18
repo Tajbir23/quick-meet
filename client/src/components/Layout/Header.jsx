@@ -1,6 +1,6 @@
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import {
-  Phone, Video, ArrowLeft, Users, Info, Shield, FolderUp, Pin
+  Phone, Video, ArrowLeft, Users, Info, Shield, FolderUp, Pin, MoreVertical, Ban
 } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useCallStore from '../../store/useCallStore';
@@ -21,11 +21,29 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
   const users = useChatStore(s => s.users);
   const showPinnedPanel = useChatStore(s => s.showPinnedPanel);
   const togglePinnedPanel = useChatStore(s => s.togglePinnedPanel);
+  const blockStatus = useChatStore(s => s.blockStatus);
+  const blockUserAction = useChatStore(s => s.blockUser);
+  const unblockUserAction = useChatStore(s => s.unblockUser);
+  const fetchBlockStatus = useChatStore(s => s.fetchBlockStatus);
   const { startCall, startGroupCall, callStatus } = useCallStore();
   const { activeGroupCalls } = useGroupStore();
   const user = useAuthStore(s => s.user);
   const sendFile = useFileTransferStore(s => s.sendFile);
   const fileInputRef = useRef(null);
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  const headerMenuRef = useRef(null);
+
+  // Close header menu on outside click
+  useEffect(() => {
+    if (!showHeaderMenu) return;
+    const handler = (e) => {
+      if (headerMenuRef.current && !headerMenuRef.current.contains(e.target)) {
+        setShowHeaderMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showHeaderMenu]);
 
   if (!activeChat) {
     return (
@@ -38,6 +56,12 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
   const isOnline = activeChat.type === 'user' && isUserOnline(activeChat.id);
   const isGroup = activeChat.type === 'group';
   const inCall = callStatus !== 'idle';
+
+  // Block status for 1-to-1 chats
+  const currentBlockStatus = !isGroup ? blockStatus[activeChat.id] : null;
+  const iBlockedThem = currentBlockStatus?.iBlockedThem || false;
+  const theyBlockedMe = currentBlockStatus?.theyBlockedMe || false;
+  const isBlockedEitherWay = iBlockedThem || theyBlockedMe;
 
   // Get last seen for the active chat user
   const chatUserLastSeen = !isGroup
@@ -221,7 +245,7 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
           onClick={handleAudioCall}
           className="btn-icon text-white hover:text-primary-400 hover:bg-primary-500/10"
           title="Audio call"
-          disabled={inCall}
+          disabled={inCall || isBlockedEitherWay}
         >
           <Phone size={20} />
         </button>
@@ -229,7 +253,7 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
           onClick={handleVideoCall}
           className="btn-icon text-white hover:text-primary-400 hover:bg-primary-500/10"
           title="Video call"
-          disabled={inCall}
+          disabled={inCall || isBlockedEitherWay}
         >
           <Video size={20} />
         </button>
@@ -245,6 +269,45 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
           >
             <Info size={20} />
           </button>
+        )}
+        {/* More menu — block/unblock (1-to-1 only) */}
+        {!isGroup && (
+          <div className="relative" ref={headerMenuRef}>
+            <button
+              onClick={() => setShowHeaderMenu(!showHeaderMenu)}
+              className="btn-icon text-white hover:text-dark-200 hover:bg-dark-700"
+              title="More options"
+            >
+              <MoreVertical size={20} />
+            </button>
+            {showHeaderMenu && (
+              <div className="absolute right-0 top-full mt-1 w-48 bg-dark-700 border border-dark-600 rounded-xl shadow-xl py-1 z-50 animate-scale-in">
+                <button
+                  onClick={async () => {
+                    setShowHeaderMenu(false);
+                    if (iBlockedThem) {
+                      const r = await unblockUserAction(activeChat.id);
+                      if (r.success) {
+                        toast.success('User unblocked');
+                        fetchBlockStatus(activeChat.id);
+                      }
+                    } else {
+                      if (!window.confirm(`Block ${activeChat.name}? They won't be able to message or call you.`)) return;
+                      const r = await blockUserAction(activeChat.id);
+                      if (r.success) {
+                        toast.success(`${activeChat.name} blocked`);
+                        fetchBlockStatus(activeChat.id);
+                      }
+                    }
+                  }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-dark-600 transition-colors ${iBlockedThem ? 'text-emerald-400' : 'text-red-400'}`}
+                >
+                  <Ban size={15} />
+                  {iBlockedThem ? 'Unblock User' : 'Block User'}
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

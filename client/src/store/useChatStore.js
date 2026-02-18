@@ -39,6 +39,8 @@ const useChatStore = create((set, get) => ({
   selectMode: false,       // Whether multi-select mode is active
   selectedMessages: {},    // { messageId: true } — set of selected message IDs
   replyToMessage: null,    // Message being replied to — { _id, content, sender, type }
+  blockedUsers: [],        // Array of user IDs I have blocked
+  blockStatus: {},         // { userId: { iBlockedThem, theyBlockedMe } } — cached block status per chat
 
   // ============================================
   // USER MANAGEMENT
@@ -140,6 +142,67 @@ const useChatStore = create((set, get) => ({
     } catch (error) {
       console.error('Failed to fetch users:', error);
     }
+  },
+
+  // ============================================
+  // USER BLOCKING
+  // ============================================
+
+  fetchBlockedUsers: async () => {
+    try {
+      const res = await api.get('/users/blocked');
+      set({ blockedUsers: (res.data.data.blockedUsers || []).map(u => typeof u === 'object' ? u._id : u) });
+    } catch (error) {
+      console.error('Failed to fetch blocked users:', error);
+    }
+  },
+
+  fetchBlockStatus: async (userId) => {
+    try {
+      const res = await api.get(`/users/${userId}/block-status`);
+      const { iBlockedThem, theyBlockedMe } = res.data.data;
+      set(state => ({
+        blockStatus: { ...state.blockStatus, [userId]: { iBlockedThem, theyBlockedMe } },
+      }));
+      return { iBlockedThem, theyBlockedMe };
+    } catch (error) {
+      console.error('Failed to fetch block status:', error);
+      return { iBlockedThem: false, theyBlockedMe: false };
+    }
+  },
+
+  blockUser: async (userId) => {
+    try {
+      await api.post(`/users/${userId}/block`);
+      set(state => ({
+        blockedUsers: [...state.blockedUsers, userId],
+        blockStatus: { ...state.blockStatus, [userId]: { iBlockedThem: true, theyBlockedMe: state.blockStatus[userId]?.theyBlockedMe || false } },
+      }));
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to block user:', error);
+      return { success: false, message: error.response?.data?.message };
+    }
+  },
+
+  unblockUser: async (userId) => {
+    try {
+      await api.post(`/users/${userId}/unblock`);
+      set(state => ({
+        blockedUsers: state.blockedUsers.filter(id => id !== userId),
+        blockStatus: { ...state.blockStatus, [userId]: { iBlockedThem: false, theyBlockedMe: state.blockStatus[userId]?.theyBlockedMe || false } },
+      }));
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to unblock user:', error);
+      return { success: false, message: error.response?.data?.message };
+    }
+  },
+
+  isBlocked: (userId) => {
+    const state = get();
+    const bs = state.blockStatus[userId];
+    return bs?.iBlockedThem || bs?.theyBlockedMe || false;
   },
 
   // ============================================

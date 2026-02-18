@@ -99,6 +99,12 @@ const userSchema = new mongoose.Schema({
     default: null,
   },
 
+  // User-to-user blocking: array of user IDs this user has blocked
+  blockedUsers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  }],
+
   // ─── SECURITY FIELDS ─────────────────────────────
 
   // Refresh token (hashed) for token rotation

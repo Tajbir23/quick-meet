@@ -45,6 +45,7 @@ const socketGuard = require('../security/SocketGuard');
 const securityLogger = require('../security/SecurityEventLogger');
 const { SEVERITY } = require('../security/SecurityEventLogger');
 const Message = require('../models/Message');
+const User = require('../models/User');
 const { storePendingNotification, clearPendingCallNotifications } = require('../controllers/pushController');
 
 /**
@@ -218,6 +219,22 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
         socket.emit('call:error', { message: 'Invalid or expired call token' });
         return;
       }
+    }
+
+    // Block check — prevent calls between blocked users
+    try {
+      const [caller, callee] = await Promise.all([
+        User.findById(socket.userId).select('blockedUsers').lean(),
+        User.findById(targetUserId).select('blockedUsers').lean(),
+      ]);
+      const iBlockedThem = caller?.blockedUsers?.some(id => id.toString() === targetUserId);
+      const theyBlockedMe = callee?.blockedUsers?.some(id => id.toString() === socket.userId);
+      if (iBlockedThem || theyBlockedMe) {
+        socket.emit('call:error', { message: 'Cannot call this user' });
+        return;
+      }
+    } catch (err) {
+      // If block check fails, allow call (fail-open)
     }
 
     // Sanitize SDP
