@@ -1,20 +1,46 @@
 import { useState, useRef, useEffect, memo } from 'react';
-import { Download, FileText, Loader2, Phone, Video, PhoneMissed, PhoneOff, PhoneIncoming, PhoneOutgoing, Trash2, Forward, MoreVertical, User as UserIcon, Pin, PinOff, RotateCcw } from 'lucide-react';
+import { Download, FileText, Loader2, Phone, Video, PhoneMissed, PhoneOff, PhoneIncoming, PhoneOutgoing, Trash2, Forward, MoreVertical, User as UserIcon, Pin, PinOff, RotateCcw, CheckCircle2, Circle } from 'lucide-react';
 import { getInitials, stringToColor, formatMessageTime, isImageFile, formatFileSize, formatDuration } from '../../utils/helpers';
 import { SERVER_URL } from '../../utils/constants';
 import ImagePreview from '../Common/ImagePreview';
 import MessageStatus from '../Common/MessageStatus';
 
-const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onViewProfile, onPin, onRetry }) => {
+const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onViewProfile, onPin, onRetry, selectMode, isSelected, onToggleSelect, onEnterSelectMode }) => {
   const [downloading, setDownloading] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef(null);
+  const longPressTimer = useRef(null);
   const isSystem = message.type === 'system';
   const isCall = message.type === 'call';
   const hasFile = message.fileUrl;
   const isImage = hasFile && isImageFile(message.fileMimeType);
+
+  // Long press to enter select mode
+  const handlePointerDown = (e) => {
+    if (selectMode || isSystem) return;
+    longPressTimer.current = setTimeout(() => {
+      longPressTimer.current = null;
+      onEnterSelectMode && onEnterSelectMode();
+    }, 500);
+  };
+
+  const handlePointerUp = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  // Tap to toggle selection when in select mode
+  const handleBubbleClick = (e) => {
+    if (selectMode) {
+      e.preventDefault();
+      e.stopPropagation();
+      onToggleSelect && onToggleSelect();
+    }
+  };
 
   /**
    * Download file — uses Electron native download if available,
@@ -182,7 +208,23 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
     : null;
 
   return (
-    <div className={`flex ${isMine ? 'justify-end' : 'justify-start'} mb-1 animate-fade-in`}>
+    <div
+      className={`flex ${isMine ? 'justify-end' : 'justify-start'} mb-1 animate-fade-in ${selectMode ? 'cursor-pointer' : ''} ${isSelected ? 'bg-primary-500/10 rounded-lg' : ''}`}
+      onClick={handleBubbleClick}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+    >
+      {/* Selection checkbox */}
+      {selectMode && (
+        <div className="flex items-center px-2 flex-shrink-0">
+          {isSelected ? (
+            <CheckCircle2 size={22} className="text-primary-500" />
+          ) : (
+            <Circle size={22} className="text-dark-500" />
+          )}
+        </div>
+      )}
       <div className={`flex gap-2 max-w-[85%] md:max-w-[70%] ${isMine ? 'flex-row-reverse' : ''}`}>
         {/* Avatar (only for received messages) */}
         {!isMine && showAvatar ? (
@@ -219,7 +261,8 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
           )}
 
           <div className={`chat-bubble ${isMine ? 'chat-bubble-sent' : 'chat-bubble-received'} relative group`}>
-            {/* Context menu button */}
+            {/* Context menu button — hidden in select mode */}
+            {!selectMode && (
             <div ref={menuRef} className="absolute top-1 right-1 z-10">
               <button
                 onClick={handleMenuToggle}
@@ -229,6 +272,14 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
               </button>
               {showMenu && (
                 <div className={`absolute ${isMine ? 'right-0' : 'left-0'} top-7 bg-dark-700 border border-dark-600 rounded-xl shadow-xl py-1.5 min-w-[140px] z-50 animate-scale-in`}>
+                  {/* Select */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowMenu(false); onEnterSelectMode && onEnterSelectMode(); }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-dark-200 hover:bg-dark-600 transition-colors"
+                  >
+                    <CheckCircle2 size={14} />
+                    Select
+                  </button>
                   {/* Forward */}
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowMenu(false); onForward && onForward(message); }}
@@ -268,6 +319,7 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
                 </div>
               )}
             </div>
+            )}
 
             {/* Image attachment */}
             {isImage && (

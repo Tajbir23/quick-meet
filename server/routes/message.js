@@ -9,6 +9,7 @@ const {
   getUnreadCounts,
   getConversations,
   deleteMessage,
+  bulkDeleteMessages,
   pinMessage,
   unpinMessage,
   getPinnedMessages,
@@ -29,6 +30,7 @@ router.get('/pinned/:chatId', getPinnedMessages);
 router.put('/:messageId/pin', pinMessage);
 router.put('/:messageId/unpin', unpinMessage);
 
+router.post('/bulk-delete', bulkDeleteMessages);
 router.delete('/:messageId', deleteMessage);
 router.get('/:userId', getConversation);
 router.put('/read/:userId', markAsRead);

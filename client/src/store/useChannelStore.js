@@ -402,6 +402,10 @@ const useChannelStore = create((set, get) => ({
       sender: { _id: currentUser._id, username: currentUser.username, avatar: currentUser.avatar },
       content: postData.content || '',
       type: postData.type || 'text',
+      fileUrl: postData.fileUrl || null,
+      fileName: postData.fileName || null,
+      fileSize: postData.fileSize || null,
+      fileMimeType: postData.fileMimeType || null,
       status: 'pending',
       reactions: [],
       comments: [],
@@ -444,11 +448,18 @@ const useChannelStore = create((set, get) => ({
     set(state => ({
       channelPosts: state.channelPosts.filter(p => p._id !== tempPost._id),
     }));
-    // Re-send
-    return get().createPost(channelId, {
+    // Re-send (include file data if present)
+    const retryData = {
       content: tempPost.content,
       type: tempPost.type,
-    });
+    };
+    if (tempPost.fileUrl) {
+      retryData.fileUrl = tempPost.fileUrl;
+      retryData.fileName = tempPost.fileName;
+      retryData.fileSize = tempPost.fileSize;
+      retryData.fileMimeType = tempPost.fileMimeType;
+    }
+    return get().createPost(channelId, retryData);
   },
 
   editPost: async (channelId, postId, content) => {
@@ -524,10 +535,70 @@ const useChannelStore = create((set, get) => ({
   // ══════════════════════════════════════════
 
   addComment: async (channelId, postId, content) => {
+    // Generate temp ID for optimistic comment
+    const tempId = `temp_comment_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    // Optimistic comment (pending state)
+    const optimisticComment = {
+      _id: tempId,
+      tempId,
+      sender: { _id: currentUser._id, username: currentUser.username, avatar: currentUser.avatar },
+      content,
+      type: 'text',
+      isDeleted: false,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+
+    // Insert optimistic comment immediately
+    set(state => ({
+      channelPosts: state.channelPosts.map(p =>
+        p._id === postId
+          ? {
+              ...p,
+              comments: [...(p.comments || []), optimisticComment],
+              commentCount: (p.commentCount || 0) + 1,
+            }
+          : p
+      ),
+    }));
+
     try {
       const res = await api.post(`/channels/${channelId}/posts/${postId}/comments`, { content });
-      return { success: true, comment: res.data.data.comment };
+      const realComment = res.data.data.comment;
+
+      // Replace optimistic comment with real comment (status: sent)
+      set(state => ({
+        channelPosts: state.channelPosts.map(p =>
+          p._id === postId
+            ? {
+                ...p,
+                comments: (p.comments || []).map(c =>
+                  c._id === tempId ? { ...realComment, status: 'sent' } : c
+                ),
+                commentCount: res.data.data.commentCount,
+              }
+            : p
+        ),
+      }));
+
+      return { success: true, comment: realComment };
     } catch (error) {
+      // Mark optimistic comment as failed
+      set(state => ({
+        channelPosts: state.channelPosts.map(p =>
+          p._id === postId
+            ? {
+                ...p,
+                comments: (p.comments || []).map(c =>
+                  c._id === tempId ? { ...c, status: 'failed' } : c
+                ),
+                commentCount: Math.max(0, (p.commentCount || 1) - 1),
+              }
+            : p
+        ),
+      }));
       return { success: false, message: error.response?.data?.message };
     }
   },
@@ -716,16 +787,42 @@ const useChannelStore = create((set, get) => ({
   },
 
   handleNewComment: (data) => {
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     set(state => ({
-      channelPosts: state.channelPosts.map(p =>
-        p._id === data.postId
-          ? {
+      channelPosts: state.channelPosts.map(p => {
+        if (p._id !== data.postId) return p;
+
+        const comments = p.comments || [];
+
+        // Check if this is our own comment that we already added optimistically
+        const isMine = (data.comment.sender?._id || data.comment.sender) === currentUser._id;
+        if (isMine) {
+          // Find optimistic (temp) comment that matches
+          const tempComment = comments.find(
+            c => c.tempId && c.sender?._id === currentUser._id && c.content === data.comment.content
+          );
+          if (tempComment) {
+            // Replace temp comment with real one (keep sent status)
+            return {
               ...p,
-              comments: [...(p.comments || []), data.comment],
+              comments: comments.map(c =>
+                c._id === tempComment._id ? { ...data.comment, status: 'sent' } : c
+              ),
               commentCount: data.commentCount,
-            }
-          : p
-      ),
+            };
+          }
+        }
+
+        // Check for duplicate (real comment already exists)
+        const exists = comments.some(c => c._id === data.comment._id && !c.tempId);
+        if (exists) return { ...p, commentCount: data.commentCount };
+
+        return {
+          ...p,
+          comments: [...comments, data.comment],
+          commentCount: data.commentCount,
+        };
+      }),
     }));
   },
 

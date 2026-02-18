@@ -526,6 +526,54 @@ const deleteMessage = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/messages/bulk-delete
+ * Delete multiple messages at once.
+ * Only messages sent by the requesting user will be deleted.
+ * Returns the list of successfully deleted message IDs.
+ */
+const bulkDeleteMessages = async (req, res) => {
+  try {
+    const { messageIds } = req.body;
+
+    if (!Array.isArray(messageIds) || messageIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'messageIds array is required' });
+    }
+
+    // Limit batch size to prevent abuse
+    if (messageIds.length > 100) {
+      return res.status(400).json({ success: false, message: 'Cannot delete more than 100 messages at once' });
+    }
+
+    // Find all messages that belong to the requesting user
+    const messages = await Message.find({
+      _id: { $in: messageIds },
+      sender: req.user._id,
+    }).select('_id');
+
+    const deletableIds = messages.map(m => m._id);
+
+    if (deletableIds.length === 0) {
+      return res.status(404).json({ success: false, message: 'No deletable messages found' });
+    }
+
+    await Message.deleteMany({ _id: { $in: deletableIds } });
+
+    securityLogger.log('INFO', req.user._id.toString(), 'Bulk delete messages', {
+      count: deletableIds.length,
+    });
+
+    res.json({
+      success: true,
+      message: `${deletableIds.length} message(s) deleted`,
+      data: { deletedIds: deletableIds.map(id => id.toString()) },
+    });
+  } catch (error) {
+    securityLogger.log('WARN', 'SYSTEM', 'Bulk delete messages error', { error: error.message });
+    res.status(500).json({ success: false, message: 'Server error deleting messages' });
+  }
+};
+
 // ─── PIN / UNPIN MESSAGES ───────────────────────────────────
 
 /**
@@ -676,6 +724,7 @@ module.exports = {
   getUnreadCounts,
   getConversations,
   deleteMessage,
+  bulkDeleteMessages,
   pinMessage,
   unpinMessage,
   getPinnedMessages,

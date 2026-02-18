@@ -121,7 +121,6 @@ const setupChatHandlers = (io, socket, onlineUsers) => {
         readAt: new Date().toISOString(),
       });
     }
-    }
   }));
 
   /**
@@ -179,6 +178,37 @@ const setupChatHandlers = (io, socket, onlineUsers) => {
           chatType: 'user',
           unpinnedByUserId: socket.userId,
           unpinnedByUsername: socket.username,
+        });
+      }
+    }
+  }));
+
+  /**
+   * Bulk delete broadcast — GUARDED
+   * Notifies the other user (1-to-1) or group room about deleted messages
+   */
+  socket.on('message:bulk-delete', guard.wrapHandler(socket, 'message:bulk-delete', ({ messageIds, chatId, chatType }) => {
+    if (!messageIds || !Array.isArray(messageIds) || !chatId || !chatType) return;
+    if (typeof chatId !== 'string' || chatId.length > 30) return;
+    if (messageIds.length > 100) return;
+
+    if (chatType === 'group') {
+      socket.to(`group:${chatId}`).emit('message:bulk-deleted', {
+        messageIds,
+        chatId,
+        chatType,
+        deletedByUserId: socket.userId,
+        deletedByUsername: socket.username,
+      });
+    } else {
+      const receiverSocketId = onlineUsers.get(chatId);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit('message:bulk-deleted', {
+          messageIds,
+          chatId: socket.userId,
+          chatType: 'user',
+          deletedByUserId: socket.userId,
+          deletedByUsername: socket.username,
         });
       }
     }

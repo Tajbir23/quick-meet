@@ -141,6 +141,12 @@ const useSocket = () => {
       useChatStore.getState().handleRemoteUnpin(chatId, messageId);
     });
 
+    // ─── BULK DELETE EVENT ───
+    socket.on('message:bulk-deleted', ({ messageIds, chatId, deletedByUsername }) => {
+      console.log(`🗑️ ${deletedByUsername} deleted ${messageIds.length} messages in ${chatId}`);
+      useChatStore.getState().handleRemoteBulkDelete(chatId, messageIds);
+    });
+
     // ============================================
     // GROUP MEMBER EVENTS
     // ============================================

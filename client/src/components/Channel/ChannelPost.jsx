@@ -430,17 +430,27 @@ const ChannelPost = memo(({ post, canManage, isOwner, myRole, channelId }) => {
                 <p className="text-xs text-dark-500 text-center py-2">No comments yet</p>
               )}
               {(post.comments || []).filter(c => !c.isDeleted).map((comment) => (
-                <div key={comment._id} className="flex gap-2 group">
+                <div key={comment._id} className={`flex gap-2 group ${comment.status === 'pending' ? 'opacity-60' : ''}`}>
                   <div className="flex-1 bg-dark-700/50 rounded-lg px-3 py-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-indigo-400">
                         {comment.sender?.username || 'User'}
                       </span>
                       <div className="flex items-center gap-2">
+                        {comment.status === 'pending' && (
+                          <span className="flex items-center gap-1 text-[10px] text-yellow-500">
+                            <Clock size={10} /> Sending...
+                          </span>
+                        )}
+                        {comment.status === 'failed' && (
+                          <span className="flex items-center gap-1 text-[10px] text-red-400">
+                            <RotateCcw size={10} /> Failed
+                          </span>
+                        )}
                         <span className="text-[10px] text-dark-500">
                           {formatMessageTime(comment.createdAt)}
                         </span>
-                        {(comment.sender?._id === user?._id || canManage) && (
+                        {(comment.sender?._id === user?._id || canManage) && !comment.tempId && (
                           <button
                             onClick={() => handleDeleteComment(comment._id)}
                             className="opacity-0 group-hover:opacity-100 text-dark-500 hover:text-red-400 transition-all"

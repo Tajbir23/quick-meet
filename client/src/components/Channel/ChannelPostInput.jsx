@@ -80,12 +80,12 @@ const ChannelPostInput = ({ channelId }) => {
 
       // Add file data
       if (fileData) {
-        postData.fileUrl = fileData.fileUrl;
-        postData.fileName = fileData.fileName;
-        postData.fileSize = fileData.fileSize;
-        postData.fileMimeType = fileData.fileMimeType;
-        postData.type = fileData.fileMimeType?.startsWith('image/') ? 'image'
-          : fileData.fileMimeType?.startsWith('video/') ? 'video' : 'file';
+        postData.fileUrl = fileData.url;
+        postData.fileName = fileData.name;
+        postData.fileSize = fileData.size;
+        postData.fileMimeType = fileData.mimeType;
+        postData.type = fileData.mimeType?.startsWith('image/') ? 'image'
+          : fileData.mimeType?.startsWith('video/') ? 'video' : 'file';
       }
 
       // Add poll data

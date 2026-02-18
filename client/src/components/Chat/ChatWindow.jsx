@@ -9,7 +9,7 @@ import GroupChat from '../Group/GroupChat';
 import ForwardMessageModal from '../Common/ForwardMessageModal';
 import UserProfileModal from '../Common/UserProfileModal';
 import { formatDateSeparator, shouldShowDateSeparator, formatMessageTime } from '../../utils/helpers';
-import { ChevronDown, Pin, X, ChevronUp, Loader2 } from 'lucide-react';
+import { ChevronDown, Pin, X, ChevronUp, Loader2, CheckSquare, Trash2, XCircle } from 'lucide-react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 
@@ -30,6 +30,12 @@ const ChatWindow = () => {
   const fetchPinnedMessages = useChatStore(s => s.fetchPinnedMessages);
   const pinMessage = useChatStore(s => s.pinMessage);
   const unpinMessage = useChatStore(s => s.unpinMessage);
+  const selectMode = useChatStore(s => s.selectMode);
+  const selectedMessages = useChatStore(s => s.selectedMessages);
+  const toggleSelectMode = useChatStore(s => s.toggleSelectMode);
+  const toggleMessageSelection = useChatStore(s => s.toggleMessageSelection);
+  const exitSelectMode = useChatStore(s => s.exitSelectMode);
+  const bulkDeleteMessages = useChatStore(s => s.bulkDeleteMessages);
   const user = useAuthStore(s => s.user);
   const containerRef = useRef(null);
   const loadingMoreRef = useRef(false);
@@ -57,6 +63,19 @@ const ChatWindow = () => {
       toast.success('Message deleted');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to delete message');
+    }
+  };
+
+  // Bulk delete handler
+  const handleBulkDelete = async () => {
+    const count = Object.keys(selectedMessages).length;
+    if (count === 0) return;
+    if (!window.confirm(`Delete ${count} selected message(s)?`)) return;
+    try {
+      const result = await bulkDeleteMessages(activeChat.id, activeChat.type);
+      toast.success(`${result.deleted} message(s) deleted`);
+    } catch (err) {
+      toast.error('Failed to delete messages');
     }
   };
 
@@ -116,6 +135,7 @@ const ChatWindow = () => {
     }
     setShowGroupInfo(false); // Close group info when switching chats
     useChatStore.getState().closePinnedPanel(); // Close pinned panel when switching chats
+    useChatStore.getState().exitSelectMode(); // Exit select mode when switching chats
     setPinnedPreviewIndex(0);
     setPinnedBarDismissed(false);
     // Fetch pinned messages for the preview bar
@@ -346,6 +366,10 @@ const ChatWindow = () => {
                 onViewProfile={handleViewProfile}
                 onPin={handlePinMessage}
                 onRetry={handleRetryMessage}
+                selectMode={selectMode}
+                isSelected={!!selectedMessages[msg._id]}
+                onToggleSelect={() => toggleMessageSelection(msg._id)}
+                onEnterSelectMode={() => { toggleSelectMode(); toggleMessageSelection(msg._id); }}
               />
             </div>
           );
@@ -367,7 +391,7 @@ const ChatWindow = () => {
 
       </div>
 
-      {/* Message input — stays at bottom */}
+      {/* Message input or Selection toolbar — stays at bottom */}
       <div className="flex-shrink-0 relative">
         {/* Scroll to bottom button */}
         {showScrollBtn && (
@@ -378,7 +402,32 @@ const ChatWindow = () => {
             <ChevronDown size={20} />
           </button>
         )}
-        <MessageInput />
+        {selectMode ? (
+          <div className="flex items-center justify-between px-4 py-3 bg-dark-800 border-t border-dark-700">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={exitSelectMode}
+                className="flex items-center gap-1.5 text-dark-400 hover:text-dark-200 transition-colors text-sm"
+              >
+                <XCircle size={18} />
+                Cancel
+              </button>
+              <span className="text-dark-300 text-sm font-medium">
+                {Object.keys(selectedMessages).length} selected
+              </span>
+            </div>
+            <button
+              onClick={handleBulkDelete}
+              disabled={Object.keys(selectedMessages).length === 0}
+              className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-sm font-medium transition-colors"
+            >
+              <Trash2 size={16} />
+              Delete ({Object.keys(selectedMessages).length})
+            </button>
+          </div>
+        ) : (
+          <MessageInput />
+        )}
       </div>
 
       </div>{/* end messages column */}

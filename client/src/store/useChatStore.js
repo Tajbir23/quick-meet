@@ -32,6 +32,8 @@ const useChatStore = create((set, get) => ({
   isLoadingMore: false,
   pinnedMessages: {},  // { chatId: [pinnedMessage, ...] }
   showPinnedPanel: false,
+  selectMode: false,       // Whether multi-select mode is active
+  selectedMessages: {},    // { messageId: true } — set of selected message IDs
 
   // ============================================
   // USER MANAGEMENT
@@ -470,6 +472,119 @@ const useChatStore = create((set, get) => ({
 
     // Update conversation preview (for 1-to-1 messages — chatId is the sender's userId)
     get().updateConversation(chatId, message, message.sender?.username);
+  },
+
+  // ============================================
+  // MULTI-SELECT & BULK DELETE
+  // ============================================
+
+  toggleSelectMode: () => {
+    set((state) => ({
+      selectMode: !state.selectMode,
+      selectedMessages: {}, // Clear selection when toggling
+    }));
+  },
+
+  exitSelectMode: () => set({ selectMode: false, selectedMessages: {} }),
+
+  toggleMessageSelection: (messageId) => {
+    set((state) => {
+      const newSelection = { ...state.selectedMessages };
+      if (newSelection[messageId]) {
+        delete newSelection[messageId];
+      } else {
+        newSelection[messageId] = true;
+      }
+      return { selectedMessages: newSelection };
+    });
+  },
+
+  selectAllMessages: (chatId) => {
+    const msgs = get().messages[chatId] || [];
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const selection = {};
+    msgs.forEach(m => {
+      const senderId = typeof m.sender === 'object' ? m.sender._id : m.sender;
+      if (senderId === currentUser._id && m._id && !m._id.startsWith('temp_')) {
+        selection[m._id] = true;
+      }
+    });
+    set({ selectedMessages: selection });
+  },
+
+  clearSelection: () => set({ selectedMessages: {} }),
+
+  /**
+   * Bulk delete selected messages from server and local state.
+   * Own messages are deleted from DB; received messages are removed locally only.
+   */
+  bulkDeleteMessages: async (chatId, chatType) => {
+    const { selectedMessages, messages } = get();
+    const selectedIds = Object.keys(selectedMessages);
+    if (selectedIds.length === 0) return;
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const chatMsgs = messages[chatId] || [];
+
+    // Separate own messages (delete from server) vs others (local remove only)
+    const ownMessageIds = [];
+    selectedIds.forEach(id => {
+      const msg = chatMsgs.find(m => m._id === id);
+      if (msg) {
+        const senderId = typeof msg.sender === 'object' ? msg.sender._id : msg.sender;
+        if (senderId === currentUser._id) {
+          ownMessageIds.push(id);
+        }
+      }
+    });
+
+    try {
+      // Delete own messages from server
+      if (ownMessageIds.length > 0) {
+        await api.post('/messages/bulk-delete', { messageIds: ownMessageIds });
+      }
+
+      // Remove ALL selected messages from local state (own + received)
+      set((state) => ({
+        messages: {
+          ...state.messages,
+          [chatId]: (state.messages[chatId] || []).filter(m => !selectedMessages[m._id]),
+        },
+        selectedMessages: {},
+        selectMode: false,
+      }));
+
+      // Broadcast deletion of own messages via socket
+      if (ownMessageIds.length > 0) {
+        const socket = getSocket();
+        if (socket) {
+          socket.emit('message:bulk-delete', {
+            messageIds: ownMessageIds,
+            chatId,
+            chatType,
+          });
+        }
+      }
+
+      return { deleted: selectedIds.length };
+    } catch (error) {
+      console.error('Bulk delete failed:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Handle real-time bulk delete from other user
+   */
+  handleRemoteBulkDelete: (chatId, messageIds) => {
+    if (!messageIds || !Array.isArray(messageIds)) return;
+    const idSet = new Set(messageIds);
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [chatId]: (state.messages[chatId] || []).filter(m => !idSet.has(m._id)),
+      },
+    }));
   },
 
   // ============================================

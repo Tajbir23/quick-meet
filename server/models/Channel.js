@@ -475,7 +475,7 @@ channelSchema.methods.canPost = function (userId) {
   if (!member || member.isBanned) return false;
   if (member.role === CHANNEL_ROLES.OWNER) return true;
   if (member.role === CHANNEL_ROLES.ADMIN) return member.permissions.post_messages !== false;
-  if (member.role === CHANNEL_ROLES.MODERATOR) return false;
+  if (member.role === CHANNEL_ROLES.MODERATOR) return member.permissions.post_messages !== false;
   return false; // subscribers can't post in channels
 };
 
