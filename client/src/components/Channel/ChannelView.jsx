@@ -10,7 +10,7 @@
  * - Channel info side panel
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, useLayoutEffect } from 'react';
 import {
   ArrowLeft, Radio, Info, Volume2, Users, Search,
   ChevronDown, Loader2, Pin, X
@@ -42,11 +42,16 @@ const ChannelView = () => {
   const liveStream = useChannelStore(s => s.liveStream);
 
   const containerRef = useRef(null);
+  const isFirstLoad = useRef(true);
+  const scrollStateRef = useRef({ scrollHeight: 0, scrollTop: 0, isLoadingMore: false });
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [showLive, setShowLive] = useState(false);
   const [showPinnedBar, setShowPinnedBar] = useState(true);
   const [pinnedIndex, setPinnedIndex] = useState(0);
+
+  // Reverse posts: DB returns newest-first, we render oldest-first (chat order)
+  const sortedPosts = useMemo(() => [...channelPosts].reverse(), [channelPosts]);
 
   // Determine user role in channel
   const myMember = activeChannel?.members?.find(m => {
@@ -61,6 +66,8 @@ const ChannelView = () => {
   // Fetch channel data when selected
   useEffect(() => {
     if (!activeChat?.id || activeChat.type !== 'channel') return;
+
+    isFirstLoad.current = true;
 
     const loadChannel = async () => {
       // Fetch full channel data if not already loaded
@@ -96,25 +103,58 @@ const ChannelView = () => {
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     setShowScrollBtn(distanceFromBottom > 200);
 
-    // Load more posts when scrolling to top
+    // Load more (older) posts when scrolling to top
     if (el.scrollTop < 100 && hasMorePosts && !isLoadingPosts) {
+      // Save scroll state for position preservation
+      scrollStateRef.current = {
+        scrollHeight: el.scrollHeight,
+        scrollTop: el.scrollTop,
+        isLoadingMore: true,
+      };
       fetchMorePosts(activeChat.id);
     }
   }, [hasMorePosts, isLoadingPosts, activeChat?.id]);
 
-  const scrollToBottom = () => {
-    containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight, behavior: 'smooth' });
+  const scrollToBottom = (instant = false) => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (instant) {
+      el.scrollTop = el.scrollHeight;
+    } else {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }
   };
 
-  // Auto-scroll to bottom on new posts
+  // Preserve scroll position when loading older posts at top
+  useLayoutEffect(() => {
+    if (scrollStateRef.current.isLoadingMore && !isLoadingPosts) {
+      const el = containerRef.current;
+      if (el) {
+        const heightDiff = el.scrollHeight - scrollStateRef.current.scrollHeight;
+        el.scrollTop = scrollStateRef.current.scrollTop + heightDiff;
+      }
+      scrollStateRef.current.isLoadingMore = false;
+    }
+  }, [channelPosts.length, isLoadingPosts]);
+
+  // Auto-scroll to bottom on new posts / first load
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+
+    // First load: scroll to bottom instantly
+    if (isFirstLoad.current && channelPosts.length > 0 && !isLoadingPosts) {
+      setTimeout(() => scrollToBottom(true), 50);
+      isFirstLoad.current = false;
+      return;
+    }
+
+    // New message: auto-scroll if near bottom
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (distanceFromBottom < 300) {
       scrollToBottom();
     }
-  }, [channelPosts.length]);
+  }, [channelPosts.length, isLoadingPosts]);
 
   const handleBack = () => {
     clearActiveChat();
@@ -241,8 +281,8 @@ const ChannelView = () => {
           </div>
         )}
 
-        {/* Posts */}
-        {channelPosts.map(post => (
+        {/* Posts (chronological order — oldest at top, newest at bottom) */}
+        {sortedPosts.map(post => (
           <ChannelPost
             key={post._id}
             post={post}
