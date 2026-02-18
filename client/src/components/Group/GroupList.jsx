@@ -7,15 +7,32 @@
 import { Hash, Users, Phone } from 'lucide-react';
 import useGroupStore from '../../store/useGroupStore';
 import useChatStore from '../../store/useChatStore';
-import { truncate } from '../../utils/helpers';
+import { truncate, formatTime } from '../../utils/helpers';
 
 const GroupList = ({ searchQuery = '' }) => {
   const { myGroups, activeGroupCalls } = useGroupStore();
-  const { setActiveChat, activeChat, unread } = useChatStore();
+  const { setActiveChat, activeChat, unread, groupConversations } = useChatStore();
 
   const filteredGroups = myGroups.filter(group =>
     group.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Sort by last message time (most recent first), then alphabetical
+  const sortedGroups = [...filteredGroups].sort((a, b) => {
+    const aConv = groupConversations[a._id];
+    const bConv = groupConversations[b._id];
+    const aUnread = unread[a._id] || 0;
+    const bUnread = unread[b._id] || 0;
+    if (aUnread > 0 && bUnread === 0) return -1;
+    if (aUnread === 0 && bUnread > 0) return 1;
+    if (aConv?.createdAt && bConv?.createdAt) {
+      const diff = new Date(bConv.createdAt) - new Date(aConv.createdAt);
+      if (diff !== 0) return diff;
+    }
+    if (aConv?.createdAt && !bConv?.createdAt) return -1;
+    if (!aConv?.createdAt && bConv?.createdAt) return 1;
+    return a.name.localeCompare(b.name);
+  });
 
   const handleSelectGroup = (group) => {
     setActiveChat({
@@ -42,9 +59,10 @@ const GroupList = ({ searchQuery = '' }) => {
 
   return (
     <div>
-      {filteredGroups.map(group => {
+      {sortedGroups.map(group => {
         const isActive = activeChat?.id === group._id;
         const unreadCount = unread[group._id] || 0;
+        const gConv = groupConversations[group._id];
 
         return (
           <button
@@ -69,16 +87,25 @@ const GroupList = ({ searchQuery = '' }) => {
                   <p className="text-sm font-semibold text-white truncate">
                     {group.name}
                   </p>
-                  {unreadCount > 0 && (
-                    <span className="ml-2 bg-primary-500 text-white text-xs rounded-full px-2 py-0.5 flex-shrink-0 animate-scale-in">
-                      {unreadCount > 99 ? '99+' : unreadCount}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {gConv?.createdAt && (
+                      <span className={`text-[11px] ${unreadCount > 0 ? 'text-primary-400 font-medium' : 'text-dark-500'}`}>
+                        {formatTime(gConv.createdAt)}
+                      </span>
+                    )}
+                    {unreadCount > 0 && (
+                      <span className="ml-1 bg-primary-500 text-white text-xs rounded-full px-2 py-0.5 animate-scale-in">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-1 mt-0.5">
-                  <Users size={12} className="text-dark-500" />
-                  <p className="text-xs text-dark-400">
-                    {group.members?.length || 0} members
+                  <p className={`text-xs truncate ${unreadCount > 0 ? 'text-dark-200 font-medium' : 'text-dark-400'}`}>
+                    {gConv?.content
+                      ? (gConv.senderUsername ? `${gConv.senderUsername}: ${gConv.content}` : gConv.content)
+                      : `${group.members?.length || 0} members`
+                    }
                   </p>
                 </div>
                 {group.description && (

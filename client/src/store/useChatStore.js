@@ -28,6 +28,8 @@ const useChatStore = create((set, get) => ({
   userLastSeen: {},    // { userId: ISO timestamp } — cached lastSeen per user
   usersLastFetched: 0, // Timestamp of last users fetch (for cache TTL)
   conversations: {},   // { chatId: { content, type, createdAt, senderId, senderUsername } } — last message per conversation
+  groupConversations: {},   // { groupId: { content, type, createdAt, senderId, senderUsername } }
+  channelConversations: {}, // { channelId: { content, type, createdAt, senderId, senderUsername } }
   isLoadingMessages: false,
   isLoadingMore: false,
   pinnedMessages: {},  // { chatId: [pinnedMessage, ...] }
@@ -148,7 +150,12 @@ const useChatStore = create((set, get) => ({
   fetchConversations: async () => {
     try {
       const res = await api.get('/messages/conversations');
-      set({ conversations: res.data.data.conversations });
+      const { conversations, groupConversations, channelConversations } = res.data.data;
+      set({
+        conversations: conversations || {},
+        groupConversations: groupConversations || {},
+        channelConversations: channelConversations || {},
+      });
     } catch (error) {
       console.error('Failed to fetch conversations:', error);
     }
@@ -158,7 +165,7 @@ const useChatStore = create((set, get) => ({
    * Update a single conversation's last message (called on send/receive).
    * This avoids re-fetching all conversations for every new message.
    */
-  updateConversation: (chatId, message, senderUsername) => {
+  updateConversation: (chatId, message, senderUsername, chatType = 'user') => {
     // Format preview text based on message type
     let content = message.content;
     if (message.type === 'image') content = '📷 Photo';
@@ -168,20 +175,39 @@ const useChatStore = create((set, get) => ({
     else if (message.type === 'call') {
       const icon = message.callType === 'video' ? '📹' : '📞';
       content = `${icon} ${message.callStatus === 'completed' ? 'Call' : 'Missed call'}`;
-    }
+    } else if (message.type === 'poll') content = '📊 Poll';
 
-    set((state) => ({
-      conversations: {
-        ...state.conversations,
-        [chatId]: {
-          content: content || '',
-          type: message.type || 'text',
-          createdAt: message.createdAt || new Date().toISOString(),
-          senderId: message.sender?._id || message.sender,
-          senderUsername: senderUsername || message.sender?.username || '',
+    const convEntry = {
+      content: content || '',
+      type: message.type || 'text',
+      createdAt: message.createdAt || new Date().toISOString(),
+      senderId: message.sender?._id || message.sender,
+      senderUsername: senderUsername || message.sender?.username || '',
+    };
+
+    // Store in the appropriate conversation map based on chat type
+    if (chatType === 'group') {
+      set((state) => ({
+        groupConversations: {
+          ...state.groupConversations,
+          [chatId]: convEntry,
         },
-      },
-    }));
+      }));
+    } else if (chatType === 'channel') {
+      set((state) => ({
+        channelConversations: {
+          ...state.channelConversations,
+          [chatId]: convEntry,
+        },
+      }));
+    } else {
+      set((state) => ({
+        conversations: {
+          ...state.conversations,
+          [chatId]: convEntry,
+        },
+      }));
+    }
   },
 
   // ============================================
@@ -319,9 +345,7 @@ const useChatStore = create((set, get) => ({
       }));
 
       // Update conversation preview (last message)
-      if (chatType === 'user') {
-        get().updateConversation(chatId, messageData, messageData.sender?.username);
-      }
+      get().updateConversation(chatId, messageData, messageData.sender?.username, chatType);
 
       // Emit via socket for real-time delivery
       const socket = getSocket();
@@ -426,7 +450,7 @@ const useChatStore = create((set, get) => ({
    * Add a received message to the store
    * Also sends delivery acknowledgment via socket
    */
-  addReceivedMessage: (chatId, message) => {
+  addReceivedMessage: (chatId, message, chatType = 'user') => {
     set((state) => {
       const activeChat = state.activeChat;
       const isActiveChat = activeChat && activeChat.id === chatId;
@@ -470,8 +494,8 @@ const useChatStore = create((set, get) => ({
       }
     }
 
-    // Update conversation preview (for 1-to-1 messages — chatId is the sender's userId)
-    get().updateConversation(chatId, message, message.sender?.username);
+    // Update conversation preview
+    get().updateConversation(chatId, message, message.sender?.username, chatType);
   },
 
   // ============================================

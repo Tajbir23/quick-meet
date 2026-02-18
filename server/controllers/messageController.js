@@ -12,8 +12,10 @@
  */
 
 const Message = require('../models/Message');
+const ChannelMessage = require('../models/ChannelMessage');
 const User = require('../models/User');
 const Group = require('../models/Group');
+const Channel = require('../models/Channel');
 const { cryptoService, securityLogger } = require('../security');
 
 // ─── HELPERS ────────────────────────────────────────────────
@@ -486,9 +488,164 @@ const getConversations = async (req, res) => {
       };
     });
 
+    // ─── GROUP CONVERSATIONS ─────────────────────
+    // Fetch last message for each group the user is in
+    const groupConversations = {};
+    try {
+      const userGroups = await Group.find({ 'members.user': userId }).select('_id name').lean();
+      if (userGroups.length > 0) {
+        const groupIds = userGroups.map(g => g._id);
+        const groupPipeline = [
+          { $match: { group: { $in: groupIds } } },
+          { $sort: { createdAt: -1 } },
+          {
+            $group: {
+              _id: '$group',
+              lastMessage: { $first: '$$ROOT' },
+            },
+          },
+          {
+            $lookup: {
+              from: 'users',
+              localField: 'lastMessage.sender',
+              foreignField: '_id',
+              as: 'senderInfo',
+            },
+          },
+          { $unwind: { path: '$senderInfo', preserveNullAndEmptyArrays: true } },
+          {
+            $project: {
+              groupId: '$_id',
+              content: '$lastMessage.content',
+              type: '$lastMessage.type',
+              createdAt: '$lastMessage.createdAt',
+              senderId: '$lastMessage.sender',
+              senderUsername: '$senderInfo.username',
+              encrypted: '$lastMessage.encrypted',
+              encryptionIV: '$lastMessage.encryptionIV',
+              encryptionTag: '$lastMessage.encryptionTag',
+              fileName: '$lastMessage.fileName',
+            },
+          },
+        ];
+        const groupResults = await Message.aggregate(groupPipeline);
+
+        groupResults.forEach(item => {
+          let content = item.content;
+          if (item.encrypted && item.encryptionIV && item.encryptionTag) {
+            content = decryptContent({
+              content: item.content,
+              encrypted: item.encrypted,
+              encryptionIV: item.encryptionIV,
+              encryptionTag: item.encryptionTag,
+              _id: item.groupId,
+            });
+          }
+          let preview = content;
+          if (item.type === 'image') preview = '📷 Photo';
+          else if (item.type === 'file') preview = `📎 ${item.fileName || 'File'}`;
+          else if (item.type === 'audio') preview = '🎵 Audio';
+          else if (item.type === 'video') preview = '🎬 Video';
+
+          groupConversations[item.groupId.toString()] = {
+            content: preview,
+            type: item.type,
+            createdAt: item.createdAt,
+            senderId: item.senderId?.toString(),
+            senderUsername: item.senderUsername,
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('Group conversations fetch error:', err.message);
+    }
+
+    // ─── CHANNEL CONVERSATIONS ───────────────────
+    // Fetch last post for each channel the user is subscribed to
+    const channelConversations = {};
+    try {
+      const userChannels = await Channel.find({ 'members.user': userId }).select('_id name').lean();
+      if (userChannels.length > 0) {
+        const channelIds = userChannels.map(c => c._id);
+        const channelPipeline = [
+          {
+            $match: {
+              channel: { $in: channelIds },
+              isDeleted: { $ne: true },
+              isScheduled: { $ne: true },
+            },
+          },
+          { $sort: { createdAt: -1 } },
+          {
+            $group: {
+              _id: '$channel',
+              lastMessage: { $first: '$$ROOT' },
+            },
+          },
+          {
+            $lookup: {
+              from: 'users',
+              localField: 'lastMessage.sender',
+              foreignField: '_id',
+              as: 'senderInfo',
+            },
+          },
+          { $unwind: { path: '$senderInfo', preserveNullAndEmptyArrays: true } },
+          {
+            $project: {
+              channelId: '$_id',
+              content: '$lastMessage.content',
+              type: '$lastMessage.type',
+              createdAt: '$lastMessage.createdAt',
+              senderId: '$lastMessage.sender',
+              senderUsername: '$senderInfo.username',
+              encrypted: '$lastMessage.encrypted',
+              encryptionIV: '$lastMessage.encryptionIV',
+              encryptionTag: '$lastMessage.encryptionTag',
+              fileName: '$lastMessage.fileName',
+            },
+          },
+        ];
+        const channelResults = await ChannelMessage.aggregate(channelPipeline);
+
+        channelResults.forEach(item => {
+          let content = item.content;
+          if (item.encrypted && item.encryptionIV && item.encryptionTag) {
+            content = decryptContent({
+              content: item.content,
+              encrypted: item.encrypted,
+              encryptionIV: item.encryptionIV,
+              encryptionTag: item.encryptionTag,
+              _id: item.channelId,
+            });
+          }
+          let preview = content;
+          if (item.type === 'image') preview = '📷 Photo';
+          else if (item.type === 'file') preview = `📎 ${item.fileName || 'File'}`;
+          else if (item.type === 'audio') preview = '🎵 Audio';
+          else if (item.type === 'video') preview = '🎬 Video';
+          else if (item.type === 'poll') preview = '📊 Poll';
+
+          channelConversations[item.channelId.toString()] = {
+            content: preview,
+            type: item.type,
+            createdAt: item.createdAt,
+            senderId: item.senderId?.toString(),
+            senderUsername: item.senderUsername,
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('Channel conversations fetch error:', err.message);
+    }
+
     res.json({
       success: true,
-      data: { conversations },
+      data: {
+        conversations,
+        groupConversations,
+        channelConversations,
+      },
     });
   } catch (error) {
     console.error('Get conversations error:', error);

@@ -7,15 +7,28 @@
 import { Radio, Users, Eye, Volume2, VolumeX, Zap } from 'lucide-react';
 import useChannelStore from '../../store/useChannelStore';
 import useChatStore from '../../store/useChatStore';
-import { truncate } from '../../utils/helpers';
+import { truncate, formatTime } from '../../utils/helpers';
 
 const ChannelList = ({ searchQuery = '' }) => {
   const { myChannels } = useChannelStore();
-  const { setActiveChat, activeChat } = useChatStore();
+  const { setActiveChat, activeChat, channelConversations } = useChatStore();
 
   const filtered = myChannels.filter(ch =>
     ch.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Sort by last post time (most recent first)
+  const sortedChannels = [...filtered].sort((a, b) => {
+    const aConv = channelConversations[a._id];
+    const bConv = channelConversations[b._id];
+    if (aConv?.createdAt && bConv?.createdAt) {
+      const diff = new Date(bConv.createdAt) - new Date(aConv.createdAt);
+      if (diff !== 0) return diff;
+    }
+    if (aConv?.createdAt && !bConv?.createdAt) return -1;
+    if (!aConv?.createdAt && bConv?.createdAt) return 1;
+    return a.name.localeCompare(b.name);
+  });
 
   const handleSelectChannel = (channel) => {
     setActiveChat({
@@ -46,18 +59,11 @@ const ChannelList = ({ searchQuery = '' }) => {
 
   return (
     <div>
-      {filtered.map(channel => {
+      {sortedChannels.map(channel => {
         const isActive = activeChat?.id === channel._id;
         const subscriberCount = channel.subscriberCount || channel.members?.filter(m => !m.isBanned)?.length || 0;
-        const myMember = channel.members?.find(m => {
-          const uid = m.user?._id || m.user;
-          return uid === channel.owner?._id || uid === channel.owner;
-        });
         const isLive = channel.liveStream?.isLive;
-        const isMuted = channel.members?.find(m => {
-          const uid = m.user?._id || m.user;
-          return uid; // Approximate — actual mute check needs current user id
-        })?.isMuted;
+        const chConv = channelConversations[channel._id];
 
         return (
           <button
@@ -89,25 +95,25 @@ const ChannelList = ({ searchQuery = '' }) => {
                       </span>
                     )}
                   </div>
-                  {isLive && (
-                    <span className="ml-2 bg-red-500 text-white text-[10px] font-bold rounded-full px-2 py-0.5 flex-shrink-0 animate-pulse">
-                      LIVE
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <div className="flex items-center gap-1">
-                    <Eye size={11} className="text-dark-500" />
-                    <p className="text-xs text-dark-400">
-                      {subscriberCount} subscribers
-                    </p>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {chConv?.createdAt && (
+                      <span className="text-[11px] text-dark-500">
+                        {formatTime(chConv.createdAt)}
+                      </span>
+                    )}
+                    {isLive && (
+                      <span className="bg-red-500 text-white text-[10px] font-bold rounded-full px-2 py-0.5 animate-pulse">
+                        LIVE
+                      </span>
+                    )}
                   </div>
                 </div>
-                {channel.description && (
-                  <p className="text-xs text-dark-500 truncate mt-0.5">
-                    {truncate(channel.description, 40)}
-                  </p>
-                )}
+                <p className="text-xs text-dark-400 truncate mt-0.5">
+                  {chConv?.content
+                    ? (chConv.senderUsername ? `${chConv.senderUsername}: ${chConv.content}` : chConv.content)
+                    : `${subscriberCount} subscribers`
+                  }
+                </p>
               </div>
             </div>
           </button>

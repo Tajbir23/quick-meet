@@ -22,6 +22,8 @@ import { SERVER_URL } from '../../utils/constants';
 const SearchResults = ({ searchQuery, onSelect }) => {
   const users = useChatStore(s => s.users);
   const conversations = useChatStore(s => s.conversations);
+  const groupConversations = useChatStore(s => s.groupConversations);
+  const channelConversations = useChatStore(s => s.channelConversations);
   const unread = useChatStore(s => s.unread);
   const isUserOnline = useChatStore(s => s.isUserOnline);
   const userLastSeen = useChatStore(s => s.userLastSeen);
@@ -34,10 +36,13 @@ const SearchResults = ({ searchQuery, onSelect }) => {
   if (!q) return null;
 
   // ---- Filter users with conversations (conversations section) ----
+  // Match by username OR by last message content
   const conversationUsers = users.filter(u => {
     if (u._id === currentUser?._id) return false;
     if (!conversations[u._id]) return false; // must have a conversation
-    return u.username.toLowerCase().includes(q);
+    const nameMatch = u.username.toLowerCase().includes(q);
+    const contentMatch = conversations[u._id]?.content?.toLowerCase().includes(q);
+    return nameMatch || contentMatch;
   });
 
   // Sort by last message time
@@ -68,15 +73,21 @@ const SearchResults = ({ searchQuery, onSelect }) => {
     return a.username.localeCompare(b.username);
   });
 
-  // ---- Filter groups ----
-  const filteredGroups = (myGroups || []).filter(g =>
-    g.name.toLowerCase().includes(q)
-  );
+  // ---- Filter groups (by name, description, or last message) ----
+  const filteredGroups = (myGroups || []).filter(g => {
+    const nameMatch = g.name.toLowerCase().includes(q);
+    const descMatch = g.description?.toLowerCase().includes(q);
+    const convMatch = groupConversations[g._id]?.content?.toLowerCase().includes(q);
+    return nameMatch || descMatch || convMatch;
+  });
 
-  // ---- Filter channels ----
-  const filteredChannels = (myChannels || []).filter(ch =>
-    ch.name.toLowerCase().includes(q)
-  );
+  // ---- Filter channels (by name, description, or last post) ----
+  const filteredChannels = (myChannels || []).filter(ch => {
+    const nameMatch = ch.name.toLowerCase().includes(q);
+    const descMatch = ch.description?.toLowerCase().includes(q);
+    const convMatch = channelConversations[ch._id]?.content?.toLowerCase().includes(q);
+    return nameMatch || descMatch || convMatch;
+  });
 
   const handleSelectUser = (user) => {
     setActiveChat({
@@ -205,28 +216,51 @@ const SearchResults = ({ searchQuery, onSelect }) => {
               Groups ({filteredGroups.length})
             </span>
           </div>
-          {filteredGroups.map(group => (
-            <button
-              key={group._id}
-              onClick={() => handleSelectGroup(group)}
-              className="sidebar-item w-full text-left"
-            >
-              <div className="relative flex-shrink-0">
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white"
-                  style={{ backgroundColor: stringToColor(group.name) }}
-                >
-                  {getInitials(group.name)}
+          {filteredGroups.map(group => {
+            const gConv = groupConversations[group._id];
+            const unreadCount = unread[group._id] || 0;
+            const hasUnread = unreadCount > 0;
+
+            return (
+              <button
+                key={group._id}
+                onClick={() => handleSelectGroup(group)}
+                className={`sidebar-item w-full text-left ${hasUnread ? 'bg-dark-750/50' : ''}`}
+              >
+                <div className="relative flex-shrink-0">
+                  <div
+                    className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white"
+                    style={{ backgroundColor: stringToColor(group.name) }}
+                  >
+                    {getInitials(group.name)}
+                  </div>
                 </div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white truncate">{group.name}</p>
-                <p className="text-xs text-dark-400 truncate">
-                  {group.members?.length || 0} members
-                </p>
-              </div>
-            </button>
-          ))}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-white truncate">{group.name}</p>
+                    {gConv?.createdAt && (
+                      <span className={`text-[11px] flex-shrink-0 ${hasUnread ? 'text-primary-400 font-medium' : 'text-dark-500'}`}>
+                        {formatTime(gConv.createdAt)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between gap-2 mt-0.5">
+                    <p className={`text-xs truncate ${hasUnread ? 'text-dark-200 font-medium' : 'text-dark-400'}`}>
+                      {gConv?.content
+                        ? (gConv.senderUsername ? `${gConv.senderUsername}: ${gConv.content}` : gConv.content)
+                        : `${group.members?.length || 0} members`
+                      }
+                    </p>
+                    {hasUnread && (
+                      <span className="min-w-[20px] h-5 px-1.5 bg-primary-500 text-white text-[11px] font-bold rounded-full flex items-center justify-center flex-shrink-0">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </>
       )}
 
@@ -239,25 +273,39 @@ const SearchResults = ({ searchQuery, onSelect }) => {
               Channels ({filteredChannels.length})
             </span>
           </div>
-          {filteredChannels.map(channel => (
-            <button
-              key={channel._id}
-              onClick={() => handleSelectChannel(channel)}
-              className="sidebar-item w-full text-left"
-            >
-              <div className="relative flex-shrink-0">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white bg-indigo-500/30">
-                  <Radio size={18} className="text-indigo-400" />
+          {filteredChannels.map(channel => {
+            const chConv = channelConversations[channel._id];
+
+            return (
+              <button
+                key={channel._id}
+                onClick={() => handleSelectChannel(channel)}
+                className="sidebar-item w-full text-left"
+              >
+                <div className="relative flex-shrink-0">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white bg-indigo-500/30">
+                    <Radio size={18} className="text-indigo-400" />
+                  </div>
                 </div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white truncate">{channel.name}</p>
-                <p className="text-xs text-dark-400 truncate">
-                  {channel.subscriberCount || channel.subscribers?.length || 0} subscribers
-                </p>
-              </div>
-            </button>
-          ))}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-white truncate">{channel.name}</p>
+                    {chConv?.createdAt && (
+                      <span className="text-[11px] flex-shrink-0 text-dark-500">
+                        {formatTime(chConv.createdAt)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-dark-400 truncate mt-0.5">
+                    {chConv?.content
+                      ? (chConv.senderUsername ? `${chConv.senderUsername}: ${chConv.content}` : chConv.content)
+                      : `${channel.subscriberCount || channel.subscribers?.length || 0} subscribers`
+                    }
+                  </p>
+                </div>
+              </button>
+            );
+          })}
         </>
       )}
 

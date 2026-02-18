@@ -89,7 +89,7 @@ const useSocket = () => {
     });
 
     socket.on('message:group:receive', ({ message, groupId }) => {
-      useChatStore.getState().addReceivedMessage(groupId, message);
+      useChatStore.getState().addReceivedMessage(groupId, message, 'group');
       playNotificationSound('message');
       // Android: show notification when app is in background
       const senderName = message.sender?.username || 'Someone';
@@ -538,6 +538,15 @@ const useSocket = () => {
 
     socket.on('channel:new-post', (data) => {
       useChannelStore.getState().handleNewPost(data);
+      // Update channel conversation preview for search
+      if (data.channelId && data.post) {
+        useChatStore.getState().updateConversation(
+          data.channelId,
+          data.post,
+          data.post.sender?.username,
+          'channel'
+        );
+      }
     });
 
     socket.on('channel:post-edited', (data) => {
