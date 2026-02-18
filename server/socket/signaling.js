@@ -198,7 +198,7 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
    * Initiate a call — send offer to target user
    * SECURITY: SDP sanitized + optional call token validation
    */
-  socket.on('call:offer', ({ targetUserId, offer, callType, isReconnect, callToken }) => {
+  socket.on('call:offer', async ({ targetUserId, offer, callType, isReconnect, callToken }) => {
     // Rate limit check via SocketGuard
     const rateResult = require('../security/IntrusionDetector').checkSocketRate(
       socket.id, socket.userId, 'call:offer'
