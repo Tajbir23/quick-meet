@@ -18,6 +18,7 @@ import ChannelList from '../Channel/ChannelList';
 import CreateChannel from '../Channel/CreateChannel';
 import ChannelDiscover from '../Channel/ChannelDiscover';
 import UserSettings from '../Common/UserSettings';
+import SearchResults from '../Common/SearchResults';
 import { getInitials, stringToColor } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 
@@ -139,7 +140,7 @@ const Sidebar = () => {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search conversations..."
+            placeholder="Search users, chats, groups..."
             className="input-field pl-10 py-2.5 text-sm bg-dark-900/50"
           />
           {searchQuery && (
@@ -183,49 +184,56 @@ const Sidebar = () => {
 
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto overscroll-contain">
-        {activeTab === 'chats' && (
-          <ChatList searchQuery={searchQuery} />
-        )}
-
-        {activeTab === 'groups' && (
+        {searchQuery.trim() ? (
+          /* Unified search results — replaces tabs when searching */
+          <SearchResults searchQuery={searchQuery} onSelect={() => setSearchQuery('')} />
+        ) : (
           <>
-            <div className="p-3">
-              <button
-                onClick={() => setShowCreateGroup(true)}
-                className="btn-primary w-full flex items-center justify-center gap-2 py-2.5 text-sm"
-              >
-                <Plus size={16} />
-                Create Group
-              </button>
-            </div>
-            <GroupList searchQuery={searchQuery} />
-          </>
-        )}
+            {activeTab === 'chats' && (
+              <ChatList searchQuery="" />
+            )}
 
-        {activeTab === 'channels' && (
-          <>
-            <div className="p-3 space-y-2">
-              <button
-                onClick={() => setShowCreateChannel(true)}
-                className="w-full flex items-center justify-center gap-2 py-2.5 text-sm bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl transition-colors"
-              >
-                <Plus size={16} />
-                Create Channel
-              </button>
-              <button
-                onClick={() => setShowDiscoverChannels(true)}
-                className="btn-secondary w-full flex items-center justify-center gap-2 py-2.5 text-sm"
-              >
-                <Search size={16} />
-                Discover Channels
-              </button>
-            </div>
-            <ChannelList searchQuery={searchQuery} />
-          </>
-        )}
+            {activeTab === 'groups' && (
+              <>
+                <div className="p-3">
+                  <button
+                    onClick={() => setShowCreateGroup(true)}
+                    className="btn-primary w-full flex items-center justify-center gap-2 py-2.5 text-sm"
+                  >
+                    <Plus size={16} />
+                    Create Group
+                  </button>
+                </div>
+                <GroupList searchQuery="" />
+              </>
+            )}
 
-        {activeTab === 'users' && (
-          <ActiveUsers searchQuery={searchQuery} />
+            {activeTab === 'channels' && (
+              <>
+                <div className="p-3 space-y-2">
+                  <button
+                    onClick={() => setShowCreateChannel(true)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 text-sm bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl transition-colors"
+                  >
+                    <Plus size={16} />
+                    Create Channel
+                  </button>
+                  <button
+                    onClick={() => setShowDiscoverChannels(true)}
+                    className="btn-secondary w-full flex items-center justify-center gap-2 py-2.5 text-sm"
+                  >
+                    <Search size={16} />
+                    Discover Channels
+                  </button>
+                </div>
+                <ChannelList searchQuery="" />
+              </>
+            )}
+
+            {activeTab === 'users' && (
+              <ActiveUsers searchQuery="" />
+            )}
+          </>
         )}
       </div>
 
