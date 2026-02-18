@@ -785,6 +785,12 @@ const useCallStore = create((set, get) => ({
           get().startCallTimer();
           get().startPingMonitor();
         }
+
+        // Notify BackgroundService that call is active (enables PiP floating window)
+        // Called here so it works for ALL call types: caller, callee, and group calls
+        const { remoteUser, callType: currentCallType, isGroupCall: isGrp, groupId: gId } = get();
+        const name = isGrp ? `Group ${gId}` : (remoteUser?.username || 'Unknown');
+        bgCallStarted(name, currentCallType || 'audio');
       }
 
       if (state === 'failed') {

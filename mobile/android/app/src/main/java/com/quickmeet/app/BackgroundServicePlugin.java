@@ -112,6 +112,13 @@ public class BackgroundServicePlugin extends Plugin {
         if (service != null) {
             service.showOngoingCallNotification(callerName, callType);
         }
+        
+        // Enable auto-PiP for Android 12+ when call is active
+        if (getActivity() instanceof MainActivity) {
+            final MainActivity activity = (MainActivity) getActivity();
+            activity.runOnUiThread(() -> activity.updatePipParams(true));
+        }
+        
         call.resolve();
     }
     
@@ -136,6 +143,13 @@ public class BackgroundServicePlugin extends Plugin {
         if (service != null) {
             service.endCall();
         }
+        
+        // Disable auto-PiP when call ends
+        if (getActivity() instanceof MainActivity) {
+            final MainActivity activity = (MainActivity) getActivity();
+            activity.runOnUiThread(() -> activity.updatePipParams(false));
+        }
+        
         call.resolve();
     }
     
