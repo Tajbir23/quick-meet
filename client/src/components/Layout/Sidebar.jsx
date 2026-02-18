@@ -94,41 +94,41 @@ const Sidebar = () => {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-0.5">
             {isOwner && (
               <>
                 <button
                   onClick={() => navigate('/owner')}
-                  className="btn-icon text-amber-400 hover:bg-amber-500/10"
+                  className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-500/10 transition-all active:scale-90"
                   title="Owner Dashboard"
                 >
-                  <Shield size={18} />
+                  <Shield size={16} />
                 </button>
                 <button
                   onClick={handleToggleOwnerMode}
-                  className={`btn-icon transition-colors ${
+                  className={`p-1.5 rounded-lg transition-all active:scale-90 ${
                     ownerModeVisible
                       ? 'text-amber-400 bg-amber-500/10'
                       : 'text-dark-400 hover:text-dark-200'
                   }`}
                   title={ownerModeVisible ? 'Owner Mode ON — click to hide' : 'Owner Mode OFF — click to show'}
                 >
-                  {ownerModeVisible ? <Eye size={18} /> : <EyeOff size={18} />}
+                  {ownerModeVisible ? <Eye size={16} /> : <EyeOff size={16} />}
                 </button>
               </>
             )}
             <button
               onClick={() => setShowSettings(true)}
-              className="btn-icon text-dark-400 hover:text-primary-400 hover:bg-primary-500/10"
+              className="p-1.5 rounded-lg text-dark-400 hover:text-primary-400 hover:bg-primary-500/10 transition-all active:scale-90"
               title="Settings"
             >
-              <Settings size={18} />
+              <Settings size={16} />
             </button>
             <button
               onClick={handleLogout}
-              className="btn-icon text-dark-400 hover:text-red-400 hover:bg-red-500/10"
+              className="p-1.5 rounded-lg text-dark-400 hover:text-red-400 hover:bg-red-500/10 transition-all active:scale-90"
             >
-              <LogOut size={18} />
+              <LogOut size={16} />
             </button>
           </div>
         </div>
