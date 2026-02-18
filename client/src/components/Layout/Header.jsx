@@ -7,7 +7,7 @@ import useCallStore from '../../store/useCallStore';
 import useGroupStore from '../../store/useGroupStore';
 import useAuthStore from '../../store/useAuthStore';
 import useFileTransferStore from '../../store/useFileTransferStore';
-import { getInitials, stringToColor } from '../../utils/helpers';
+import { getInitials, stringToColor, formatLastSeen } from '../../utils/helpers';
 import { SERVER_URL, MAX_P2P_FILE_SIZE, MAX_P2P_FILE_SIZE_BROWSER_MEMORY } from '../../utils/constants';
 import { canReceiveLargeFiles, getPlatformCapability } from '../../services/p2pFileTransfer';
 import toast from 'react-hot-toast';
@@ -17,6 +17,8 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
   const activeChat = useChatStore(s => s.activeChat);
   const clearActiveChat = useChatStore(s => s.clearActiveChat);
   const isUserOnline = useChatStore(s => s.isUserOnline);
+  const userLastSeen = useChatStore(s => s.userLastSeen);
+  const users = useChatStore(s => s.users);
   const showPinnedPanel = useChatStore(s => s.showPinnedPanel);
   const togglePinnedPanel = useChatStore(s => s.togglePinnedPanel);
   const { startCall, startGroupCall, callStatus } = useCallStore();
@@ -36,6 +38,11 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
   const isOnline = activeChat.type === 'user' && isUserOnline(activeChat.id);
   const isGroup = activeChat.type === 'group';
   const inCall = callStatus !== 'idle';
+
+  // Get last seen for the active chat user
+  const chatUserLastSeen = !isGroup
+    ? (userLastSeen[activeChat.id] || users.find(u => u._id === activeChat.id)?.lastSeen)
+    : null;
 
   // Telegram-style: check if this group has an active call
   const activeCall = isGroup ? activeGroupCalls[activeChat.id] : null;
@@ -168,7 +175,9 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
               ? `${activeChat.memberCount || 0} members`
               : isOnline
                 ? <span className="text-emerald-400">Online</span>
-                : 'Offline'
+                : chatUserLastSeen
+                  ? <span>{formatLastSeen(chatUserLastSeen)}</span>
+                  : 'Offline'
             }
           </p>
         </div>

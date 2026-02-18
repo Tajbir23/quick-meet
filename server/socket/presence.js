@@ -14,6 +14,7 @@
 
 const { socketGuard, securityLogger } = require('../security');
 const Group = require('../models/Group');
+const userCache = require('../utils/userCache');
 
 const setupPresenceHandlers = (io, socket, onlineUsers) => {
   const guard = socketGuard;
@@ -98,8 +99,10 @@ const setupPresenceHandlers = (io, socket, onlineUsers) => {
 
   /**
    * Heartbeat — rate-limited via SocketGuard
+   * Also updates lastSeen in the presence cache
    */
   socket.on('heartbeat', guard.wrapHandler(socket, 'heartbeat', () => {
+    userCache.heartbeat(socket.userId);
     socket.emit('heartbeat:ack', { timestamp: new Date().toISOString() });
   }));
 

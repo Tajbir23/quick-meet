@@ -32,6 +32,7 @@ const socketGuard = require('../security/SocketGuard');
 const securityLogger = require('../security/SecurityEventLogger');
 const { SEVERITY } = require('../security/SecurityEventLogger');
 const intrusionDetector = require('../security/IntrusionDetector');
+const userCache = require('../utils/userCache');
 
 // Helper: check if MongoDB is connected before DB operations
 const isMongoConnected = () => mongoose.connection.readyState === 1;
@@ -85,17 +86,26 @@ const registerSocketHandlers = (io) => {
     // FIX: Broadcast + register handlers FIRST (synchronous),
     //      then do DB update in the background (fire-and-forget).
 
+    // ─── Update presence cache ───
+    userCache.setOnline(userId, username, socket.id);
+
     socket.broadcast.emit('user:online', {
       userId,
       username,
       socketId: socket.id,
+      lastSeen: new Date().toISOString(),
     });
 
-    // Send current online users list to the newly connected user
+    // Send current online users list to the newly connected user (with lastSeen)
     const onlineUsersList = [];
     for (const [uid, sid] of onlineUsers.entries()) {
       if (uid !== userId) {
-        onlineUsersList.push({ userId: uid, socketId: sid });
+        const presence = userCache.getPresence(uid);
+        onlineUsersList.push({
+          userId: uid,
+          socketId: sid,
+          lastSeen: presence?.lastSeen?.toISOString() || new Date().toISOString(),
+        });
       }
     }
     socket.emit('users:online-list', onlineUsersList);
@@ -121,7 +131,12 @@ const registerSocketHandlers = (io) => {
       const list = [];
       for (const [uid, sid] of onlineUsers.entries()) {
         if (uid !== userId) {
-          list.push({ userId: uid, socketId: sid });
+          const presence = userCache.getPresence(uid);
+          list.push({
+            userId: uid,
+            socketId: sid,
+            lastSeen: presence?.lastSeen?.toISOString() || new Date().toISOString(),
+          });
         }
       }
       socket.emit('users:online-list', list);
@@ -172,13 +187,19 @@ const registerSocketHandlers = (io) => {
       if (isCurrentSocket) {
         onlineUsers.delete(userId);
 
+        // Update presence cache
+        userCache.setOffline(userId);
+
         // Clear any pending calls for this user
         clearPendingCall(userId);
 
-        // Broadcast offline IMMEDIATELY (before DB update)
+        const lastSeen = new Date().toISOString();
+
+        // Broadcast offline IMMEDIATELY with lastSeen timestamp
         socket.broadcast.emit('user:offline', {
           userId,
           username,
+          lastSeen,
         });
 
         // DB update (fire-and-forget)

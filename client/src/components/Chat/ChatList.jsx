@@ -1,7 +1,7 @@
 import useChatStore from '../../store/useChatStore';
 import useGroupStore from '../../store/useGroupStore';
 import useAuthStore from '../../store/useAuthStore';
-import { getInitials, stringToColor, formatTime, truncate } from '../../utils/helpers';
+import { getInitials, stringToColor, formatTime, formatLastSeen, truncate } from '../../utils/helpers';
 import { SERVER_URL } from '../../utils/constants';
 import { MessageCircle, Shield } from 'lucide-react';
 
@@ -10,6 +10,7 @@ const ChatList = ({ searchQuery }) => {
   const setActiveChat = useChatStore(s => s.setActiveChat);
   const unread = useChatStore(s => s.unread);
   const isUserOnline = useChatStore(s => s.isUserOnline);
+  const userLastSeen = useChatStore(s => s.userLastSeen);
   const currentUser = useAuthStore(s => s.user);
 
   // Filter users that have conversations or match search
@@ -83,12 +84,17 @@ const ChatList = ({ searchQuery }) => {
                     </span>
                   )}
                 </div>
-                {user.lastSeen && (
-                  <span className="text-[11px] text-dark-500 flex-shrink-0">{formatTime(user.lastSeen)}</span>
+                {(userLastSeen[user._id] || user.lastSeen) && (
+                  <span className="text-[11px] text-dark-500 flex-shrink-0">{formatTime(userLastSeen[user._id] || user.lastSeen)}</span>
                 )}
               </div>
               <p className="text-xs text-dark-400 truncate mt-0.5">
-                {online ? <span className="text-emerald-400">Online</span> : 'Tap to chat'}
+                {online
+                  ? <span className="text-emerald-400">Online</span>
+                  : (userLastSeen[user._id] || user.lastSeen)
+                    ? formatLastSeen(userLastSeen[user._id] || user.lastSeen)
+                    : 'Tap to chat'
+                }
               </p>
             </div>
 

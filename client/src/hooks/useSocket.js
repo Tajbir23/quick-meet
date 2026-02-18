@@ -54,21 +54,21 @@ const useSocket = () => {
     };
     socket.on('users:online-list', onOnlineList);
 
-    const onUserOnline = ({ userId, username, socketId }) => {
+    const onUserOnline = ({ userId, username, socketId, lastSeen }) => {
       console.log(`👤 User online: ${username} (${userId})`);
-      useChatStore.getState().addOnlineUser({ userId, socketId });
+      useChatStore.getState().addOnlineUser({ userId, socketId, lastSeen });
 
       // If this user isn't in our users list (e.g. new signup), refresh the list
       const { users } = useChatStore.getState();
       if (!users.some(u => u._id === userId)) {
-        useChatStore.getState().fetchUsers();
+        useChatStore.getState().fetchUsers(true); // force refresh
       }
     };
     socket.on('user:online', onUserOnline);
 
-    const onUserOffline = ({ userId }) => {
+    const onUserOffline = ({ userId, lastSeen }) => {
       console.log(`👤 User offline: ${userId}`);
-      useChatStore.getState().removeOnlineUser(userId);
+      useChatStore.getState().removeOnlineUser(userId, lastSeen);
     };
     socket.on('user:offline', onUserOffline);
 
@@ -378,7 +378,7 @@ const useSocket = () => {
       socket.emit('users:get-online-list');
 
       // Refresh users list in case new users signed up
-      useChatStore.getState().fetchUsers();
+      useChatStore.getState().fetchUsers(true); // force refresh on reconnect
     };
     socket.on('connect', onConnect);
 

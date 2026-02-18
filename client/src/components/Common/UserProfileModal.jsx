@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import api from '../../services/api';
 import { SERVER_URL } from '../../utils/constants';
-import { getInitials, stringToColor, formatTime } from '../../utils/helpers';
+import { getInitials, stringToColor, formatLastSeen } from '../../utils/helpers';
 import useChatStore from '../../store/useChatStore';
 
 const UserProfileModal = ({ userId, onClose }) => {
@@ -21,6 +21,7 @@ const UserProfileModal = ({ userId, onClose }) => {
   const [loading, setLoading] = useState(true);
   const setActiveChat = useChatStore(s => s.setActiveChat);
   const isUserOnline = useChatStore(s => s.isUserOnline);
+  const userLastSeen = useChatStore(s => s.userLastSeen);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -106,7 +107,7 @@ const UserProfileModal = ({ userId, onClose }) => {
                 )}
               </h3>
               <p className={`text-xs mt-1 ${online ? 'text-emerald-400' : 'text-dark-400'}`}>
-                {online ? 'Online' : `Last seen ${formatTime(profile.lastSeen)}`}
+                {online ? 'Online' : formatLastSeen(userLastSeen[profile._id] || profile.lastSeen) || 'Offline'}
               </p>
             </div>
 

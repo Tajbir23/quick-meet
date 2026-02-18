@@ -9,10 +9,13 @@
 
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
+const userCache = require('../utils/userCache');
 
 /**
  * GET /api/users
  * Get all users (excluding current user)
+ * Sorted: Online first, then by lastSeen (most recent first)
+ * Includes cached lastSeen timestamps for real-time accuracy
  */
 const getUsers = async (req, res) => {
   try {
@@ -22,10 +25,21 @@ const getUsers = async (req, res) => {
       profileHidden: { $ne: true },
     })
       .select('-password')
-      .sort({ isOnline: -1, username: 1 }); // Online users first
+      .sort({ isOnline: -1, lastSeen: -1, username: 1 });
 
-    // Map users to public objects (hides owner role if ownerModeVisible is off)
-    const publicUsers = users.map(u => u.toPublicObject());
+    // Map users to public objects and enrich with cached lastSeen
+    const publicUsers = users.map(u => {
+      const obj = u.toPublicObject();
+      // Override lastSeen with cached value (more accurate than DB)
+      const cachedPresence = userCache.getPresence(u._id.toString());
+      if (cachedPresence?.lastSeen) {
+        obj.lastSeen = cachedPresence.lastSeen;
+      }
+      return obj;
+    });
+
+    // Cache the user data for future requests
+    userCache.cacheUsersBatch(publicUsers);
 
     res.json({
       success: true,
@@ -42,7 +56,7 @@ const getUsers = async (req, res) => {
 
 /**
  * GET /api/users/active
- * Get online users only
+ * Get online users only (with cached lastSeen)
  */
 const getActiveUsers = async (req, res) => {
   try {
@@ -52,7 +66,14 @@ const getActiveUsers = async (req, res) => {
       isBlocked: { $ne: true },
     }).select('username avatar isOnline lastSeen role ownerModeVisible');
 
-    const publicUsers = users.map(u => u.toPublicObject());
+    const publicUsers = users.map(u => {
+      const obj = u.toPublicObject();
+      const cachedPresence = userCache.getPresence(u._id.toString());
+      if (cachedPresence?.lastSeen) {
+        obj.lastSeen = cachedPresence.lastSeen;
+      }
+      return obj;
+    });
 
     res.json({
       success: true,

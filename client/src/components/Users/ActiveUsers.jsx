@@ -2,15 +2,19 @@
  * ============================================
  * ActiveUsers — Online users list for sidebar
  * ============================================
+ * 
+ * SORTING: Online users first, then sorted by lastActive
+ * (most recently active at top). Shows "last active" time
+ * for offline users using formatLastSeen.
  */
 
 import { Users, MessageCircle, Shield } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
-import { getInitials, stringToColor } from '../../utils/helpers';
+import { getInitials, stringToColor, formatLastSeen } from '../../utils/helpers';
 
 const ActiveUsers = ({ searchQuery = '' }) => {
-  const { users, onlineUsers, setActiveChat, activeChat } = useChatStore();
+  const { users, onlineUsers, userLastSeen, setActiveChat, activeChat } = useChatStore();
   const { user: currentUser } = useAuthStore();
 
   // Filter out current user & apply search
@@ -20,12 +24,34 @@ const ActiveUsers = ({ searchQuery = '' }) => {
 
   const isOnline = (userId) => onlineUsers.some(u => u.userId === userId);
 
-  // Sort: online first, then alphabetical
+  /**
+   * Get last seen time for a user.
+   * Priority: socket event cache → API response → user model field
+   */
+  const getLastSeen = (userId) => {
+    return userLastSeen[userId] || users.find(u => u._id === userId)?.lastSeen || null;
+  };
+
+  // Sort: online first, then by lastSeen (most recent first), then alphabetical
   const sortedUsers = [...filteredUsers].sort((a, b) => {
     const aOnline = isOnline(a._id);
     const bOnline = isOnline(b._id);
+
+    // Online users always come first
     if (aOnline && !bOnline) return -1;
     if (!aOnline && bOnline) return 1;
+
+    // Among same status (both online or both offline), sort by lastSeen (most recent first)
+    const aLastSeen = getLastSeen(a._id);
+    const bLastSeen = getLastSeen(b._id);
+
+    if (aLastSeen && bLastSeen) {
+      const diff = new Date(bLastSeen) - new Date(aLastSeen);
+      if (diff !== 0) return diff;
+    }
+    if (aLastSeen && !bLastSeen) return -1;
+    if (!aLastSeen && bLastSeen) return 1;
+
     return a.username.localeCompare(b.username);
   });
 
@@ -67,6 +93,7 @@ const ActiveUsers = ({ searchQuery = '' }) => {
         {sortedUsers.map(user => {
           const online = isOnline(user._id);
           const isActive = activeChat?.id === user._id;
+          const lastSeen = getLastSeen(user._id);
 
           return (
             <button
@@ -99,8 +126,13 @@ const ActiveUsers = ({ searchQuery = '' }) => {
                       </span>
                     )}
                   </div>
-                  <p className={`text-xs mt-0.5 ${online ? 'text-emerald-400' : 'text-dark-500'}`}>
-                    {online ? 'Online' : 'Offline'}
+                  <p className={`text-xs mt-0.5 truncate ${online ? 'text-emerald-400' : 'text-dark-500'}`}>
+                    {online
+                      ? 'Online'
+                      : lastSeen
+                        ? formatLastSeen(lastSeen)
+                        : 'Offline'
+                    }
                   </p>
                 </div>
 

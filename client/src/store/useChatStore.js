@@ -23,8 +23,10 @@ const useChatStore = create((set, get) => ({
   activeChat: null,    // { id, type: 'user'|'group', name, avatar }
   typingUsers: {},     // { chatId: { userId: true } }
   unread: {},          // { chatId: count }
-  onlineUsers: [],     // [{ userId, socketId }]
+  onlineUsers: [],     // [{ userId, socketId, lastSeen }]
   users: [],           // All users
+  userLastSeen: {},    // { userId: ISO timestamp } — cached lastSeen per user
+  usersLastFetched: 0, // Timestamp of last users fetch (for cache TTL)
   isLoadingMessages: false,
   pinnedMessages: {},  // { chatId: [pinnedMessage, ...] }
   showPinnedPanel: false,
@@ -33,19 +35,49 @@ const useChatStore = create((set, get) => ({
   // USER MANAGEMENT
   // ============================================
 
-  setOnlineUsers: (users) => set({ onlineUsers: users }),
+  setOnlineUsers: (users) => {
+    // Extract lastSeen from online users list
+    const lastSeenUpdates = {};
+    users.forEach(u => {
+      if (u.lastSeen) {
+        lastSeenUpdates[u.userId] = u.lastSeen;
+      }
+    });
+    set((state) => ({
+      onlineUsers: users,
+      userLastSeen: { ...state.userLastSeen, ...lastSeenUpdates },
+    }));
+  },
 
   addOnlineUser: (user) => {
     set((state) => {
       const exists = state.onlineUsers.some(u => u.userId === user.userId);
       if (exists) return state;
-      return { onlineUsers: [...state.onlineUsers, user] };
+      const newLastSeen = user.lastSeen
+        ? { ...state.userLastSeen, [user.userId]: user.lastSeen }
+        : state.userLastSeen;
+      return {
+        onlineUsers: [...state.onlineUsers, user],
+        userLastSeen: newLastSeen,
+      };
     });
   },
 
-  removeOnlineUser: (userId) => {
+  removeOnlineUser: (userId, lastSeen) => {
     set((state) => ({
       onlineUsers: state.onlineUsers.filter(u => u.userId !== userId),
+      userLastSeen: lastSeen
+        ? { ...state.userLastSeen, [userId]: lastSeen }
+        : state.userLastSeen,
+    }));
+  },
+
+  /**
+   * Update lastSeen for a specific user (from socket events)
+   */
+  updateUserLastSeen: (userId, lastSeen) => {
+    set((state) => ({
+      userLastSeen: { ...state.userLastSeen, [userId]: lastSeen },
     }));
   },
 
@@ -70,10 +102,32 @@ const useChatStore = create((set, get) => ({
     });
   },
 
-  fetchUsers: async () => {
+  fetchUsers: async (force = false) => {
+    const { usersLastFetched } = get();
+    const CACHE_TTL = 2 * 60 * 1000; // 2 minutes cache TTL
+
+    // Skip fetch if recently fetched (unless forced)
+    if (!force && usersLastFetched && (Date.now() - usersLastFetched < CACHE_TTL)) {
+      return;
+    }
+
     try {
       const res = await api.get('/users');
-      set({ users: res.data.data.users });
+      const fetchedUsers = res.data.data.users;
+
+      // Extract lastSeen from fetched users
+      const lastSeenUpdates = {};
+      fetchedUsers.forEach(u => {
+        if (u.lastSeen) {
+          lastSeenUpdates[u._id] = u.lastSeen;
+        }
+      });
+
+      set((state) => ({
+        users: fetchedUsers,
+        usersLastFetched: Date.now(),
+        userLastSeen: { ...state.userLastSeen, ...lastSeenUpdates },
+      }));
     } catch (error) {
       console.error('Failed to fetch users:', error);
     }

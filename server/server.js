@@ -69,6 +69,9 @@ const pushRoutes = require('./routes/push');
 // Socket handlers
 const registerSocketHandlers = require('./socket');
 
+// User presence cache
+const userCache = require('./utils/userCache');
+
 // ============================================
 // Express App Setup
 // ============================================
@@ -267,6 +270,9 @@ const startServer = async () => {
     // 5. Register all socket event handlers
     registerSocketHandlers(io);
 
+    // 5.5. Start user presence cache background sync
+    userCache.startSync();
+
     // 6. Start listening
     const PORT = process.env.PORT || 5000;
     const HOST = process.env.SERVER_IP || '0.0.0.0';
@@ -295,6 +301,11 @@ const startServer = async () => {
 
       // Shutdown security modules
       shutdownSecurity();
+
+      // Stop cache sync
+      userCache.stopSync();
+      // Final sync to DB before shutdown
+      await userCache.syncToDatabase();
 
       // Close socket connections
       io.close(() => {
