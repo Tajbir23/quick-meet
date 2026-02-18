@@ -8,21 +8,24 @@
 import { useState } from 'react';
 import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
-  PhoneOff, Settings, Minimize2
+  PhoneOff, Settings, Minimize2, Volume2, PhoneForwarded
 } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
 import DeviceSelector from './DeviceSelector';
 import toast from 'react-hot-toast';
+import { isMobile } from '../../utils/platform';
 
 const CallControls = ({ compact = false }) => {
   const {
     isAudioEnabled,
     isVideoEnabled,
     isScreenSharing,
+    isSpeakerOn,
     callType,
     toggleAudio,
     toggleVideo,
     toggleScreenShare,
+    toggleSpeaker,
     endCall,
     toggleMinimize,
   } = useCallStore();
@@ -69,6 +72,21 @@ const CallControls = ({ compact = false }) => {
       >
         {isAudioEnabled ? <Mic size={iconSize} /> : <MicOff size={iconSize} />}
       </button>
+
+      {/* Speaker / Earpiece toggle (mobile only) */}
+      {isMobile() && (
+        <button
+          onClick={toggleSpeaker}
+          className={`${btnBase} rounded-full flex items-center justify-center transition-all ${
+            isSpeakerOn
+              ? 'bg-primary-500/20 text-primary-400 ring-2 ring-primary-400/30'
+              : 'bg-dark-700/80 hover:bg-dark-600 text-white backdrop-blur-sm'
+          }`}
+          title={isSpeakerOn ? 'Switch to earpiece' : 'Switch to speaker'}
+        >
+          {isSpeakerOn ? <Volume2 size={iconSize} /> : <PhoneForwarded size={iconSize} />}
+        </button>
+      )}
 
       {/* Camera toggle (video calls only) */}
       {callType === 'video' && (

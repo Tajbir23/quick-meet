@@ -22,6 +22,7 @@ import {
   onCallStarted as bgCallStarted,
   onCallEnded as bgCallEnded,
 } from '../services/backgroundService';
+import { setSpeakerOn as nativeSetSpeaker } from '../services/audioRoute';
 
 const useCallStore = create((set, get) => ({
   // State
@@ -35,6 +36,7 @@ const useCallStore = create((set, get) => ({
   isAudioEnabled: true,
   isVideoEnabled: true,
   isScreenSharing: false,
+  isSpeakerOn: false,
   callDuration: 0,
   callTimer: null,
   iceState: 'new',
@@ -233,6 +235,9 @@ const useCallStore = create((set, get) => ({
     // Notify background service: call ended
     bgCallEnded();
 
+    // Turn off speakerphone (native Android)
+    nativeSetSpeaker(false).catch(() => {});
+
     if (isGroupCall && groupId) {
       // Leave group call
       if (socket) {
@@ -275,6 +280,7 @@ const useCallStore = create((set, get) => ({
       isAudioEnabled: true,
       isVideoEnabled: true,
       isScreenSharing: false,
+      isSpeakerOn: false,
       callDuration: 0,
       callTimer: null,
       incomingCall: null,
@@ -382,6 +388,22 @@ const useCallStore = create((set, get) => ({
   // ============================================
   // MEDIA CONTROLS
   // ============================================
+
+  /**
+   * Toggle speaker / earpiece (mobile only)
+   * Uses native Android AudioManager via AudioRoute plugin
+   */
+  toggleSpeaker: async () => {
+    const { isSpeakerOn } = get();
+    const newState = !isSpeakerOn;
+    try {
+      await nativeSetSpeaker(newState);
+      set({ isSpeakerOn: newState });
+      console.log(`🔊 Speaker ${newState ? 'ON' : 'OFF'}`);
+    } catch (err) {
+      console.warn('Speaker toggle failed:', err);
+    }
+  },
 
   toggleAudio: () => {
     const enabled = webrtcService.toggleAudio();

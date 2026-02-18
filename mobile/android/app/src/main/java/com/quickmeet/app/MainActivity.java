@@ -49,6 +49,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BackgroundServicePlugin.class);
         registerPlugin(ApkInstallerPlugin.class);
         registerPlugin(ScreenCapturePlugin.class);
+        registerPlugin(AudioRoutePlugin.class);
 
         super.onCreate(savedInstanceState);
 
