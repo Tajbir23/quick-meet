@@ -159,7 +159,20 @@ async function createCallMessage(io, onlineUsers, { callerId, receiverId, callTy
 // Used to notify the other party when a user disconnects during a call
 const activeCalls = new Map();
 
+// Delayed disconnect timers — gives user time to reconnect before ending the call
+// userId → { timer, targetUserId }
+const disconnectTimers = new Map();
+const DISCONNECT_GRACE_PERIOD = 15000; // 15 seconds to reconnect before call ends
+
 const setupSignalingHandlers = (io, socket, onlineUsers) => {
+
+  // Cancel any pending disconnect grace timer if this user reconnected
+  const pendingDisconnect = disconnectTimers.get(socket.userId);
+  if (pendingDisconnect) {
+    clearTimeout(pendingDisconnect.timer);
+    disconnectTimers.delete(socket.userId);
+    console.log(`📞 User ${socket.username} reconnected — cancelled disconnect grace timer, call preserved`);
+  }
 
   /**
    * REQUEST CALL TOKEN — must be obtained before initiating a call
@@ -488,20 +501,26 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
    * Check if a call is still active on the server
    * Used by the client when ICE disconnects — if the peer already ended
    * the call (activeCalls cleared), the server tells us immediately.
+   * 
+   * NOTE: If a disconnect grace timer is running for the peer,
+   * consider the call still active (peer may reconnect).
    */
   socket.on('call:check-active', ({ peerId }) => {
     const peerTarget = activeCalls.get(peerId);
     const selfTarget = activeCalls.get(socket.userId);
     const isActive = (peerTarget === socket.userId) && (selfTarget === peerId);
 
-    if (!isActive) {
+    // Also check if peer has a pending disconnect grace timer
+    const peerHasGraceTimer = disconnectTimers.has(peerId);
+
+    if (!isActive && !peerHasGraceTimer) {
       console.log(`📞 call:check-active — call NOT active for ${socket.username} ↔ ${peerId}`);
       socket.emit('call:ended', {
         userId: peerId,
         username: '',
       });
     } else {
-      console.log(`📞 call:check-active — call IS active for ${socket.username} ↔ ${peerId}`);
+      console.log(`📞 call:check-active — call IS active for ${socket.username} ↔ ${peerId}${peerHasGraceTimer ? ' (peer reconnecting)' : ''}`);
     }
   });
 
@@ -577,14 +596,32 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
   });
 
   /**
-   * Handle disconnect — if user was in an active call, notify the other party.
-   * This ensures the call ends for both sides even if the socket disconnects
-   * before the client can emit call:end (e.g., app killed, network drop).
+   * Handle disconnect — if user was in an active call, give them a grace period
+   * to reconnect before notifying the peer. Since WebRTC media flows P2P,
+   * the call can survive brief server outages / socket reconnections.
+   * 
+   * Grace period: 15s — if user doesn't reconnect within this time,
+   * send call:ended to the peer and clean up activeCalls.
    */
   socket.on('disconnect', () => {
     const targetUserId = activeCalls.get(socket.userId);
-    if (targetUserId) {
-      console.log(`📞 User ${socket.username} disconnected during active call with ${targetUserId}`);
+    if (!targetUserId) return;
+
+    console.log(`📞 User ${socket.username} disconnected during active call — starting ${DISCONNECT_GRACE_PERIOD / 1000}s grace period`);
+
+    // Start grace period timer
+    const timer = setTimeout(() => {
+      disconnectTimers.delete(socket.userId);
+
+      // Check if user reconnected (new socket would have re-registered in onlineUsers)
+      const newSocketId = onlineUsers.get(socket.userId);
+      if (newSocketId) {
+        console.log(`📞 User ${socket.username} reconnected — call preserved`);
+        return; // User reconnected, don't end the call
+      }
+
+      // User did NOT reconnect — end the call
+      console.log(`📞 User ${socket.username} did not reconnect within grace period — ending call`);
       activeCalls.delete(socket.userId);
       activeCalls.delete(targetUserId);
 
@@ -595,7 +632,9 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
           username: socket.username,
         });
       }
-    }
+    }, DISCONNECT_GRACE_PERIOD);
+
+    disconnectTimers.set(socket.userId, { timer, targetUserId });
   });
 };
 
