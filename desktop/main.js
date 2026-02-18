@@ -62,11 +62,6 @@ function createWindow() {
     icon: getIconPath(),
     frame: false,
     titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: '#0a0a0f',
-      symbolColor: '#ffffff',
-      height: 36,
-    },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -89,20 +84,6 @@ function createWindow() {
   // Inject native-app CSS after page loads
   mainWindow.webContents.on('did-finish-load', () => {
     mainWindow.webContents.insertCSS(`
-      /* Drag region — top area acts as native titlebar */
-      body::before {
-        content: '';
-        display: block;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 36px;
-        -webkit-app-region: drag;
-        z-index: 99999;
-        pointer-events: none;
-      }
-
       /* Interactive elements must not be draggable */
       header, nav, button, a, input, select, textarea, [role="button"], .no-drag {
         -webkit-app-region: no-drag;
