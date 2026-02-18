@@ -18,6 +18,13 @@
 
 const mongoose = require('mongoose');
 
+// ─── REACTION SUB-SCHEMA ────────────────────
+const reactionSchema = new mongoose.Schema({
+  emoji: { type: String, required: true },
+  users: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  count: { type: Number, default: 0 },
+}, { _id: false });
+
 const messageSchema = new mongoose.Schema({
   sender: {
     type: mongoose.Schema.Types.ObjectId,
@@ -37,6 +44,14 @@ const messageSchema = new mongoose.Schema({
     default: null,
     index: true,
   },
+  // ─── REPLY (THREAD) REFERENCE ─────────────
+  replyTo: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Message',
+    default: null,
+  },
+  // ─── REACTIONS ────────────────────────────
+  reactions: [reactionSchema],
   content: {
     type: String,
     default: '',
@@ -151,7 +166,12 @@ messageSchema.statics.getConversation = function (userId1, userId2, page = 1, li
     .skip(skip)
     .limit(limit)
     .populate('sender', 'username avatar')
-    .populate('receiver', 'username avatar');
+    .populate('receiver', 'username avatar')
+    .populate({
+      path: 'replyTo',
+      select: 'content sender type fileUrl fileName encrypted encryptionIV encryptionTag',
+      populate: { path: 'sender', select: 'username avatar' },
+    });
 };
 
 /**
@@ -163,7 +183,12 @@ messageSchema.statics.getGroupMessages = function (groupId, page = 1, limit = 50
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
-    .populate('sender', 'username avatar');
+    .populate('sender', 'username avatar')
+    .populate({
+      path: 'replyTo',
+      select: 'content sender type fileUrl fileName encrypted encryptionIV encryptionTag',
+      populate: { path: 'sender', select: 'username avatar' },
+    });
 };
 
 module.exports = mongoose.model('Message', messageSchema);

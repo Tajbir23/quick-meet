@@ -91,6 +91,12 @@ function decryptMessages(messages) {
     // Strip encryption metadata from response (plain object — no DB side effects)
     delete obj.encryptionIV;
     delete obj.encryptionTag;
+    // Decrypt replyTo content if present
+    if (obj.replyTo && obj.replyTo.encrypted && obj.replyTo.encryptionIV && obj.replyTo.encryptionTag) {
+      obj.replyTo.content = decryptContent(obj.replyTo);
+      delete obj.replyTo.encryptionIV;
+      delete obj.replyTo.encryptionTag;
+    }
     return obj;
   });
 }
@@ -114,7 +120,7 @@ function sanitizeText(text) {
  */
 const sendMessage = async (req, res) => {
   try {
-    const { receiverId, content, type, fileUrl, fileName, fileSize, fileMimeType } = req.body;
+    const { receiverId, content, type, fileUrl, fileName, fileSize, fileMimeType, replyTo } = req.body;
 
     if (!receiverId) {
       return res.status(400).json({ success: false, message: 'Receiver ID is required' });
@@ -146,11 +152,19 @@ const sendMessage = async (req, res) => {
       fileName,
       fileSize,
       fileMimeType,
+      replyTo: replyTo || null,
     });
 
     // Populate sender info for response
     await message.populate('sender', 'username avatar');
     await message.populate('receiver', 'username avatar');
+    if (replyTo) {
+      await message.populate({
+        path: 'replyTo',
+        select: 'content sender type fileUrl fileName encrypted encryptionIV encryptionTag',
+        populate: { path: 'sender', select: 'username avatar' },
+      });
+    }
 
     // Convert to plain object for response — NEVER mutate the Mongoose doc
     // (mutating would mark fields as modified; if .save() were ever called
@@ -159,6 +173,13 @@ const sendMessage = async (req, res) => {
     messageResponse.content = sanitized;
     delete messageResponse.encryptionIV;
     delete messageResponse.encryptionTag;
+
+    // Decrypt replyTo content if present
+    if (messageResponse.replyTo && messageResponse.replyTo.encrypted) {
+      messageResponse.replyTo.content = decryptContent(messageResponse.replyTo);
+      delete messageResponse.replyTo.encryptionIV;
+      delete messageResponse.replyTo.encryptionTag;
+    }
 
     res.status(201).json({
       success: true,
@@ -176,7 +197,7 @@ const sendMessage = async (req, res) => {
  */
 const sendGroupMessage = async (req, res) => {
   try {
-    const { groupId, content, type, fileUrl, fileName, fileSize, fileMimeType } = req.body;
+    const { groupId, content, type, fileUrl, fileName, fileSize, fileMimeType, replyTo } = req.body;
 
     if (!groupId) {
       return res.status(400).json({ success: false, message: 'Group ID is required' });
@@ -212,15 +233,30 @@ const sendGroupMessage = async (req, res) => {
       fileName,
       fileSize,
       fileMimeType,
+      replyTo: replyTo || null,
     });
 
     await message.populate('sender', 'username avatar');
+    if (replyTo) {
+      await message.populate({
+        path: 'replyTo',
+        select: 'content sender type fileUrl fileName encrypted encryptionIV encryptionTag',
+        populate: { path: 'sender', select: 'username avatar' },
+      });
+    }
 
     // Convert to plain object for response — NEVER mutate the Mongoose doc
     const messageResponse = message.toObject();
     messageResponse.content = sanitized;
     delete messageResponse.encryptionIV;
     delete messageResponse.encryptionTag;
+
+    // Decrypt replyTo content if present
+    if (messageResponse.replyTo && messageResponse.replyTo.encrypted) {
+      messageResponse.replyTo.content = decryptContent(messageResponse.replyTo);
+      delete messageResponse.replyTo.encryptionIV;
+      delete messageResponse.replyTo.encryptionTag;
+    }
 
     res.status(201).json({
       success: true,
@@ -1044,6 +1080,82 @@ const getPinnedMessages = async (req, res) => {
   }
 };
 
+// ══════════════════════════════════════════════
+// REACTIONS
+// ══════════════════════════════════════════════
+
+/**
+ * PUT /api/messages/:messageId/react
+ * Toggle a reaction on a message (add/remove)
+ */
+const toggleReaction = async (req, res) => {
+  try {
+    const { emoji } = req.body;
+    if (!emoji || typeof emoji !== 'string') {
+      return res.status(400).json({ success: false, message: 'Emoji is required' });
+    }
+
+    const message = await Message.findById(req.params.messageId);
+    if (!message) {
+      return res.status(404).json({ success: false, message: 'Message not found' });
+    }
+
+    // Verify user has access to this message (sender, receiver, or group member)
+    const userId = req.user._id;
+    const isSender = message.sender.toString() === userId.toString();
+    const isReceiver = message.receiver && message.receiver.toString() === userId.toString();
+    let isGroupMember = false;
+    if (message.group) {
+      const group = await Group.findById(message.group);
+      isGroupMember = group && group.isMember(userId);
+    }
+
+    if (!isSender && !isReceiver && !isGroupMember) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    let reaction = message.reactions.find(r => r.emoji === emoji);
+    let added = false;
+
+    if (reaction) {
+      const userIndex = reaction.users.findIndex(
+        u => u.toString() === userId.toString()
+      );
+      if (userIndex > -1) {
+        // Remove user's reaction
+        reaction.users.splice(userIndex, 1);
+        reaction.count -= 1;
+        if (reaction.count <= 0) {
+          message.reactions = message.reactions.filter(r => r.emoji !== emoji);
+        }
+      } else {
+        // Add user's reaction
+        reaction.users.push(userId);
+        reaction.count += 1;
+        added = true;
+      }
+    } else {
+      // New emoji reaction
+      message.reactions.push({
+        emoji,
+        users: [userId],
+        count: 1,
+      });
+      added = true;
+    }
+
+    await message.save();
+
+    res.json({
+      success: true,
+      data: { reactions: message.reactions, added },
+    });
+  } catch (error) {
+    securityLogger.log('WARN', 'SYSTEM', 'Toggle reaction error', { error: error.message });
+    res.status(500).json({ success: false, message: 'Server error toggling reaction' });
+  }
+};
+
 module.exports = {
   sendMessage,
   sendGroupMessage,
@@ -1058,4 +1170,5 @@ module.exports = {
   pinMessage,
   unpinMessage,
   getPinnedMessages,
+  toggleReaction,
 };

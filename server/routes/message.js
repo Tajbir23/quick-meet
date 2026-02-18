@@ -14,6 +14,7 @@ const {
   pinMessage,
   unpinMessage,
   getPinnedMessages,
+  toggleReaction,
 } = require('../controllers/messageController');
 const { protect } = require('../middleware/auth');
 const { apiLimiter, messageLimiter } = require('../middleware/rateLimiter');
@@ -31,6 +32,7 @@ router.get('/search', searchConversations);
 router.get('/pinned/:chatId', getPinnedMessages);
 router.put('/:messageId/pin', pinMessage);
 router.put('/:messageId/unpin', unpinMessage);
+router.put('/:messageId/react', toggleReaction);
 
 router.post('/bulk-delete', bulkDeleteMessages);
 router.delete('/:messageId', deleteMessage);

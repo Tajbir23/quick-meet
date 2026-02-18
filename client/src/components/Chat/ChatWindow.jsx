@@ -37,6 +37,8 @@ const ChatWindow = () => {
   const exitSelectMode = useChatStore(s => s.exitSelectMode);
   const bulkDeleteMessages = useChatStore(s => s.bulkDeleteMessages);
   const user = useAuthStore(s => s.user);
+  const toggleReaction = useChatStore(s => s.toggleReaction);
+  const setReplyTo = useChatStore(s => s.setReplyTo);
   const containerRef = useRef(null);
   const loadingMoreRef = useRef(false);
   const prevMsgCountRef = useRef(0);
@@ -97,6 +99,17 @@ const ChatWindow = () => {
     } catch {
       toast.error(message.isPinned ? 'Failed to unpin' : 'Failed to pin');
     }
+  };
+
+  // Reply handler
+  const handleReplyMessage = (message) => {
+    setReplyTo(message);
+  };
+
+  // Reaction handler
+  const handleReactMessage = (messageId, emoji) => {
+    if (!activeChat) return;
+    toggleReaction(activeChat.id, messageId, emoji, activeChat.type);
   };
 
   // Scroll to a specific message (used by PinnedMessages panel)
@@ -366,6 +379,8 @@ const ChatWindow = () => {
                 onViewProfile={handleViewProfile}
                 onPin={handlePinMessage}
                 onRetry={handleRetryMessage}
+                onReply={handleReplyMessage}
+                onReact={handleReactMessage}
                 selectMode={selectMode}
                 isSelected={!!selectedMessages[msg._id]}
                 onToggleSelect={() => toggleMessageSelection(msg._id)}

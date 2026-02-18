@@ -147,6 +147,11 @@ const useSocket = () => {
       useChatStore.getState().handleRemoteBulkDelete(chatId, messageIds);
     });
 
+    // ─── REACTION EVENT ───
+    socket.on('message:reacted', ({ messageId, reactions }) => {
+      useChatStore.getState().handleRemoteReaction(messageId, reactions);
+    });
+
     // ============================================
     // GROUP MEMBER EVENTS
     // ============================================

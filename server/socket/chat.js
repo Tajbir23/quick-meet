@@ -184,6 +184,33 @@ const setupChatHandlers = (io, socket, onlineUsers) => {
   }));
 
   /**
+   * Reaction broadcast — GUARDED
+   * Broadcasts a reaction update to the other user (1-to-1) or group
+   */
+  socket.on('message:react', guard.wrapHandler(socket, 'message:react', ({ messageId, reactions, chatId, chatType, emoji, added }) => {
+    if (!messageId || !chatId) return;
+    if (typeof messageId !== 'string' || messageId.length > 30) return;
+    if (typeof chatId !== 'string' || chatId.length > 30) return;
+
+    const reactionData = {
+      messageId,
+      reactions,
+      userId: socket.userId,
+      emoji,
+      added,
+    };
+
+    if (chatType === 'group') {
+      socket.to(`group:${chatId}`).emit('message:reacted', reactionData);
+    } else {
+      const receiverSocketId = onlineUsers.get(chatId);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit('message:reacted', reactionData);
+      }
+    }
+  }));
+
+  /**
    * Bulk delete broadcast — GUARDED
    * Notifies the other user (1-to-1) or group room about deleted messages
    */

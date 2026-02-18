@@ -1,16 +1,21 @@
 import { useState, useRef, useEffect, memo } from 'react';
-import { Download, FileText, Loader2, Phone, Video, PhoneMissed, PhoneOff, PhoneIncoming, PhoneOutgoing, Trash2, Forward, MoreVertical, User as UserIcon, Pin, PinOff, RotateCcw, CheckCircle2, Circle } from 'lucide-react';
+import { Download, FileText, Loader2, Phone, Video, PhoneMissed, PhoneOff, PhoneIncoming, PhoneOutgoing, Trash2, Forward, MoreVertical, User as UserIcon, Pin, PinOff, RotateCcw, CheckCircle2, Circle, Reply, SmilePlus } from 'lucide-react';
 import { getInitials, stringToColor, formatMessageTime, isImageFile, formatFileSize, formatDuration } from '../../utils/helpers';
 import { SERVER_URL } from '../../utils/constants';
 import ImagePreview from '../Common/ImagePreview';
 import MessageStatus from '../Common/MessageStatus';
 
-const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onViewProfile, onPin, onRetry, selectMode, isSelected, onToggleSelect, onEnterSelectMode }) => {
+// Quick reaction emoji palette
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥', '👏', '🎉'];
+
+const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onViewProfile, onPin, onRetry, onReply, onReact, selectMode, isSelected, onToggleSelect, onEnterSelectMode }) => {
   const [downloading, setDownloading] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const menuRef = useRef(null);
+  const emojiRef = useRef(null);
   const longPressTimer = useRef(null);
   const isSystem = message.type === 'system';
   const isCall = message.type === 'call';
@@ -95,15 +100,18 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
 
   // Close menu when clicking outside
   useEffect(() => {
-    if (!showMenu) return;
+    if (!showMenu && !showEmojiPicker) return;
     const handleClickOutside = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
+      if (showMenu && menuRef.current && !menuRef.current.contains(e.target)) {
         setShowMenu(false);
+      }
+      if (showEmojiPicker && emojiRef.current && !emojiRef.current.contains(e.target)) {
+        setShowEmojiPicker(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showMenu]);
+  }, [showMenu, showEmojiPicker]);
 
   // System message
   if (isSystem) {
@@ -280,6 +288,22 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
               </button>
               {showMenu && (
                 <div className={`absolute ${isMine ? 'right-0' : 'left-0'} top-7 bg-dark-700 border border-dark-600 rounded-xl shadow-xl py-1.5 min-w-[140px] z-50 animate-scale-in`}>
+                  {/* Reply */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowMenu(false); onReply && onReply(message); }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-dark-200 hover:bg-dark-600 transition-colors"
+                  >
+                    <Reply size={14} />
+                    Reply
+                  </button>
+                  {/* React */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowMenu(false); setShowEmojiPicker(true); }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-dark-200 hover:bg-dark-600 transition-colors"
+                  >
+                    <SmilePlus size={14} />
+                    React
+                  </button>
                   {/* Select */}
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowMenu(false); onEnterSelectMode && onEnterSelectMode(); }}
@@ -327,6 +351,35 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
                 </div>
               )}
             </div>
+            )}
+
+            {/* Emoji picker popup */}
+            {showEmojiPicker && (
+              <div ref={emojiRef} className={`absolute ${isMine ? 'right-0' : 'left-0'} -top-12 bg-dark-700 border border-dark-600 rounded-xl shadow-xl px-2 py-1.5 z-50 animate-scale-in`}>
+                <div className="flex gap-1">
+                  {QUICK_REACTIONS.map(emoji => (
+                    <button
+                      key={emoji}
+                      onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(false); onReact && onReact(message._id, emoji); }}
+                      className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-dark-600 transition-colors text-base"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Reply-to quoted message */}
+            {message.replyTo && (
+              <div className={`mb-2 px-2.5 py-1.5 rounded-lg border-l-2 ${isMine ? 'bg-primary-700/30 border-primary-400/60' : 'bg-dark-600/50 border-dark-400/60'}`}>
+                <p className={`text-[10px] font-semibold ${isMine ? 'text-primary-300' : 'text-dark-300'}`}>
+                  {typeof message.replyTo.sender === 'object' ? message.replyTo.sender.username : 'Unknown'}
+                </p>
+                <p className={`text-[11px] truncate ${isMine ? 'text-primary-200/70' : 'text-dark-400'}`}>
+                  {message.replyTo.type === 'image' ? '📷 Photo' : message.replyTo.type === 'file' ? `📎 ${message.replyTo.fileName || 'File'}` : (message.replyTo.content || 'Message')}
+                </p>
+              </div>
             )}
 
             {/* Image attachment */}
@@ -409,6 +462,43 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
                 </button>
               )}
             </div>
+
+            {/* Reaction display row */}
+            {message.reactions && message.reactions.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1.5 -mb-0.5">
+                {message.reactions.map((reaction) => {
+                  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+                  const iReacted = reaction.users?.includes(currentUser._id);
+                  return (
+                    <button
+                      key={reaction.emoji}
+                      onClick={(e) => { e.stopPropagation(); onReact && onReact(message._id, reaction.emoji); }}
+                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs transition-colors ${
+                        iReacted
+                          ? (isMine ? 'bg-primary-400/30 border border-primary-400/50' : 'bg-primary-500/20 border border-primary-500/40')
+                          : (isMine ? 'bg-white/10 border border-white/10 hover:bg-white/20' : 'bg-dark-600/60 border border-dark-500/30 hover:bg-dark-600')
+                      }`}
+                    >
+                      <span className="text-[13px]">{reaction.emoji}</span>
+                      {reaction.count > 1 && (
+                        <span className={`text-[10px] ${iReacted ? 'text-primary-300' : (isMine ? 'text-primary-200/70' : 'text-dark-400')}`}>
+                          {reaction.count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+                {/* Quick add reaction button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(true); }}
+                  className={`w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all ${
+                    isMine ? 'hover:bg-white/10' : 'hover:bg-dark-600'
+                  }`}
+                >
+                  <SmilePlus size={12} className={isMine ? 'text-primary-200/60' : 'text-dark-500'} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

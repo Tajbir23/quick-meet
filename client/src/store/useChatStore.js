@@ -38,6 +38,7 @@ const useChatStore = create((set, get) => ({
   showPinnedPanel: false,
   selectMode: false,       // Whether multi-select mode is active
   selectedMessages: {},    // { messageId: true } — set of selected message IDs
+  replyToMessage: null,    // Message being replied to — { _id, content, sender, type }
 
   // ============================================
   // USER MANAGEMENT
@@ -299,6 +300,7 @@ const useChatStore = create((set, get) => ({
     // Generate temporary ID for optimistic message
     const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const { replyToMessage } = get();
 
     // Optimistic message (pending state)
     const optimisticMsg = {
@@ -314,7 +316,14 @@ const useChatStore = create((set, get) => ({
       createdAt: new Date().toISOString(),
       status: 'pending',
       read: false,
+      replyTo: replyToMessage || null,
+      reactions: [],
     };
+
+    // Clear reply state
+    if (replyToMessage) {
+      set({ replyToMessage: null });
+    }
 
     // Insert optimistic message immediately
     set((state) => ({
@@ -331,6 +340,7 @@ const useChatStore = create((set, get) => ({
         const payload = {
           groupId: chatId,
           content,
+          ...(replyToMessage && { replyTo: replyToMessage._id }),
           ...(fileData && {
             type: fileData.type || 'file',
             fileUrl: fileData.url,
@@ -345,6 +355,7 @@ const useChatStore = create((set, get) => ({
         const payload = {
           receiverId: chatId,
           content,
+          ...(replyToMessage && { replyTo: replyToMessage._id }),
           ...(fileData && {
             type: fileData.type || 'file',
             fileUrl: fileData.url,
@@ -823,6 +834,114 @@ const useChatStore = create((set, get) => ({
         [chatId]: (state.pinnedMessages[chatId] || []).filter(m => m._id !== messageId),
       },
     }));
+  },
+
+  // ============================================
+  // REPLY TO MESSAGE
+  // ============================================
+
+  setReplyTo: (message) => set({ replyToMessage: message }),
+  clearReplyTo: () => set({ replyToMessage: null }),
+
+  // ============================================
+  // REACTIONS
+  // ============================================
+
+  /**
+   * Toggle reaction on a message (optimistic + API + socket broadcast)
+   */
+  toggleReaction: async (chatId, messageId, emoji, chatType = 'user') => {
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const userId = currentUser._id;
+
+    // Optimistic update
+    set((state) => {
+      const msgs = state.messages[chatId] || [];
+      return {
+        messages: {
+          ...state.messages,
+          [chatId]: msgs.map(m => {
+            if (m._id !== messageId) return m;
+            const reactions = [...(m.reactions || [])];
+            const idx = reactions.findIndex(r => r.emoji === emoji);
+            if (idx > -1) {
+              const reaction = { ...reactions[idx] };
+              const userIdx = reaction.users.indexOf(userId);
+              if (userIdx > -1) {
+                // Remove
+                reaction.users = reaction.users.filter(u => u !== userId);
+                reaction.count -= 1;
+                if (reaction.count <= 0) {
+                  reactions.splice(idx, 1);
+                } else {
+                  reactions[idx] = reaction;
+                }
+              } else {
+                // Add
+                reaction.users = [...reaction.users, userId];
+                reaction.count += 1;
+                reactions[idx] = reaction;
+              }
+            } else {
+              // New reaction
+              reactions.push({ emoji, users: [userId], count: 1 });
+            }
+            return { ...m, reactions };
+          }),
+        },
+      };
+    });
+
+    try {
+      const res = await api.put(`/messages/${messageId}/react`, { emoji });
+
+      // Broadcast via socket
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('message:react', {
+          messageId,
+          reactions: res.data.data.reactions,
+          chatId,
+          chatType,
+          emoji,
+          added: res.data.data.added,
+        });
+      }
+
+      // Sync server reactions (replaces optimistic)
+      set((state) => ({
+        messages: {
+          ...state.messages,
+          [chatId]: (state.messages[chatId] || []).map(m =>
+            m._id === messageId ? { ...m, reactions: res.data.data.reactions } : m
+          ),
+        },
+      }));
+    } catch (error) {
+      console.error('Toggle reaction failed:', error);
+      // Revert optimistic update (re-fetch)
+    }
+  },
+
+  /**
+   * Handle real-time reaction from other user
+   */
+  handleRemoteReaction: (messageId, reactions) => {
+    set((state) => {
+      // Find which chatId contains this message
+      const newMessages = { ...state.messages };
+      for (const chatId of Object.keys(newMessages)) {
+        const msgs = newMessages[chatId];
+        const idx = msgs?.findIndex(m => m._id === messageId);
+        if (idx > -1) {
+          newMessages[chatId] = msgs.map(m =>
+            m._id === messageId ? { ...m, reactions } : m
+          );
+          break;
+        }
+      }
+      return { messages: newMessages };
+    });
   },
 }));
 

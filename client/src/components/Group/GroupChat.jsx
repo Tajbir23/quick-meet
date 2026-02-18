@@ -16,9 +16,10 @@
 import { useState, useEffect } from 'react';
 import {
   Users, LogOut, UserPlus, Crown, Hash, X, Search,
-  Shield, UserMinus, ChevronDown, MoreVertical
+  Shield, UserMinus, ChevronDown, MoreVertical, Mic, MicOff, Headphones, PhoneOff, Volume2
 } from 'lucide-react';
 import useGroupStore from '../../store/useGroupStore';
+import useCallStore from '../../store/useCallStore';
 import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
 import { getInitials, stringToColor } from '../../utils/helpers';
@@ -142,9 +143,14 @@ const GroupChat = ({ groupId, onClose }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [showAddMember, setShowAddMember] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');
-  const { leaveGroup } = useGroupStore();
+  const { leaveGroup, activeGroupCalls } = useGroupStore();
   const { users, onlineUsers, clearActiveChat } = useChatStore();
   const { user } = useAuthStore();
+  const callStatus = useCallStore(s => s.callStatus);
+  const isGroupCall = useCallStore(s => s.isGroupCall);
+  const callGroupId = useCallStore(s => s.groupId);
+  const startGroupCall = useCallStore(s => s.startGroupCall);
+  const endCall = useCallStore(s => s.endCall);
 
   const fetchGroupData = async () => {
     try {
@@ -279,6 +285,72 @@ const GroupChat = ({ groupId, onClose }) => {
             <RoleBadge role={myRole} />
           </div>
         )}
+      </div>
+
+      {/* Voice Channel Section */}
+      <div className="border-b border-dark-700">
+        {(() => {
+          const voiceCall = activeGroupCalls[groupId];
+          const voiceParticipants = voiceCall?.participants || [];
+          const isInThisVoice = isGroupCall && callGroupId === groupId && callStatus !== 'idle';
+          const hasActiveVoice = voiceParticipants.length > 0 || isInThisVoice;
+
+          return (
+            <div className="px-3 py-2.5">
+              {/* Voice channel header */}
+              <div className="flex items-center gap-2 mb-2">
+                <Volume2 size={14} className={`${hasActiveVoice ? 'text-green-400' : 'text-dark-500'}`} />
+                <span className="text-xs font-semibold text-dark-300 uppercase tracking-wide">Voice Channel</span>
+                {hasActiveVoice && (
+                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                )}
+              </div>
+
+              {/* Active voice participants */}
+              {hasActiveVoice && voiceParticipants.length > 0 && (
+                <div className="space-y-1.5 mb-2.5">
+                  {voiceParticipants.map(p => (
+                    <div key={p.userId} className="flex items-center gap-2 px-2 py-1 rounded-lg bg-dark-700/40">
+                      <div
+                        className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+                        style={{ backgroundColor: stringToColor(p.username) }}
+                      >
+                        {getInitials(p.username)}
+                      </div>
+                      <span className="text-xs text-dark-200 flex-1 truncate">{p.username}</span>
+                      <Mic size={11} className="text-green-400 flex-shrink-0" />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* No one in voice */}
+              {!hasActiveVoice && (
+                <p className="text-[11px] text-dark-500 mb-2 pl-1">No one in voice</p>
+              )}
+
+              {/* Join / Leave button */}
+              {isInThisVoice ? (
+                <button
+                  onClick={() => endCall()}
+                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-red-600/20 border border-red-500/30 text-red-400 text-xs font-medium hover:bg-red-600/30 transition-colors"
+                >
+                  <PhoneOff size={14} />
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  onClick={() => startGroupCall(groupId, 'audio')}
+                  disabled={callStatus !== 'idle'}
+                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-green-600/20 border border-green-500/30 text-green-400 text-xs font-medium hover:bg-green-600/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Headphones size={14} />
+                  {hasActiveVoice ? 'Join Voice' : 'Start Voice'}
+                </button>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Members list */}

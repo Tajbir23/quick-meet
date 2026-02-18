@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Send, Paperclip, X } from 'lucide-react';
+import { Send, Paperclip, X, Reply } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import FileUpload from '../Common/FileUpload';
 import P2PFileSend from '../FileTransfer/P2PFileSend';
@@ -11,6 +11,8 @@ const MessageInput = () => {
   const activeChat = useChatStore(s => s.activeChat);
   const sendMessage = useChatStore(s => s.sendMessage);
   const emitTyping = useChatStore(s => s.emitTyping);
+  const replyToMessage = useChatStore(s => s.replyToMessage);
+  const clearReplyTo = useChatStore(s => s.clearReplyTo);
   const typingTimeoutRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -21,6 +23,13 @@ const MessageInput = () => {
       inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 120) + 'px';
     }
   }, [content]);
+
+  // Focus input when reply is set
+  useEffect(() => {
+    if (replyToMessage) {
+      inputRef.current?.focus();
+    }
+  }, [replyToMessage]);
 
   const handleTyping = useCallback(() => {
     if (!activeChat) return;
@@ -84,6 +93,27 @@ const MessageInput = () => {
 
   return (
     <div className="border-t border-dark-700 bg-dark-800 p-2.5 md:p-4 safe-bottom">
+      {/* Reply-to preview bar */}
+      {replyToMessage && (
+        <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-dark-700 rounded-xl animate-slide-down">
+          <Reply size={14} className="text-primary-400 flex-shrink-0" />
+          <div className="flex-1 min-w-0 border-l-2 border-primary-500 pl-2">
+            <p className="text-[11px] font-semibold text-primary-400">
+              {typeof replyToMessage.sender === 'object' ? replyToMessage.sender.username : 'Unknown'}
+            </p>
+            <p className="text-[12px] text-dark-300 truncate">
+              {replyToMessage.type === 'image' ? '📷 Photo' : replyToMessage.type === 'file' ? `📎 ${replyToMessage.fileName || 'File'}` : (replyToMessage.content || 'Message')}
+            </p>
+          </div>
+          <button
+            onClick={clearReplyTo}
+            className="text-dark-400 hover:text-white p-1 rounded-full hover:bg-dark-600 flex-shrink-0"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* File upload area */}
       {showFileUpload && (
         <div className="mb-2.5 p-3 bg-dark-700 rounded-xl relative animate-slide-down">
