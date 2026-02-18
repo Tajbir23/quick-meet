@@ -29,6 +29,7 @@ const useChatStore = create((set, get) => ({
   usersLastFetched: 0, // Timestamp of last users fetch (for cache TTL)
   conversations: {},   // { chatId: { content, type, createdAt, senderId, senderUsername } } — last message per conversation
   isLoadingMessages: false,
+  isLoadingMore: false,
   pinnedMessages: {},  // { chatId: [pinnedMessage, ...] }
   showPinnedPanel: false,
 
@@ -207,7 +208,11 @@ const useChatStore = create((set, get) => ({
    * Fetch conversation messages from server
    */
   fetchMessages: async (chatId, chatType = 'user', page = 1) => {
-    set({ isLoadingMessages: true });
+    if (page === 1) {
+      set({ isLoadingMessages: true });
+    } else {
+      set({ isLoadingMore: true });
+    }
 
     try {
       const endpoint = chatType === 'group'
@@ -222,15 +227,16 @@ const useChatStore = create((set, get) => ({
           ...state.messages,
           [chatId]: page === 1
             ? fetchedMessages
-            : [...(state.messages[chatId] || []), ...fetchedMessages],
+            : [...fetchedMessages, ...(state.messages[chatId] || [])],
         },
         isLoadingMessages: false,
+        isLoadingMore: false,
       }));
 
       return res.data.data.pagination;
     } catch (error) {
       console.error('Failed to fetch messages:', error);
-      set({ isLoadingMessages: false });
+      set({ isLoadingMessages: false, isLoadingMore: false });
       return null;
     }
   },

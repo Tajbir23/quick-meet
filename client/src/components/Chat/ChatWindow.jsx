@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
 import MessageBubble from './MessageBubble';
@@ -9,7 +9,7 @@ import GroupChat from '../Group/GroupChat';
 import ForwardMessageModal from '../Common/ForwardMessageModal';
 import UserProfileModal from '../Common/UserProfileModal';
 import { formatDateSeparator, shouldShowDateSeparator, formatMessageTime } from '../../utils/helpers';
-import { ChevronDown, Pin, X, ChevronUp } from 'lucide-react';
+import { ChevronDown, Pin, X, ChevronUp, Loader2 } from 'lucide-react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 
@@ -21,6 +21,7 @@ const ChatWindow = () => {
   const messages = useChatStore(s => s.messages);
   const fetchMessages = useChatStore(s => s.fetchMessages);
   const isLoadingMessages = useChatStore(s => s.isLoadingMessages);
+  const isLoadingMore = useChatStore(s => s.isLoadingMore);
   const typingUsers = useChatStore(s => s.typingUsers);
   const markAsRead = useChatStore(s => s.markAsRead);
   const showPinnedPanel = useChatStore(s => s.showPinnedPanel);
@@ -30,6 +31,8 @@ const ChatWindow = () => {
   const unpinMessage = useChatStore(s => s.unpinMessage);
   const user = useAuthStore(s => s.user);
   const containerRef = useRef(null);
+  const loadingMoreRef = useRef(false);
+  const prevMsgCountRef = useRef(0);
   const [pagination, setPagination] = useState(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
@@ -115,12 +118,26 @@ const ChatWindow = () => {
     }
   }, [activeChat?.id]);
 
-  // Auto scroll to bottom on new messages
+  // Auto scroll to bottom only for NEW messages (not when loading older pages)
   useEffect(() => {
     const el = containerRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
+    const currentMsgs = messages[activeChat?.id] || [];
+    const prevCount = prevMsgCountRef.current;
+
+    if (el && currentMsgs.length > 0) {
+      if (loadingMoreRef.current) {
+        // Older messages were prepended — preserve scroll position
+        const newScrollHeight = el.scrollHeight;
+        const addedHeight = newScrollHeight - (el._prevScrollHeight || 0);
+        el.scrollTop = addedHeight;
+        loadingMoreRef.current = false;
+      } else {
+        // New message arrived or first load — scroll to bottom
+        el.scrollTop = el.scrollHeight;
+      }
     }
+
+    prevMsgCountRef.current = currentMsgs.length;
   }, [messages[activeChat?.id]?.length]);
 
   if (!activeChat) return null;
@@ -159,8 +176,8 @@ const ChatWindow = () => {
     return 'Pinned message';
   };
 
-  // Load more messages (scroll to top)
-  const handleScroll = () => {
+  // Load more messages (scroll to top) with loading guard & scroll preservation
+  const handleScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
 
@@ -168,12 +185,22 @@ const ChatWindow = () => {
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     setShowScrollBtn(distanceFromBottom > 200);
 
-    if (el.scrollTop === 0 && pagination && pagination.page < pagination.pages) {
+    // Trigger load when scrolled near top (within 50px)
+    if (
+      el.scrollTop < 50 &&
+      pagination &&
+      pagination.page < pagination.pages &&
+      !loadingMoreRef.current
+    ) {
+      loadingMoreRef.current = true;
+      el._prevScrollHeight = el.scrollHeight;
       fetchMessages(activeChat.id, activeChat.type, pagination.page + 1).then(pag => {
         setPagination(pag);
+      }).catch(() => {
+        loadingMoreRef.current = false;
       });
     }
-  };
+  }, [pagination, activeChat?.id, activeChat?.type, fetchMessages]);
 
   const scrollToBottom = () => {
     const el = containerRef.current;
@@ -248,6 +275,21 @@ const ChatWindow = () => {
         className="flex-1 overflow-y-auto px-3 md:px-4 py-3 md:py-4 space-y-1 overscroll-contain min-h-0"
         onScroll={handleScroll}
       >
+        {/* Loading older messages spinner at top */}
+        {isLoadingMore && (
+          <div className="flex items-center justify-center py-3">
+            <Loader2 size={20} className="animate-spin text-primary-500" />
+            <span className="text-dark-500 text-xs ml-2">Loading older messages...</span>
+          </div>
+        )}
+
+        {/* Has more pages indicator */}
+        {!isLoadingMore && pagination && pagination.page < pagination.pages && chatMessages.length > 0 && (
+          <div className="flex items-center justify-center py-2">
+            <span className="text-dark-600 text-[10px]">Scroll up for more</span>
+          </div>
+        )}
+
         {isLoadingMessages && chatMessages.length === 0 && (
           <div className="flex items-center justify-center py-12">
             <div className="flex flex-col items-center gap-3">
