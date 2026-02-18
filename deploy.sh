@@ -107,6 +107,31 @@ else
   echo "  ℹ️  No APK found in latest release (GitHub Actions may not have built yet)"
 fi
 
+# ─── 6b. Download latest EXE from GitHub Releases (if available) ──
+echo ""
+echo "🖥️  Checking for latest EXE from GitHub Releases..."
+LATEST_EXE_URL=$(curl -s https://api.github.com/repos/Tajbir23/quick-meet/releases/latest | node -e "
+const chunks = [];
+process.stdin.on('data', d => chunks.push(d));
+process.stdin.on('end', () => {
+  try {
+    const data = JSON.parse(Buffer.concat(chunks).toString());
+    const exe = (data.assets || []).find(a => a.name.endsWith('.exe'));
+    if (exe) console.log(exe.browser_download_url);
+    else console.log('');
+  } catch(e) { console.log(''); }
+});
+" 2>/dev/null || echo "")
+
+if [ -n "$LATEST_EXE_URL" ]; then
+  echo "  ⬇️  Downloading EXE: $LATEST_EXE_URL"
+  curl -L -o server/updates/builds/quick-meet-setup.exe "$LATEST_EXE_URL" 2>/dev/null && \
+    echo "  ✅ EXE downloaded to server/updates/builds/quick-meet-setup.exe" || \
+    echo "  ⚠️  EXE download failed (continuing anyway)"
+else
+  echo "  ℹ️  No EXE found in latest release (GitHub Actions may not have built yet)"
+fi
+
 # ─── 7. Restart PM2 ──────────────────────────
 echo ""
 echo "♻️  Restarting PM2..."

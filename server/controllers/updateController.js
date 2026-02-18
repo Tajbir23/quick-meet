@@ -263,10 +263,14 @@ const downloadBuild = (req, res) => {
       }
     }
 
-    // Fallback: redirect to GitHub Releases
+    // Fallback: redirect to GitHub Releases latest asset
     const versions = getVersions();
-    const downloadUrl = versions[platform]?.downloadUrl || 'https://github.com/Tajbir23/quick-meet/releases/latest';
-    return res.redirect(302, downloadUrl);
+    const ver = versions[platform]?.version || 'latest';
+    const ext = platform === 'desktop' ? 'setup.exe' : 'release.apk';
+    const githubUrl = ver === 'latest'
+      ? 'https://github.com/Tajbir23/quick-meet/releases/latest'
+      : `https://github.com/Tajbir23/quick-meet/releases/download/v${ver}/quick-meet-v${ver}-${ext}`;
+    return res.redirect(302, githubUrl);
   } catch (error) {
     console.error('Download build error:', error);
     return res.status(500).json({ success: false, message: 'Download failed' });
