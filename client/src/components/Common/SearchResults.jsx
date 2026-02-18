@@ -3,15 +3,16 @@
  * SearchResults — Unified search across conversations & users
  * ============================================
  * 
- * When the user types in the search bar, this component replaces
- * the tab content and shows results in two sections:
- * 1. Conversations — users the current user has chatted with
- * 2. Users — all other users (no conversation yet)
+ * Searches:
+ * 1. Message content across all conversations (server-side API)
+ * 2. User names, group names, channel names (client-side)
  * 
- * Also searches groups and channels.
+ * Server-side search decrypts messages and matches the query,
+ * returning matching conversations with message snippets.
  */
 
-import { MessageCircle, Users, Hash, Radio, Shield, Search } from 'lucide-react';
+import { useEffect, useRef, useCallback } from 'react';
+import { MessageCircle, Users, Hash, Radio, Shield, Search, Loader2 } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
 import useGroupStore from '../../store/useGroupStore';
@@ -28,24 +29,58 @@ const SearchResults = ({ searchQuery, onSelect }) => {
   const isUserOnline = useChatStore(s => s.isUserOnline);
   const userLastSeen = useChatStore(s => s.userLastSeen);
   const setActiveChat = useChatStore(s => s.setActiveChat);
+  const searchResults = useChatStore(s => s.searchResults);
+  const isSearching = useChatStore(s => s.isSearching);
+  const searchMessages = useChatStore(s => s.searchMessages);
+  const clearSearchResults = useChatStore(s => s.clearSearchResults);
   const currentUser = useAuthStore(s => s.user);
   const { myGroups } = useGroupStore();
   const { myChannels } = useChannelStore();
 
-  const q = searchQuery.toLowerCase().trim();
+  // Debounced server-side search
+  const debounceRef = useRef(null);
+  const lastQueryRef = useRef('');
+
+  const debouncedSearch = useCallback((query) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!query || query.trim().length < 1) {
+      clearSearchResults();
+      return;
+    }
+    debounceRef.current = setTimeout(() => {
+      searchMessages(query.trim());
+    }, 400);
+  }, [searchMessages, clearSearchResults]);
+
+  useEffect(() => {
+    if (searchQuery !== lastQueryRef.current) {
+      lastQueryRef.current = searchQuery;
+      debouncedSearch(searchQuery);
+    }
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [searchQuery, debouncedSearch]);
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      clearSearchResults();
+    };
+  }, [clearSearchResults]);
+
+  const q = searchQuery?.toLowerCase().trim();
   if (!q) return null;
 
-  // ---- Filter users with conversations (conversations section) ----
-  // Match by username OR by last message content
+  // ── LOCAL FILTERS (name-based) ──────────────────────────
+
+  // Users with conversations — match by username
   const conversationUsers = users.filter(u => {
     if (u._id === currentUser?._id) return false;
-    if (!conversations[u._id]) return false; // must have a conversation
-    const nameMatch = u.username.toLowerCase().includes(q);
-    const contentMatch = conversations[u._id]?.content?.toLowerCase().includes(q);
-    return nameMatch || contentMatch;
+    if (!conversations[u._id]) return false;
+    return u.username.toLowerCase().includes(q);
   });
 
-  // Sort by last message time
   const sortedConversations = [...conversationUsers].sort((a, b) => {
     const aConv = conversations[a._id];
     const bConv = conversations[b._id];
@@ -57,14 +92,13 @@ const SearchResults = ({ searchQuery, onSelect }) => {
     return 0;
   });
 
-  // ---- Filter users without conversations (users section) ----
+  // Users without conversations — match by username
   const nonConversationUsers = users.filter(u => {
     if (u._id === currentUser?._id) return false;
-    if (conversations[u._id]) return false; // exclude those with conversations
+    if (conversations[u._id]) return false;
     return u.username.toLowerCase().includes(q);
   });
 
-  // Sort: online first, then alphabetical
   const sortedUsers = [...nonConversationUsers].sort((a, b) => {
     const aOnline = isUserOnline(a._id);
     const bOnline = isUserOnline(b._id);
@@ -73,54 +107,70 @@ const SearchResults = ({ searchQuery, onSelect }) => {
     return a.username.localeCompare(b.username);
   });
 
-  // ---- Filter groups (by name, description, or last message) ----
-  const filteredGroups = (myGroups || []).filter(g => {
-    const nameMatch = g.name.toLowerCase().includes(q);
-    const descMatch = g.description?.toLowerCase().includes(q);
-    const convMatch = groupConversations[g._id]?.content?.toLowerCase().includes(q);
-    return nameMatch || descMatch || convMatch;
-  });
+  // Groups — match by name
+  const filteredGroups = (myGroups || []).filter(g => g.name.toLowerCase().includes(q));
 
-  // ---- Filter channels (by name, description, or last post) ----
-  const filteredChannels = (myChannels || []).filter(ch => {
-    const nameMatch = ch.name.toLowerCase().includes(q);
-    const descMatch = ch.description?.toLowerCase().includes(q);
-    const convMatch = channelConversations[ch._id]?.content?.toLowerCase().includes(q);
-    return nameMatch || descMatch || convMatch;
-  });
+  // Channels — match by name
+  const filteredChannels = (myChannels || []).filter(ch => ch.name.toLowerCase().includes(q));
 
-  const handleSelectUser = (user) => {
-    setActiveChat({
-      id: user._id,
-      type: 'user',
-      name: user.username,
-      avatar: user.avatar,
-      role: user.role,
-    });
+  // ── SERVER RESULTS (message content search) ─────────────
+  const nameMatchUserIds = new Set(sortedConversations.map(u => u._id));
+  const nameMatchGroupIds = new Set(filteredGroups.map(g => g._id));
+  const nameMatchChannelIds = new Set(filteredChannels.map(ch => ch._id));
+
+  // API results not already covered by name matches
+  const apiConvResults = (searchResults?.conversations || []).filter(
+    c => !nameMatchUserIds.has(c.userId)
+  );
+  const apiGroupResults = (searchResults?.groups || []).filter(
+    g => !nameMatchGroupIds.has(g.groupId)
+  );
+  const apiChannelResults = (searchResults?.channels || []).filter(
+    ch => !nameMatchChannelIds.has(ch.channelId)
+  );
+
+  // Maps for message snippets on name-matched items
+  const apiConvMap = {};
+  (searchResults?.conversations || []).forEach(c => { apiConvMap[c.userId] = c; });
+  const apiGroupMap = {};
+  (searchResults?.groups || []).forEach(g => { apiGroupMap[g.groupId] = g; });
+  const apiChannelMap = {};
+  (searchResults?.channels || []).forEach(ch => { apiChannelMap[ch.channelId] = ch; });
+
+  const handleSelectUser = (userId, username, avatar, role) => {
+    setActiveChat({ id: userId, type: 'user', name: username, avatar, role });
     onSelect?.();
   };
 
   const handleSelectGroup = (group) => {
-    setActiveChat({
-      id: group._id,
-      type: 'group',
-      name: group.name,
-    });
+    setActiveChat({ id: group._id || group.groupId, type: 'group', name: group.name });
     onSelect?.();
   };
 
   const handleSelectChannel = (channel) => {
-    setActiveChat({
-      id: channel._id,
-      type: 'channel',
-      name: channel.name,
-    });
+    setActiveChat({ id: channel._id || channel.channelId, type: 'channel', name: channel.name });
     onSelect?.();
   };
 
-  const totalResults = sortedConversations.length + sortedUsers.length + filteredGroups.length + filteredChannels.length;
+  const totalLocal = sortedConversations.length + sortedUsers.length + filteredGroups.length + filteredChannels.length;
+  const totalApi = apiConvResults.length + apiGroupResults.length + apiChannelResults.length;
+  const totalResults = totalLocal + totalApi;
 
-  if (totalResults === 0) {
+  // Highlight matching text
+  const highlightMatch = (text, query) => {
+    if (!text || !query) return text;
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return text;
+    return (
+      <>
+        {text.slice(0, idx)}
+        <span className="bg-primary-500/30 text-primary-300 rounded-sm px-0.5">{text.slice(idx, idx + query.length)}</span>
+        {text.slice(idx + query.length)}
+      </>
+    );
+  };
+
+  if (!isSearching && totalResults === 0) {
     return (
       <div className="p-8 text-center">
         <Search size={32} className="mx-auto text-dark-600 mb-3" />
@@ -132,7 +182,7 @@ const SearchResults = ({ searchQuery, onSelect }) => {
 
   return (
     <div className="py-1">
-      {/* ---- Conversations Section ---- */}
+      {/* ── Conversations (name match) ── */}
       {sortedConversations.length > 0 && (
         <>
           <div className="px-4 py-2 flex items-center gap-2">
@@ -146,33 +196,24 @@ const SearchResults = ({ searchQuery, onSelect }) => {
             const unreadCount = unread[user._id] || 0;
             const hasUnread = unreadCount > 0;
             const conv = conversations[user._id];
+            const apiMatch = apiConvMap[user._id];
 
             return (
               <button
-                key={user._id}
-                onClick={() => handleSelectUser(user)}
+                key={`conv-${user._id}`}
+                onClick={() => handleSelectUser(user._id, user.username, user.avatar, user.role)}
                 className={`sidebar-item w-full text-left ${hasUnread ? 'bg-dark-750/50' : ''}`}
               >
-                {/* Avatar */}
                 <div className="relative flex-shrink-0">
                   {user.avatar ? (
-                    <img
-                      src={`${SERVER_URL}${user.avatar}`}
-                      alt={user.username}
-                      className="w-10 h-10 rounded-full object-cover"
-                    />
+                    <img src={`${SERVER_URL}${user.avatar}`} alt={user.username} className="w-10 h-10 rounded-full object-cover" />
                   ) : (
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white"
-                      style={{ backgroundColor: stringToColor(user.username) }}
-                    >
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: stringToColor(user.username) }}>
                       {getInitials(user.username)}
                     </div>
                   )}
                   <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-dark-800 ${online ? 'bg-emerald-400' : 'bg-dark-500'}`} />
                 </div>
-
-                {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 min-w-0">
@@ -187,19 +228,26 @@ const SearchResults = ({ searchQuery, onSelect }) => {
                       {conv?.createdAt ? formatTime(conv.createdAt) : ''}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-2 mt-0.5">
-                    <p className={`text-xs truncate ${hasUnread ? 'text-dark-200 font-medium' : 'text-dark-400'}`}>
-                      {conv?.content
-                        ? (conv.senderId === currentUser?._id ? `You: ${conv.content}` : conv.content)
-                        : online ? <span className="text-emerald-400">Online</span> : 'Tap to chat'
-                      }
+                  {apiMatch?.messages?.[0] ? (
+                    <p className="text-xs text-dark-400 truncate mt-0.5">
+                      <span className="text-dark-500">{apiMatch.messages[0].senderUsername}: </span>
+                      {highlightMatch(apiMatch.messages[0].content, q)}
                     </p>
-                    {hasUnread && (
-                      <span className="min-w-[20px] h-5 px-1.5 bg-primary-500 text-white text-[11px] font-bold rounded-full flex items-center justify-center flex-shrink-0">
-                        {unreadCount > 99 ? '99+' : unreadCount}
-                      </span>
-                    )}
-                  </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <p className={`text-xs truncate ${hasUnread ? 'text-dark-200 font-medium' : 'text-dark-400'}`}>
+                        {conv?.content
+                          ? (conv.senderId === currentUser?._id ? `You: ${conv.content}` : conv.content)
+                          : online ? <span className="text-emerald-400">Online</span> : 'Tap to chat'
+                        }
+                      </p>
+                      {hasUnread && (
+                        <span className="min-w-[20px] h-5 px-1.5 bg-primary-500 text-white text-[11px] font-bold rounded-full flex items-center justify-center flex-shrink-0">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </button>
             );
@@ -207,7 +255,59 @@ const SearchResults = ({ searchQuery, onSelect }) => {
         </>
       )}
 
-      {/* ---- Groups Section ---- */}
+      {/* ── Message search results: Conversations (not in name match) ── */}
+      {apiConvResults.length > 0 && (
+        <>
+          <div className="px-4 py-2 flex items-center gap-2 mt-1">
+            <Search size={14} className="text-yellow-400" />
+            <span className="text-xs text-dark-400 font-semibold uppercase tracking-wider">
+              Messages ({apiConvResults.length})
+            </span>
+          </div>
+          {apiConvResults.map(conv => {
+            const online = isUserOnline(conv.userId);
+            const unreadCount = unread[conv.userId] || 0;
+            const hasUnread = unreadCount > 0;
+
+            return (
+              <button
+                key={`api-conv-${conv.userId}`}
+                onClick={() => handleSelectUser(conv.userId, conv.username, conv.avatar, conv.role)}
+                className={`sidebar-item w-full text-left ${hasUnread ? 'bg-dark-750/50' : ''}`}
+              >
+                <div className="relative flex-shrink-0">
+                  {conv.avatar ? (
+                    <img src={`${SERVER_URL}${conv.avatar}`} alt={conv.username} className="w-10 h-10 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: stringToColor(conv.username) }}>
+                      {getInitials(conv.username)}
+                    </div>
+                  )}
+                  <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-dark-800 ${online ? 'bg-emerald-400' : 'bg-dark-500'}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-white truncate">{conv.username}</p>
+                    {conv.messages?.[0]?.createdAt && (
+                      <span className="text-[11px] text-dark-500 flex-shrink-0">
+                        {formatTime(conv.messages[0].createdAt)}
+                      </span>
+                    )}
+                  </div>
+                  {conv.messages?.map((msg, i) => (
+                    <p key={msg._id || i} className="text-xs text-dark-400 truncate mt-0.5">
+                      <span className="text-dark-500">{msg.senderUsername}: </span>
+                      {highlightMatch(msg.content, q)}
+                    </p>
+                  ))}
+                </div>
+              </button>
+            );
+          })}
+        </>
+      )}
+
+      {/* ── Groups (name match) ── */}
       {filteredGroups.length > 0 && (
         <>
           <div className="px-4 py-2 flex items-center gap-2 mt-1">
@@ -220,18 +320,16 @@ const SearchResults = ({ searchQuery, onSelect }) => {
             const gConv = groupConversations[group._id];
             const unreadCount = unread[group._id] || 0;
             const hasUnread = unreadCount > 0;
+            const apiMatch = apiGroupMap[group._id];
 
             return (
               <button
-                key={group._id}
+                key={`group-${group._id}`}
                 onClick={() => handleSelectGroup(group)}
                 className={`sidebar-item w-full text-left ${hasUnread ? 'bg-dark-750/50' : ''}`}
               >
                 <div className="relative flex-shrink-0">
-                  <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white"
-                    style={{ backgroundColor: stringToColor(group.name) }}
-                  >
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: stringToColor(group.name) }}>
                     {getInitials(group.name)}
                   </div>
                 </div>
@@ -244,19 +342,26 @@ const SearchResults = ({ searchQuery, onSelect }) => {
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center justify-between gap-2 mt-0.5">
-                    <p className={`text-xs truncate ${hasUnread ? 'text-dark-200 font-medium' : 'text-dark-400'}`}>
-                      {gConv?.content
-                        ? (gConv.senderUsername ? `${gConv.senderUsername}: ${gConv.content}` : gConv.content)
-                        : `${group.members?.length || 0} members`
-                      }
+                  {apiMatch?.messages?.[0] ? (
+                    <p className="text-xs text-dark-400 truncate mt-0.5">
+                      <span className="text-dark-500">{apiMatch.messages[0].senderUsername}: </span>
+                      {highlightMatch(apiMatch.messages[0].content, q)}
                     </p>
-                    {hasUnread && (
-                      <span className="min-w-[20px] h-5 px-1.5 bg-primary-500 text-white text-[11px] font-bold rounded-full flex items-center justify-center flex-shrink-0">
-                        {unreadCount > 99 ? '99+' : unreadCount}
-                      </span>
-                    )}
-                  </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <p className={`text-xs truncate ${hasUnread ? 'text-dark-200 font-medium' : 'text-dark-400'}`}>
+                        {gConv?.content
+                          ? (gConv.senderUsername ? `${gConv.senderUsername}: ${gConv.content}` : gConv.content)
+                          : `${group.members?.length || 0} members`
+                        }
+                      </p>
+                      {hasUnread && (
+                        <span className="min-w-[20px] h-5 px-1.5 bg-primary-500 text-white text-[11px] font-bold rounded-full flex items-center justify-center flex-shrink-0">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </button>
             );
@@ -264,7 +369,48 @@ const SearchResults = ({ searchQuery, onSelect }) => {
         </>
       )}
 
-      {/* ---- Channels Section ---- */}
+      {/* ── Message search results: Groups (not in name match) ── */}
+      {apiGroupResults.length > 0 && (
+        <>
+          <div className="px-4 py-2 flex items-center gap-2 mt-1">
+            <Search size={14} className="text-yellow-400" />
+            <span className="text-xs text-dark-400 font-semibold uppercase tracking-wider">
+              Group Messages ({apiGroupResults.length})
+            </span>
+          </div>
+          {apiGroupResults.map(group => (
+            <button
+              key={`api-group-${group.groupId}`}
+              onClick={() => handleSelectGroup(group)}
+              className="sidebar-item w-full text-left"
+            >
+              <div className="relative flex-shrink-0">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: stringToColor(group.name) }}>
+                  {getInitials(group.name)}
+                </div>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-white truncate">{group.name}</p>
+                  {group.messages?.[0]?.createdAt && (
+                    <span className="text-[11px] text-dark-500 flex-shrink-0">
+                      {formatTime(group.messages[0].createdAt)}
+                    </span>
+                  )}
+                </div>
+                {group.messages?.map((msg, i) => (
+                  <p key={msg._id || i} className="text-xs text-dark-400 truncate mt-0.5">
+                    <span className="text-dark-500">{msg.senderUsername}: </span>
+                    {highlightMatch(msg.content, q)}
+                  </p>
+                ))}
+              </div>
+            </button>
+          ))}
+        </>
+      )}
+
+      {/* ── Channels (name match) ── */}
       {filteredChannels.length > 0 && (
         <>
           <div className="px-4 py-2 flex items-center gap-2 mt-1">
@@ -275,10 +421,11 @@ const SearchResults = ({ searchQuery, onSelect }) => {
           </div>
           {filteredChannels.map(channel => {
             const chConv = channelConversations[channel._id];
+            const apiMatch = apiChannelMap[channel._id];
 
             return (
               <button
-                key={channel._id}
+                key={`channel-${channel._id}`}
                 onClick={() => handleSelectChannel(channel)}
                 className="sidebar-item w-full text-left"
               >
@@ -296,12 +443,19 @@ const SearchResults = ({ searchQuery, onSelect }) => {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-dark-400 truncate mt-0.5">
-                    {chConv?.content
-                      ? (chConv.senderUsername ? `${chConv.senderUsername}: ${chConv.content}` : chConv.content)
-                      : `${channel.subscriberCount || channel.subscribers?.length || 0} subscribers`
-                    }
-                  </p>
+                  {apiMatch?.messages?.[0] ? (
+                    <p className="text-xs text-dark-400 truncate mt-0.5">
+                      <span className="text-dark-500">{apiMatch.messages[0].senderUsername}: </span>
+                      {highlightMatch(apiMatch.messages[0].content, q)}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-dark-400 truncate mt-0.5">
+                      {chConv?.content
+                        ? (chConv.senderUsername ? `${chConv.senderUsername}: ${chConv.content}` : chConv.content)
+                        : `${channel.subscriberCount || channel.subscribers?.length || 0} subscribers`
+                      }
+                    </p>
+                  )}
                 </div>
               </button>
             );
@@ -309,7 +463,48 @@ const SearchResults = ({ searchQuery, onSelect }) => {
         </>
       )}
 
-      {/* ---- Users Section (no conversation yet) ---- */}
+      {/* ── Message search results: Channels (not in name match) ── */}
+      {apiChannelResults.length > 0 && (
+        <>
+          <div className="px-4 py-2 flex items-center gap-2 mt-1">
+            <Search size={14} className="text-yellow-400" />
+            <span className="text-xs text-dark-400 font-semibold uppercase tracking-wider">
+              Channel Messages ({apiChannelResults.length})
+            </span>
+          </div>
+          {apiChannelResults.map(channel => (
+            <button
+              key={`api-channel-${channel.channelId}`}
+              onClick={() => handleSelectChannel(channel)}
+              className="sidebar-item w-full text-left"
+            >
+              <div className="relative flex-shrink-0">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white bg-indigo-500/30">
+                  <Radio size={18} className="text-indigo-400" />
+                </div>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-white truncate">{channel.name}</p>
+                  {channel.messages?.[0]?.createdAt && (
+                    <span className="text-[11px] text-dark-500 flex-shrink-0">
+                      {formatTime(channel.messages[0].createdAt)}
+                    </span>
+                  )}
+                </div>
+                {channel.messages?.map((msg, i) => (
+                  <p key={msg._id || i} className="text-xs text-dark-400 truncate mt-0.5">
+                    <span className="text-dark-500">{msg.senderUsername}: </span>
+                    {highlightMatch(msg.content, q)}
+                  </p>
+                ))}
+              </div>
+            </button>
+          ))}
+        </>
+      )}
+
+      {/* ── Users (no conversation yet) ── */}
       {sortedUsers.length > 0 && (
         <>
           <div className="px-4 py-2 flex items-center gap-2 mt-1">
@@ -324,30 +519,20 @@ const SearchResults = ({ searchQuery, onSelect }) => {
 
             return (
               <button
-                key={user._id}
-                onClick={() => handleSelectUser(user)}
+                key={`user-${user._id}`}
+                onClick={() => handleSelectUser(user._id, user.username, user.avatar, user.role)}
                 className="sidebar-item w-full text-left"
               >
-                {/* Avatar */}
                 <div className="relative flex-shrink-0">
                   {user.avatar ? (
-                    <img
-                      src={`${SERVER_URL}${user.avatar}`}
-                      alt={user.username}
-                      className="w-10 h-10 rounded-full object-cover"
-                    />
+                    <img src={`${SERVER_URL}${user.avatar}`} alt={user.username} className="w-10 h-10 rounded-full object-cover" />
                   ) : (
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white"
-                      style={{ backgroundColor: stringToColor(user.username) }}
-                    >
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: stringToColor(user.username) }}>
                       {getInitials(user.username)}
                     </div>
                   )}
                   <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-dark-800 ${online ? 'bg-emerald-400' : 'bg-dark-500'}`} />
                 </div>
-
-                {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <p className="text-sm font-semibold text-white truncate">{user.username}</p>
@@ -370,6 +555,14 @@ const SearchResults = ({ searchQuery, onSelect }) => {
             );
           })}
         </>
+      )}
+
+      {/* Loading indicator */}
+      {isSearching && (
+        <div className="flex items-center justify-center gap-2 py-4">
+          <Loader2 size={16} className="text-primary-400 animate-spin" />
+          <span className="text-xs text-dark-400">Searching messages...</span>
+        </div>
       )}
     </div>
   );

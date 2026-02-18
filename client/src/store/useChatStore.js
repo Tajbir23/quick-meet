@@ -30,6 +30,8 @@ const useChatStore = create((set, get) => ({
   conversations: {},   // { chatId: { content, type, createdAt, senderId, senderUsername } } — last message per conversation
   groupConversations: {},   // { groupId: { content, type, createdAt, senderId, senderUsername } }
   channelConversations: {}, // { channelId: { content, type, createdAt, senderId, senderUsername } }
+  searchResults: null,      // { conversations: [], groups: [], channels: [] } — server-side message search results
+  isSearching: false,
   isLoadingMessages: false,
   isLoadingMore: false,
   pinnedMessages: {},  // { chatId: [pinnedMessage, ...] }
@@ -160,6 +162,27 @@ const useChatStore = create((set, get) => ({
       console.error('Failed to fetch conversations:', error);
     }
   },
+
+  /**
+   * Search messages across all conversations (server-side decrypt & match).
+   * Returns matching conversations, groups, channels with message snippets.
+   */
+  searchMessages: async (query) => {
+    if (!query || query.trim().length < 1) {
+      set({ searchResults: null, isSearching: false });
+      return;
+    }
+    set({ isSearching: true });
+    try {
+      const res = await api.get(`/messages/search?q=${encodeURIComponent(query.trim())}`);
+      set({ searchResults: res.data.data, isSearching: false });
+    } catch (error) {
+      console.error('Search messages failed:', error);
+      set({ searchResults: null, isSearching: false });
+    }
+  },
+
+  clearSearchResults: () => set({ searchResults: null, isSearching: false }),
 
   /**
    * Update a single conversation's last message (called on send/receive).

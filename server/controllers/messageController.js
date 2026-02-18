@@ -653,6 +653,178 @@ const getConversations = async (req, res) => {
   }
 };
 
+// ─── SEARCH CONVERSATIONS (server-side decrypt & match) ─────
+/**
+ * GET /api/messages/search?q=term
+ * Search through all user's conversations (1-to-1, group, channel)
+ * by decrypting messages server-side and matching the query.
+ */
+const searchConversations = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { q } = req.query;
+
+    if (!q || q.trim().length < 1) {
+      return res.json({
+        success: true,
+        data: { conversations: [], groups: [], channels: [] },
+      });
+    }
+
+    const searchTerm = q.trim().toLowerCase();
+
+    // ── 1. Search 1-to-1 messages ────────────────────────
+    const userMessages = await Message.find({
+      group: null,
+      $or: [{ sender: userId }, { receiver: userId }],
+      type: 'text', // only search text messages
+    })
+      .sort({ createdAt: -1 })
+      .limit(1000)
+      .populate('sender', 'username avatar role')
+      .populate('receiver', 'username avatar role')
+      .lean();
+
+    const matchedConversations = {};
+    for (const msg of userMessages) {
+      let content = msg.content;
+      if (msg.encrypted && msg.encryptionIV && msg.encryptionTag) {
+        content = decryptContent(msg);
+      }
+      if (!content || !content.toLowerCase().includes(searchTerm)) continue;
+
+      const isMe = msg.sender._id.toString() === userId.toString();
+      const partner = isMe ? msg.receiver : msg.sender;
+      const partnerId = partner._id.toString();
+
+      if (!matchedConversations[partnerId]) {
+        matchedConversations[partnerId] = {
+          userId: partnerId,
+          username: partner.username,
+          avatar: partner.avatar,
+          role: partner.role,
+          messages: [],
+        };
+      }
+      // Keep at most 3 matching messages per conversation
+      if (matchedConversations[partnerId].messages.length < 3) {
+        matchedConversations[partnerId].messages.push({
+          _id: msg._id,
+          content,
+          createdAt: msg.createdAt,
+          senderId: msg.sender._id.toString(),
+          senderUsername: msg.sender.username,
+        });
+      }
+    }
+
+    // ── 2. Search group messages ─────────────────────────
+    const userGroups = await Group.find({ 'members.user': userId })
+      .select('_id name')
+      .lean();
+
+    const matchedGroups = {};
+    if (userGroups.length > 0) {
+      const groupIds = userGroups.map(g => g._id);
+      const groupMessages = await Message.find({
+        group: { $in: groupIds },
+        type: 'text',
+      })
+        .sort({ createdAt: -1 })
+        .limit(1000)
+        .populate('sender', 'username avatar')
+        .lean();
+
+      for (const msg of groupMessages) {
+        let content = msg.content;
+        if (msg.encrypted && msg.encryptionIV && msg.encryptionTag) {
+          content = decryptContent(msg);
+        }
+        if (!content || !content.toLowerCase().includes(searchTerm)) continue;
+
+        const groupId = msg.group.toString();
+        const group = userGroups.find(g => g._id.toString() === groupId);
+
+        if (!matchedGroups[groupId]) {
+          matchedGroups[groupId] = {
+            groupId,
+            name: group?.name || 'Unknown Group',
+            messages: [],
+          };
+        }
+        if (matchedGroups[groupId].messages.length < 3) {
+          matchedGroups[groupId].messages.push({
+            _id: msg._id,
+            content,
+            createdAt: msg.createdAt,
+            senderId: msg.sender?._id?.toString(),
+            senderUsername: msg.sender?.username,
+          });
+        }
+      }
+    }
+
+    // ── 3. Search channel messages ───────────────────────
+    const userChannels = await Channel.find({ 'members.user': userId })
+      .select('_id name')
+      .lean();
+
+    const matchedChannels = {};
+    if (userChannels.length > 0) {
+      const channelIds = userChannels.map(c => c._id);
+      const channelMessages = await ChannelMessage.find({
+        channel: { $in: channelIds },
+        isDeleted: { $ne: true },
+        type: { $in: ['text', undefined, null] },
+      })
+        .sort({ createdAt: -1 })
+        .limit(1000)
+        .populate('sender', 'username avatar')
+        .lean();
+
+      for (const msg of channelMessages) {
+        let content = msg.content;
+        if (msg.encrypted && msg.encryptionIV && msg.encryptionTag) {
+          content = decryptContent(msg);
+        }
+        if (!content || !content.toLowerCase().includes(searchTerm)) continue;
+
+        const channelId = msg.channel.toString();
+        const channel = userChannels.find(c => c._id.toString() === channelId);
+
+        if (!matchedChannels[channelId]) {
+          matchedChannels[channelId] = {
+            channelId,
+            name: channel?.name || 'Unknown Channel',
+            messages: [],
+          };
+        }
+        if (matchedChannels[channelId].messages.length < 3) {
+          matchedChannels[channelId].messages.push({
+            _id: msg._id,
+            content,
+            createdAt: msg.createdAt,
+            senderId: msg.sender?._id?.toString(),
+            senderUsername: msg.sender?.username,
+          });
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        conversations: Object.values(matchedConversations),
+        groups: Object.values(matchedGroups),
+        channels: Object.values(matchedChannels),
+      },
+    });
+  } catch (error) {
+    console.error('Search conversations error:', error);
+    res.status(500).json({ success: false, message: 'Search failed' });
+  }
+};
+
 /**
  * DELETE /api/messages/:messageId
  * Delete a message (only sender can delete)
@@ -880,6 +1052,7 @@ module.exports = {
   markAsRead,
   getUnreadCounts,
   getConversations,
+  searchConversations,
   deleteMessage,
   bulkDeleteMessages,
   pinMessage,

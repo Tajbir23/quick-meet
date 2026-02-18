@@ -8,6 +8,7 @@ const {
   markAsRead,
   getUnreadCounts,
   getConversations,
+  searchConversations,
   deleteMessage,
   bulkDeleteMessages,
   pinMessage,
@@ -24,6 +25,7 @@ router.use(apiLimiter);
 router.post('/', messageLimiter, sendMessage);
 router.get('/unread/count', getUnreadCounts);
 router.get('/conversations', getConversations);
+router.get('/search', searchConversations);
 
 // Pinned messages — must be before /:messageId and /:userId routes
 router.get('/pinned/:chatId', getPinnedMessages);
