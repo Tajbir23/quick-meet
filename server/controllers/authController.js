@@ -4,8 +4,8 @@
  * ============================================
  * 
  * SECURITY UPGRADES:
- * - Short-lived access tokens (7 day)
- * - Refresh token rotation (new token on every refresh)
+ * - Short-lived access tokens (30 day)
+ * - Refresh token (non-rotating — prevents JS/native race condition)
  * - Device fingerprint binding
  * - Brute force protection (progressive lockout)
  * - Intrusion detection integration
@@ -19,8 +19,22 @@ const {
   generateAccessToken,
   generateRefreshToken,
   hashRefreshToken,
+  ACCESS_TOKEN_EXPIRY,
   REFRESH_TOKEN_EXPIRY_DAYS,
 } = require('../middleware/auth');
+
+/**
+ * Parse ACCESS_TOKEN_EXPIRY string (e.g. '30d', '15m', '7d') to seconds.
+ */
+function getAccessTokenExpirySeconds() {
+  const val = ACCESS_TOKEN_EXPIRY;
+  const num = parseInt(val);
+  if (val.endsWith('d')) return num * 86400;
+  if (val.endsWith('h')) return num * 3600;
+  if (val.endsWith('m')) return num * 60;
+  if (val.endsWith('s')) return num;
+  return 30 * 86400; // default 30 days
+}
 const securityLogger = require('../security/SecurityEventLogger');
 const { SEVERITY } = require('../security/SecurityEventLogger');
 const intrusionDetector = require('../security/IntrusionDetector');
@@ -102,6 +116,7 @@ const signup = async (req, res) => {
 
     // Store hashed refresh token
     user.refreshToken = hashRefreshToken(refreshToken);
+    user.refreshTokenCreatedAt = new Date();
     if (deviceFingerprint) {
       user.deviceFingerprint = cryptoService.hashFingerprint(deviceFingerprint);
     }
@@ -122,7 +137,7 @@ const signup = async (req, res) => {
         user: user.toSafeObject(),
         accessToken,
         refreshToken,
-        expiresIn: 7 * 24 * 3600, // 7 days in seconds
+        expiresIn: getAccessTokenExpirySeconds(),
       },
     });
   } catch (error) {
@@ -269,6 +284,7 @@ const login = async (req, res) => {
 
     // Store hashed refresh token and device fingerprint
     user.refreshToken = hashRefreshToken(refreshToken);
+    user.refreshTokenCreatedAt = new Date();
     if (deviceFingerprint) {
       user.deviceFingerprint = cryptoService.hashFingerprint(deviceFingerprint);
     }
@@ -297,7 +313,7 @@ const login = async (req, res) => {
         user: user.toSafeObject(),
         accessToken,
         refreshToken,
-        expiresIn: 7 * 24 * 3600, // 7 days in seconds
+        expiresIn: getAccessTokenExpirySeconds(),
       },
     });
   } catch (error) {
@@ -314,9 +330,11 @@ const login = async (req, res) => {
  * Refresh access token using refresh token
  * 
  * SECURITY:
- * - Refresh token rotation (old token invalidated)
+ * - Refresh token NOT rotated (prevents JS/native BackgroundService race condition)
+ * - Only new access token is generated
+ * - Refresh token expiry checked (REFRESH_TOKEN_EXPIRY_DAYS)
  * - Device fingerprint re-validation
- * - If stolen refresh token is reused, ALL tokens are revoked
+ * - If stolen refresh token is reused after login rotates it, it fails
  */
 const refreshAccessToken = async (req, res) => {
   try {
@@ -333,7 +351,7 @@ const refreshAccessToken = async (req, res) => {
 
     // Find user by hashed refresh token
     const hashedToken = hashRefreshToken(refreshToken);
-    const user = await User.findOne({ refreshToken: hashedToken }).select('+refreshToken');
+    const user = await User.findOne({ refreshToken: hashedToken }).select('+refreshToken +refreshTokenCreatedAt');
 
     if (!user) {
       // Possible token theft — someone is using an old/stolen refresh token
@@ -350,6 +368,28 @@ const refreshAccessToken = async (req, res) => {
       });
     }
 
+    // Check if refresh token has expired
+    if (user.refreshTokenCreatedAt) {
+      const expiryMs = REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+      if (Date.now() - user.refreshTokenCreatedAt.getTime() > expiryMs) {
+        // Refresh token expired — user must re-login
+        user.refreshToken = null;
+        user.refreshTokenCreatedAt = null;
+        await user.save();
+
+        securityLogger.authEvent('refresh_token_expired', SEVERITY.INFO, {
+          userId: user._id.toString(),
+          ip,
+        });
+
+        return res.status(401).json({
+          success: false,
+          message: 'Refresh token expired — please login again',
+          code: 'REFRESH_TOKEN_EXPIRED',
+        });
+      }
+    }
+
     // Check if account is locked
     if (user.isLocked()) {
       return res.status(423).json({
@@ -358,12 +398,13 @@ const refreshAccessToken = async (req, res) => {
       });
     }
 
-    // Generate new token pair (rotation)
+    // Generate NEW access token only (keep same refresh token)
+    // WHY no rotation: Both WebView JS and native Android BackgroundService
+    // independently call /auth/refresh. If we rotate, one invalidates the
+    // other's refresh token → force logout. By keeping the same refresh token,
+    // both can refresh independently without conflict.
     const newAccessToken = generateAccessToken(user._id, deviceFingerprint);
-    const newRefreshToken = generateRefreshToken();
 
-    // Store new hashed refresh token (invalidates old one)
-    user.refreshToken = hashRefreshToken(newRefreshToken);
     user.lastSeen = new Date();
     await user.save();
 
@@ -376,8 +417,8 @@ const refreshAccessToken = async (req, res) => {
       success: true,
       data: {
         accessToken: newAccessToken,
-        refreshToken: newRefreshToken,
-        expiresIn: 7 * 24 * 3600, // 7 days in seconds
+        refreshToken,  // Return same refresh token (no rotation)
+        expiresIn: getAccessTokenExpirySeconds(),
       },
     });
   } catch (error) {

@@ -108,6 +108,13 @@ const userSchema = new mongoose.Schema({
     default: null,
   },
 
+  // When the refresh token was created (for expiry enforcement)
+  refreshTokenCreatedAt: {
+    type: Date,
+    select: false,
+    default: null,
+  },
+
   // Device fingerprint hash — binds token to device
   deviceFingerprint: {
     type: String,

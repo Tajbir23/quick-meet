@@ -4,8 +4,8 @@
  * ============================================
  * 
  * ZERO-TRUST SECURITY UPGRADES:
- * 1. Short-lived access tokens (7 day default — balanced for chat app UX)
- * 2. Refresh token rotation (new refresh token per use)
+ * 1. Short-lived access tokens (30 day default — balanced for chat app UX)
+ * 2. Refresh token (non-rotating — prevents JS/native race condition)
  * 3. Token binding with device fingerprint (non-fatal mismatch)
  * 4. Session revocation support
  * 5. Concurrent session limits
@@ -13,15 +13,15 @@
  * 7. Password change invalidation
  * 
  * TOKEN ARCHITECTURE:
- * ┌─────────────┐  7 day TTL   ┌─────────────┐
+ * ┌─────────────┐  30 day TTL  ┌─────────────┐
  * │ Access Token │──────────►   │  Protected   │
  * │   (JWT)      │  every req   │   Route      │
  * └──────┬──────┘              └─────────────┘
  *        │ expired?
  *        ▼
- * ┌─────────────┐ 30 day TTL   ┌─────────────┐
- * │Refresh Token│──────────►   │ New Access + │
- * │(httpOnly DB)│  /refresh    │ New Refresh  │
+ * ┌─────────────┐ 90 day TTL   ┌─────────────┐
+ * │Refresh Token│──────────►   │ New Access   │
+ * │(httpOnly DB)│  /refresh    │ (same RT)    │
  * └─────────────┘              └─────────────┘
  */
 
@@ -33,10 +33,12 @@ const { SEVERITY } = require('../security/SecurityEventLogger');
 const intrusionDetector = require('../security/IntrusionDetector');
 
 // Token durations
-// WHY 7d: Chat apps need long sessions — 15m caused constant logouts.
-// Refresh token extends to 30 days for persistent login across app updates.
-const ACCESS_TOKEN_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || '7d';
-const REFRESH_TOKEN_EXPIRY_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRY_DAYS) || 30;
+// WHY 30d: Chat apps need long sessions — short expiry caused constant logouts
+// and refresh token race conditions between WebView JS and native BackgroundService.
+// Refresh token is NOT rotated on use — only created at login — to prevent the
+// race condition where JS and native independently rotate the token.
+const ACCESS_TOKEN_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || '30d';
+const REFRESH_TOKEN_EXPIRY_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRY_DAYS) || 90;
 
 /**
  * Protect routes — requires valid JWT access token
@@ -176,7 +178,7 @@ const protect = async (req, res, next) => {
  * Generate short-lived JWT access token
  * 
  * SECURITY:
- * - 7 day expiry (balanced for chat app UX vs security)
+ * - 30 day expiry (balanced for chat app UX vs security)
  * - Includes device fingerprint hash
  * - Includes issued-at for password change detection
  */
@@ -202,7 +204,9 @@ const generateAccessToken = (userId, deviceFingerprint = null) => {
  * SECURITY:
  * - Random 64-byte token (not JWT — cannot be decoded)
  * - Stored as SHA-256 hash in DB (if DB is breached, raw tokens are safe)
- * - Rotated on every use (one-time use)
+ * - NOT rotated on use (prevents JS/native race condition)
+ * - Rotated only on login
+ * - Expires after REFRESH_TOKEN_EXPIRY_DAYS (90 days default)
  * - Bound to user and device
  */
 const generateRefreshToken = () => {

@@ -188,7 +188,7 @@ api.interceptors.response.use(
       }
 
       // Hard force logout codes
-      if (code === 'FORCE_LOGOUT' || code === 'ACCOUNT_LOCKED') {
+      if (code === 'FORCE_LOGOUT' || code === 'ACCOUNT_LOCKED' || code === 'REFRESH_TOKEN_EXPIRED') {
         forceLogout();
       }
     }
