@@ -242,9 +242,37 @@ const useChatStore = create((set, get) => ({
   },
 
   /**
-   * Send a message (via REST API + socket)
+   * Send a message (optimistic UI: pending → sent)
    */
   sendMessage: async (chatId, chatType, content, fileData = null) => {
+    // Generate temporary ID for optimistic message
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    // Optimistic message (pending state)
+    const optimisticMsg = {
+      _id: tempId,
+      tempId,
+      sender: { _id: currentUser._id, username: currentUser.username, avatar: currentUser.avatar },
+      content: content || '',
+      type: fileData?.type || 'text',
+      fileUrl: fileData?.url || null,
+      fileName: fileData?.name || null,
+      fileSize: fileData?.size || null,
+      fileMimeType: fileData?.mimeType || null,
+      createdAt: new Date().toISOString(),
+      status: 'pending',
+      read: false,
+    };
+
+    // Insert optimistic message immediately
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [chatId]: [...(state.messages[chatId] || []), optimisticMsg],
+      },
+    }));
+
     try {
       let messageData;
 
@@ -278,11 +306,13 @@ const useChatStore = create((set, get) => ({
         messageData = res.data.data.message;
       }
 
-      // Add to local store
+      // Replace optimistic msg with real msg (status: sent)
       set((state) => ({
         messages: {
           ...state.messages,
-          [chatId]: [...(state.messages[chatId] || []), messageData],
+          [chatId]: (state.messages[chatId] || []).map(m =>
+            m._id === tempId ? { ...messageData, status: 'sent' } : m
+          ),
         },
       }));
 
@@ -295,21 +325,104 @@ const useChatStore = create((set, get) => ({
       const socket = getSocket();
       if (socket) {
         if (chatType === 'group') {
-          socket.emit('message:group:send', { message: messageData, groupId: chatId });
+          socket.emit('message:group:send', { message: { ...messageData, status: 'sent' }, groupId: chatId });
         } else {
-          socket.emit('message:send', { message: messageData, receiverId: chatId });
+          socket.emit('message:send', { message: { ...messageData, status: 'sent' }, receiverId: chatId });
         }
       }
 
       return messageData;
     } catch (error) {
+      // Mark optimistic message as failed
+      set((state) => ({
+        messages: {
+          ...state.messages,
+          [chatId]: (state.messages[chatId] || []).map(m =>
+            m._id === tempId ? { ...m, status: 'failed' } : m
+          ),
+        },
+      }));
       console.error('Failed to send message:', error);
       throw error;
     }
   },
 
   /**
+   * Retry sending a failed message
+   */
+  retrySendMessage: async (chatId, chatType, tempMessage) => {
+    // Remove failed message
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [chatId]: (state.messages[chatId] || []).filter(m => m._id !== tempMessage._id),
+      },
+    }));
+    // Re-send
+    return get().sendMessage(chatId, chatType, tempMessage.content, tempMessage.fileUrl ? {
+      type: tempMessage.type,
+      url: tempMessage.fileUrl,
+      name: tempMessage.fileName,
+      size: tempMessage.fileSize,
+      mimeType: tempMessage.fileMimeType,
+    } : null);
+  },
+
+  /**
+   * Update a specific message's status
+   */
+  updateMessageStatus: (chatId, messageId, status) => {
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [chatId]: (state.messages[chatId] || []).map(m =>
+          m._id === messageId ? { ...m, status } : m
+        ),
+      },
+    }));
+  },
+
+  /**
+   * Batch update: mark all my sent messages in a chat as 'seen'
+   */
+  markMyMessagesAsSeen: (chatId, readerId) => {
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [chatId]: (state.messages[chatId] || []).map(m => {
+          const senderId = typeof m.sender === 'object' ? m.sender._id : m.sender;
+          if (senderId === currentUser._id && m.status !== 'seen') {
+            return { ...m, status: 'seen', read: true, readAt: new Date().toISOString() };
+          }
+          return m;
+        }),
+      },
+    }));
+  },
+
+  /**
+   * Mark all my sent messages as delivered
+   */
+  markMyMessagesAsDelivered: (chatId) => {
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [chatId]: (state.messages[chatId] || []).map(m => {
+          const senderId = typeof m.sender === 'object' ? m.sender._id : m.sender;
+          if (senderId === currentUser._id && (m.status === 'sent' || !m.status)) {
+            return { ...m, status: 'delivered' };
+          }
+          return m;
+        }),
+      },
+    }));
+  },
+
+  /**
    * Add a received message to the store
+   * Also sends delivery acknowledgment via socket
    */
   addReceivedMessage: (chatId, message) => {
     set((state) => {
@@ -319,7 +432,7 @@ const useChatStore = create((set, get) => ({
       return {
         messages: {
           ...state.messages,
-          [chatId]: [...(state.messages[chatId] || []), message],
+          [chatId]: [...(state.messages[chatId] || []), { ...message, status: 'delivered' }],
         },
         // Increment unread if not active chat
         unread: isActiveChat
@@ -330,6 +443,30 @@ const useChatStore = create((set, get) => ({
             },
       };
     });
+
+    // Send delivery ack to sender
+    const socket = getSocket();
+    if (socket && message._id) {
+      const senderId = typeof message.sender === 'object' ? message.sender._id : message.sender;
+      socket.emit('message:delivered', {
+        messageId: message._id,
+        senderId,
+        chatId,
+      });
+    }
+
+    // If this chat is currently active, also mark as seen
+    const { activeChat } = get();
+    if (activeChat && activeChat.id === chatId) {
+      const senderId = typeof message.sender === 'object' ? message.sender._id : message.sender;
+      if (socket && message._id) {
+        socket.emit('message:read', {
+          senderId,
+          messageId: message._id,
+          chatId,
+        });
+      }
+    }
 
     // Update conversation preview (for 1-to-1 messages — chatId is the sender's userId)
     get().updateConversation(chatId, message, message.sender?.username);
@@ -391,6 +528,23 @@ const useChatStore = create((set, get) => ({
         delete newUnread[chatId];
         return { unread: newUnread };
       });
+
+      // Emit seen status for all unread messages from this sender
+      const socket = getSocket();
+      if (socket) {
+        const messages = get().messages[chatId] || [];
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        messages.forEach(m => {
+          const senderId = typeof m.sender === 'object' ? m.sender._id : m.sender;
+          if (senderId !== currentUser._id && !m.read) {
+            socket.emit('message:read', {
+              senderId,
+              messageId: m._id,
+              chatId,
+            });
+          }
+        });
+      }
     } catch (error) {
       console.error('Failed to mark as read:', error);
     }

@@ -390,13 +390,65 @@ const useChannelStore = create((set, get) => ({
   },
 
   createPost: async (channelId, postData) => {
+    // Generate temporary ID for optimistic post
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    // Optimistic post (pending state)
+    const optimisticPost = {
+      _id: tempId,
+      tempId,
+      channel: channelId,
+      sender: { _id: currentUser._id, username: currentUser.username, avatar: currentUser.avatar },
+      content: postData.content || '',
+      type: postData.type || 'text',
+      status: 'pending',
+      reactions: [],
+      comments: [],
+      views: 0,
+      commentCount: 0,
+      totalReactions: 0,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Insert optimistic post at the top
+    set(state => ({
+      channelPosts: [optimisticPost, ...state.channelPosts],
+    }));
+
     try {
       const res = await api.post(`/channels/${channelId}/posts`, postData);
-      // Post will be added via socket event
-      return { success: true, post: res.data.data.post };
+      const realPost = res.data.data.post;
+
+      // Replace optimistic post with real post (status: sent)
+      set(state => ({
+        channelPosts: state.channelPosts.map(p =>
+          p._id === tempId ? { ...realPost, status: 'sent' } : p
+        ),
+      }));
+
+      return { success: true, post: realPost };
     } catch (error) {
+      // Mark as failed
+      set(state => ({
+        channelPosts: state.channelPosts.map(p =>
+          p._id === tempId ? { ...p, status: 'failed' } : p
+        ),
+      }));
       return { success: false, message: error.response?.data?.message };
     }
+  },
+
+  retryCreatePost: async (channelId, tempPost) => {
+    // Remove failed post
+    set(state => ({
+      channelPosts: state.channelPosts.filter(p => p._id !== tempPost._id),
+    }));
+    // Re-send
+    return get().createPost(channelId, {
+      content: tempPost.content,
+      type: tempPost.type,
+    });
   },
 
   editPost: async (channelId, postId, content) => {
@@ -605,9 +657,26 @@ const useChannelStore = create((set, get) => ({
   handleNewPost: (data) => {
     set(state => {
       if (state.activeChannel?._id === data.channelId) {
-        // Avoid duplicates
-        const exists = state.channelPosts.some(p => p._id === data.post._id);
+        // Check if we already have a real post with this ID
+        const exists = state.channelPosts.some(p => p._id === data.post._id && !p.tempId);
         if (exists) return {};
+
+        // Check if there's an optimistic (temp) post from us that matches
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const tempPost = state.channelPosts.find(
+          p => p.tempId && p.sender?._id === currentUser._id &&
+               p.content === data.post.content && p.channel === data.channelId
+        );
+
+        if (tempPost) {
+          // Replace optimistic post with real post (keep sent status)
+          return {
+            channelPosts: state.channelPosts.map(p =>
+              p._id === tempPost._id ? { ...data.post, status: 'sent' } : p
+            ),
+          };
+        }
+
         return { channelPosts: [data.post, ...state.channelPosts] };
       }
       return {};

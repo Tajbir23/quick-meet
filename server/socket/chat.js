@@ -84,9 +84,30 @@ const setupChatHandlers = (io, socket, onlineUsers) => {
   }));
 
   /**
-   * Message read receipt — GUARDED
+   * Message delivered acknowledgment — GUARDED
+   * Receiver confirms they received the message
    */
-  socket.on('message:read', guard.wrapHandler(socket, 'message:read', ({ senderId, messageId }) => {
+  socket.on('message:delivered', guard.wrapHandler(socket, 'message:delivered', ({ messageId, senderId, chatId }) => {
+    if (!senderId || !messageId) return;
+    if (typeof senderId !== 'string' || senderId.length > 30) return;
+    if (typeof messageId !== 'string' || messageId.length > 30) return;
+
+    const senderSocketId = onlineUsers.get(senderId);
+    if (senderSocketId) {
+      io.to(senderSocketId).emit('message:delivered:ack', {
+        messageId,
+        chatId: socket.userId, // The receiver's userId = chatId for the sender
+        deliveredTo: socket.userId,
+        deliveredAt: new Date().toISOString(),
+      });
+    }
+  }));
+
+  /**
+   * Message read/seen receipt — GUARDED
+   * Emits to sender that their message was seen
+   */
+  socket.on('message:read', guard.wrapHandler(socket, 'message:read', ({ senderId, messageId, chatId }) => {
     if (!senderId || !messageId) return;
     if (typeof senderId !== 'string' || senderId.length > 30) return;
     if (typeof messageId !== 'string' || messageId.length > 30) return;
@@ -95,9 +116,11 @@ const setupChatHandlers = (io, socket, onlineUsers) => {
     if (senderSocketId) {
       io.to(senderSocketId).emit('message:read:ack', {
         messageId,
+        chatId: socket.userId, // The reader's userId = chatId for the sender
         readBy: socket.userId,
         readAt: new Date().toISOString(),
       });
+    }
     }
   }));
 

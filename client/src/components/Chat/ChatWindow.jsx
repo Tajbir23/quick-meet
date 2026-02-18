@@ -24,6 +24,7 @@ const ChatWindow = () => {
   const isLoadingMore = useChatStore(s => s.isLoadingMore);
   const typingUsers = useChatStore(s => s.typingUsers);
   const markAsRead = useChatStore(s => s.markAsRead);
+  const retrySendMessage = useChatStore(s => s.retrySendMessage);
   const showPinnedPanel = useChatStore(s => s.showPinnedPanel);
   const pinnedMessages = useChatStore(s => s.pinnedMessages);
   const fetchPinnedMessages = useChatStore(s => s.fetchPinnedMessages);
@@ -89,6 +90,11 @@ const ChatWindow = () => {
       msgEl.classList.add('bg-amber-500/10');
       setTimeout(() => msgEl.classList.remove('bg-amber-500/10'), 2000);
     }
+  };
+
+  // Retry failed message handler
+  const handleRetryMessage = (message) => {
+    retrySendMessage(activeChat.id, activeChat.type, message);
   };
 
   // View profile handler
@@ -339,6 +345,7 @@ const ChatWindow = () => {
                 onForward={handleForwardMessage}
                 onViewProfile={handleViewProfile}
                 onPin={handlePinMessage}
+                onRetry={handleRetryMessage}
               />
             </div>
           );

@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, memo } from 'react';
-import { Download, FileText, Loader2, Phone, Video, PhoneMissed, PhoneOff, PhoneIncoming, PhoneOutgoing, Trash2, Forward, MoreVertical, User as UserIcon, Pin, PinOff } from 'lucide-react';
+import { Download, FileText, Loader2, Phone, Video, PhoneMissed, PhoneOff, PhoneIncoming, PhoneOutgoing, Trash2, Forward, MoreVertical, User as UserIcon, Pin, PinOff, RotateCcw } from 'lucide-react';
 import { getInitials, stringToColor, formatMessageTime, isImageFile, formatFileSize, formatDuration } from '../../utils/helpers';
 import { SERVER_URL } from '../../utils/constants';
 import ImagePreview from '../Common/ImagePreview';
+import MessageStatus from '../Common/MessageStatus';
 
-const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onViewProfile, onPin }) => {
+const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onViewProfile, onPin, onRetry }) => {
   const [downloading, setDownloading] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -327,14 +328,26 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
               </>
             )}
 
-            {/* Timestamp + Pin indicator */}
-            <div className={`flex items-center gap-1.5 mt-1 ${isMine ? 'justify-end' : 'justify-end'}`}>
+            {/* Timestamp + Status indicator */}
+            <div className={`flex items-center gap-1 mt-1 ${isMine ? 'justify-end' : 'justify-end'}`}>
               {message.isPinned && (
                 <Pin size={10} className={`${isMine ? 'text-primary-200/70' : 'text-amber-400/70'}`} />
               )}
               <p className={`text-[10px] ${isMine ? 'text-primary-200/70' : 'text-dark-500'}`}>
                 {message.isDeleted ? 'Deleted' : formatMessageTime(message.createdAt)}
               </p>
+              {isMine && !message.isDeleted && (
+                <MessageStatus status={message.status || (message.read ? 'seen' : 'sent')} size={13} />
+              )}
+              {message.status === 'failed' && isMine && (
+                <button
+                  onClick={() => onRetry?.(message)}
+                  className="ml-1 text-red-400 hover:text-red-300 transition-colors"
+                  title="Retry"
+                >
+                  <RotateCcw size={11} />
+                </button>
+              )}
             </div>
           </div>
         </div>

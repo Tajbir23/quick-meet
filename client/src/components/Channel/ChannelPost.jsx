@@ -19,10 +19,11 @@ import {
   Eye, MessageCircle, Pin, MoreVertical, Trash2, Edit3,
   PinOff, Forward, Download, FileText, Loader2, Share2,
   Clock, Smile, ChevronDown, ChevronUp, Send, X, Image,
-  Film, Volume2
+  Film, Volume2, RotateCcw
 } from 'lucide-react';
 import useChannelStore from '../../store/useChannelStore';
 import useAuthStore from '../../store/useAuthStore';
+import MessageStatus from '../Common/MessageStatus';
 import ChannelPoll from './ChannelPoll';
 import { SERVER_URL } from '../../utils/constants';
 import { formatMessageTime, isImageFile, formatFileSize } from '../../utils/helpers';
@@ -36,6 +37,7 @@ const ChannelPost = memo(({ post, canManage, isOwner, myRole, channelId }) => {
   const togglePinPost = useChannelStore(s => s.togglePinPost);
   const editPost = useChannelStore(s => s.editPost);
   const forwardPost = useChannelStore(s => s.forwardPost);
+  const retryCreatePost = useChannelStore(s => s.retryCreatePost);
 
   const [showMenu, setShowMenu] = useState(false);
   const [showComments, setShowComments] = useState(false);
@@ -136,10 +138,22 @@ const ChannelPost = memo(({ post, canManage, isOwner, myRole, channelId }) => {
   return (
     <div
       data-post-id={post._id}
-      className={`bg-dark-800 rounded-2xl border transition-colors ${
+      className={`bg-dark-800 rounded-2xl border transition-colors relative ${
         post.isPinned ? 'border-amber-500/30' : 'border-dark-700'
-      }`}
+      } ${post.status === 'pending' ? 'opacity-60' : ''} ${post.status === 'failed' ? 'opacity-50 border-red-500/40' : ''}`}
     >
+      {/* Failed retry overlay */}
+      {post.status === 'failed' && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-dark-900/40 rounded-2xl">
+          <button
+            onClick={() => retryCreatePost(channelId, post)}
+            className="flex items-center gap-2 px-4 py-2 bg-red-500/90 hover:bg-red-500 text-white rounded-xl text-sm font-medium transition-colors"
+          >
+            <RotateCcw size={14} />
+            Retry
+          </button>
+        </div>
+      )}
       {/* Pinned indicator */}
       {post.isPinned && (
         <div className="flex items-center gap-1.5 px-4 pt-3 text-amber-400">
@@ -179,6 +193,9 @@ const ChannelPost = memo(({ post, canManage, isOwner, myRole, channelId }) => {
             <span className="text-[11px] text-dark-500">
               {formatMessageTime(post.createdAt)}
             </span>
+            {post.sender?._id === user?._id && post.status && (
+              <MessageStatus status={post.status} size={13} />
+            )}
             {post.editHistory?.length > 0 && (
               <span className="text-[10px] text-dark-500 italic">edited</span>
             )}

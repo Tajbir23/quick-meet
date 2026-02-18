@@ -96,6 +96,20 @@ const useSocket = () => {
       notifyNewMessage(senderName, message.content || (message.fileUrl ? '📎 File' : 'New message'));
     });
 
+    // ─── MESSAGE STATUS: Delivered acknowledgment ───
+    socket.on('message:delivered:ack', ({ messageId, chatId }) => {
+      if (chatId) {
+        useChatStore.getState().markMyMessagesAsDelivered(chatId);
+      }
+    });
+
+    // ─── MESSAGE STATUS: Seen/Read acknowledgment ───
+    socket.on('message:read:ack', ({ messageId, chatId, readBy }) => {
+      if (chatId) {
+        useChatStore.getState().markMyMessagesAsSeen(chatId, readBy);
+      }
+    });
+
     // Typing indicators
     socket.on('typing:start', ({ userId }) => {
       useChatStore.getState().setTyping(userId, userId, true);
@@ -669,6 +683,8 @@ const useSocket = () => {
       socket.off('user:offline', onUserOffline);
       socket.off('message:receive');
       socket.off('message:group:receive');
+      socket.off('message:delivered:ack');
+      socket.off('message:read:ack');
       socket.off('typing:start');
       socket.off('typing:stop');
       socket.off('typing:group:start');
