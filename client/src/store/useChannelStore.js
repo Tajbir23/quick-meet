@@ -41,7 +41,17 @@ const useChannelStore = create((set, get) => ({
     set({ isLoading: true });
     try {
       const res = await api.get('/channels');
-      set({ myChannels: res.data.data.channels, isLoading: false });
+      const channels = res.data.data.channels;
+      // Also refresh activeChannel if it matches one of the fetched channels
+      const currentActive = get().activeChannel;
+      const updatedActive = currentActive
+        ? channels.find(c => c._id === currentActive._id) || currentActive
+        : null;
+      set({
+        myChannels: channels,
+        isLoading: false,
+        ...(updatedActive && currentActive ? { activeChannel: updatedActive } : {}),
+      });
     } catch (error) {
       console.error('Failed to fetch channels:', error);
       set({ isLoading: false });
@@ -121,7 +131,10 @@ const useChannelStore = create((set, get) => ({
   getChannelById: async (channelId) => {
     try {
       const res = await api.get(`/channels/${channelId}`);
-      return { success: true, channel: res.data.data.channel };
+      const channel = res.data.data.channel;
+      // Update activeChannel so subscriber count and members are always fresh
+      set({ activeChannel: channel });
+      return { success: true, channel };
     } catch (error) {
       return { success: false, message: error.response?.data?.message };
     }

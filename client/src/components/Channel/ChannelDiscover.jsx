@@ -179,7 +179,7 @@ const ChannelDiscover = ({ onClose }) => {
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="text-xs text-dark-400 flex items-center gap-1">
                             <Users size={11} />
-                            {channel.stats?.subscriberCount || channel.members?.length || 0}
+                            {channel.subscriberCount || channel.members?.length || 0}
                           </span>
                         </div>
                         {channel.description && (

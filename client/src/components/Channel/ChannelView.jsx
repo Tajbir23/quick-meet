@@ -123,7 +123,7 @@ const ChannelView = () => {
 
   if (!activeChat || activeChat.type !== 'channel') return null;
 
-  const subscriberCount = activeChannel?.stats?.subscriberCount || activeChat.memberCount || 0;
+  const subscriberCount = activeChannel?.subscriberCount || activeChat.subscriberCount || activeChannel?.members?.filter(m => !m.isBanned)?.length || 0;
   const isLive = activeChannel?.liveStream?.isLive;
 
   return (
