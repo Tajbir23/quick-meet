@@ -23,6 +23,7 @@ const AudioCall = () => {
     isAudioEnabled,
     iceState,
     isMinimized,
+    isPipMode,
     remoteAudioMuted,
   } = useCallStore();
 
@@ -47,6 +48,34 @@ const AudioCall = () => {
 
   const isConnecting = callStatus === CALL_STATUS.CALLING || callStatus === CALL_STATUS.RECONNECTING;
   const isConnected = callStatus === CALL_STATUS.CONNECTED;
+
+  // ===== PiP MODE: Minimal floating window layout for audio calls =====
+  if (isPipMode) {
+    return (
+      <div className="fixed inset-0 bg-dark-900 z-40 flex items-center justify-center">
+        {/* Hidden audio — must still play in PiP */}
+        <audio ref={remoteAudioRef} autoPlay playsInline />
+        <div
+          className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold text-white"
+          style={{ backgroundColor: stringToColor(remoteUser?.username) }}
+        >
+          {getInitials(remoteUser?.username)}
+        </div>
+        {/* Duration */}
+        {isConnected && (
+          <div className="absolute bottom-1 left-1 bg-black/60 px-1.5 py-0.5 rounded text-[9px] text-white">
+            {formatDuration(callDuration)}
+          </div>
+        )}
+        {/* Mute indicator */}
+        {!isAudioEnabled && (
+          <div className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500/80 flex items-center justify-center">
+            <MicOff size={10} className="text-white" />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={`fixed inset-0 bg-gradient-to-b from-dark-800 via-dark-900 to-dark-950 z-40 flex flex-col safe-top safe-bottom ${isMinimized ? 'hidden' : ''}`}>

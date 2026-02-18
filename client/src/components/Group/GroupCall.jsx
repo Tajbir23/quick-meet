@@ -214,11 +214,15 @@ const GroupCall = () => {
     callStatus,
     endCall,
     isMinimized,
+    isPipMode,
   } = useCallStore();
   const { user } = useAuthStore();
 
   // Personal pin state — stored as participant userId or 'self'
   const [pinnedUserId, setPinnedUserId] = useState(null);
+
+  // PiP video ref (must be declared unconditionally — React rules of hooks)
+  const pipVideoRef = useRef(null);
 
   // When the pinned user leaves the call, auto-unpin
   useEffect(() => {
@@ -278,6 +282,58 @@ const GroupCall = () => {
     if (totalParticipants <= 6) return 'grid-cols-2 md:grid-cols-3 auto-rows-fr';
     return 'grid-cols-3 auto-rows-fr';
   }, [totalParticipants, hasPinned, unpinnedParticipants.length]);
+
+  // PiP: pick the best participant to show in floating window
+  const pipParticipant = useMemo(() => {
+    return allParticipants.find(p => !p.isLocal && p.stream) || allParticipants[0];
+  }, [allParticipants]);
+
+  // PiP: attach stream to pip video element
+  useEffect(() => {
+    if (isPipMode && pipVideoRef.current && pipParticipant?.stream) {
+      pipVideoRef.current.srcObject = pipParticipant.stream;
+      pipVideoRef.current.play().catch(() => {});
+    }
+  }, [isPipMode, pipParticipant?.stream]);
+
+  // ===== PiP MODE: Minimal floating window layout for group calls =====
+  if (isPipMode) {
+    return (
+      <div className="fixed inset-0 bg-black z-40 flex items-center justify-center">
+        {pipParticipant?.stream ? (
+          <video
+            ref={pipVideoRef}
+            autoPlay
+            playsInline
+            muted={pipParticipant.isLocal}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-dark-900">
+            <div
+              className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold text-white"
+              style={{ backgroundColor: stringToColor(pipParticipant?.username || 'G') }}
+            >
+              {getInitials(pipParticipant?.username || 'Group')}
+            </div>
+          </div>
+        )}
+        {/* Participant count + duration */}
+        <div className="absolute bottom-1 left-1 bg-black/60 px-1.5 py-0.5 rounded text-[9px] text-white flex items-center gap-1">
+          <Users size={8} />
+          <span>{totalParticipants}</span>
+          <span>·</span>
+          <span>{formatDuration(callDuration)}</span>
+        </div>
+        {/* Mute indicator */}
+        {!isAudioEnabled && (
+          <div className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500/80 flex items-center justify-center">
+            <MicOff size={10} className="text-white" />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={`fixed inset-0 bg-dark-900 z-40 flex flex-col ${isMinimized ? 'hidden' : ''}`}>

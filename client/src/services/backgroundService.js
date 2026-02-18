@@ -79,6 +79,9 @@ export const initBackgroundService = async () => {
     // Start polling for pending actions from notification buttons
     startActionPolling();
     
+    // Listen for PiP mode changes from native Android
+    initPipListener();
+    
     console.log('[BackgroundService] Initialized successfully');
   } catch (err) {
     console.warn('[BackgroundService] Init failed (non-fatal):', err.message);
@@ -179,6 +182,36 @@ const handleAppStateChange = ({ isActive }) => {
     // App went to background — update notification with current state
     updateNotificationForCurrentState();
   }
+};
+
+// ========================================
+// Picture-in-Picture (PiP) Mode
+// ========================================
+
+let _pipListenerAttached = false;
+
+/**
+ * Listen for PiP mode changes from Android native.
+ * MainActivity dispatches 'pipModeChanged' CustomEvent on the window.
+ */
+export const initPipListener = () => {
+  if (_pipListenerAttached) return;
+  _pipListenerAttached = true;
+
+  window.addEventListener('pipModeChanged', (event) => {
+    const isInPipMode = event.detail?.isInPipMode ?? false;
+    console.log(`[BackgroundService] PiP mode: ${isInPipMode}`);
+
+    // Update call store so UI components can render PiP layout
+    try {
+      const { default: useCallStore } = require('../store/useCallStore');
+      useCallStore.setState({ isPipMode: isInPipMode });
+    } catch (e) {
+      // Silent — store may not be loaded yet
+    }
+  });
+
+  console.log('[BackgroundService] PiP listener attached');
 };
 
 /**
@@ -522,4 +555,5 @@ export default {
   dismissTransferNotification,
   onSocketConnected,
   onSocketDisconnected,
+  initPipListener,
 };

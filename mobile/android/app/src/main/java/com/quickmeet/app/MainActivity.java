@@ -1,9 +1,13 @@
 package com.quickmeet.app;
 
 import android.Manifest;
+import android.app.PictureInPictureParams;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
+import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Rational;
 import android.webkit.WebView;
 import android.widget.Toast;
 import android.util.Log;
@@ -109,10 +113,20 @@ public class MainActivity extends BridgeActivity {
      * During an active call, we MUST immediately "undo" this pause by calling
      * webView.onResume() + webView.resumeTimers() right after super.onPause().
      * This allows the WebView to continue processing WebRTC audio/video.
+     *
+     * IMPORTANT: Do NOT resume WebView if we're entering PiP — PiP keeps the
+     * Activity in a "paused" but visible state. The WebView stays active in PiP
+     * on its own because the window is still visible.
      */
     @Override
     public void onPause() {
         super.onPause();
+        
+        // In PiP mode, the Activity is still visible — WebView stays active
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPictureInPictureMode()) {
+            Log.i(TAG, "onPause — in PiP mode, WebView stays active");
+            return;
+        }
         
         if (isCallActive()) {
             // Immediately resume the WebView after system paused it
@@ -222,6 +236,98 @@ public class MainActivity extends BridgeActivity {
     private boolean isCallActive() {
         BackgroundService bgService = BackgroundService.getInstance();
         return bgService != null && bgService.isCallActive();
+    }
+
+    // ============================================
+    // PICTURE-IN-PICTURE (PiP) — Floating Window
+    // ============================================
+
+    /**
+     * Auto-enter PiP when user presses Home during an active call.
+     * onUserLeaveHint() is called when the user navigates away (Home button,
+     * recent apps, etc.) — but NOT when another activity appears on top.
+     */
+    @Override
+    public void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        if (isCallActive()) {
+            enterPipMode();
+        }
+    }
+
+    /**
+     * Enter Picture-in-Picture mode for active video/group calls.
+     * The Activity shrinks to a small floating window on Android 8.0+.
+     * WebRTC continues because the Activity is still "visible" in PiP.
+     */
+    private void enterPipMode() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            Log.w(TAG, "PiP requires Android 8.0+ (API 26)");
+            return;
+        }
+
+        try {
+            // 16:9 aspect ratio for the PiP window (landscape video)
+            Rational aspectRatio = new Rational(16, 9);
+
+            PictureInPictureParams.Builder pipBuilder = new PictureInPictureParams.Builder()
+                    .setAspectRatio(aspectRatio);
+
+            // Android 12+ (API 31): auto-enter PiP when going home
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                pipBuilder.setAutoEnterEnabled(true);
+                pipBuilder.setSeamlessResizeEnabled(true);
+            }
+
+            enterPictureInPictureMode(pipBuilder.build());
+            Log.i(TAG, "Entered PiP mode");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to enter PiP mode: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Called when PiP mode changes (enter or exit).
+     * Notifies JavaScript so the UI can show a simplified PiP layout.
+     */
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode,
+                                               Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        Log.i(TAG, "PiP mode changed: " + isInPictureInPictureMode);
+
+        // Notify JavaScript about PiP state change
+        WebView webView = getBridge().getWebView();
+        if (webView != null) {
+            String js = "window.dispatchEvent(new CustomEvent('pipModeChanged', { detail: { isInPipMode: "
+                    + isInPictureInPictureMode + " } }));";
+            webView.post(() -> webView.evaluateJavascript(js, null));
+
+            // Ensure WebView stays active during PiP
+            if (isInPictureInPictureMode) {
+                webView.onResume();
+                webView.resumeTimers();
+            }
+        }
+    }
+
+    /**
+     * Update PiP params so Android 12+ auto-enters PiP on home press.
+     * Call this whenever a call starts to enable auto-PiP.
+     */
+    public void updatePipParams(boolean callActive) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
+
+        try {
+            PictureInPictureParams.Builder pipBuilder = new PictureInPictureParams.Builder()
+                    .setAspectRatio(new Rational(16, 9))
+                    .setAutoEnterEnabled(callActive)
+                    .setSeamlessResizeEnabled(true);
+            setPictureInPictureParams(pipBuilder.build());
+            Log.d(TAG, "PiP params updated — autoEnter: " + callActive);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to update PiP params: " + e.getMessage());
+        }
     }
 
     private void requestEssentialPermissions() {

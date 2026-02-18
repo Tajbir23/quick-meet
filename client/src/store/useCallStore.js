@@ -54,6 +54,7 @@ const useCallStore = create((set, get) => ({
 
   // UI state
   isMinimized: false,
+  isPipMode: false,        // Android PiP (Picture-in-Picture) mode
 
   // Incoming call data
   incomingCall: null,      // { callerId, callerName, offer, callType }
@@ -279,6 +280,7 @@ const useCallStore = create((set, get) => ({
       incomingCall: null,
       incomingGroupCall: null,
       isMinimized: false,
+      isPipMode: false,
       iceState: 'new',
       networkPing: null,
       pingTimer: null,
