@@ -109,7 +109,7 @@ const Sidebar = () => {
                   className={`p-1.5 rounded-lg transition-all active:scale-90 ${
                     ownerModeVisible
                       ? 'text-amber-400 bg-amber-500/10'
-                      : 'text-dark-400 hover:text-dark-200'
+                      : 'text-dark-400 hover:text-dark-200 hover:bg-dark-700/50'
                   }`}
                   title={ownerModeVisible ? 'Owner Mode ON — click to hide' : 'Owner Mode OFF — click to show'}
                 >
