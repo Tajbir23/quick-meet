@@ -394,12 +394,20 @@ const FileTransferPage = () => {
                 </div>
                 {selectedUser && (
                   <div className="mt-2 flex items-center gap-2 bg-primary-500/10 border border-primary-500/20 rounded-xl px-3 py-2">
-                    <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-                      style={{ backgroundColor: stringToColor(selectedUser.username) }}
-                    >
-                      {getInitials(selectedUser.username)}
-                    </div>
+                    {selectedUser.avatar ? (
+                      <img
+                        src={`${SERVER_URL}${selectedUser.avatar}`}
+                        alt={selectedUser.username}
+                        className="w-7 h-7 rounded-full object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div
+                        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                        style={{ backgroundColor: stringToColor(selectedUser.username) }}
+                      >
+                        {getInitials(selectedUser.username)}
+                      </div>
+                    )}
                     <span className="text-sm text-primary-300 font-medium flex-1 truncate">{selectedUser.username}</span>
                     <button
                       onClick={() => setSelectedUser(null)}

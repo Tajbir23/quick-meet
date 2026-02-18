@@ -8,6 +8,7 @@ import { useEffect, useRef } from 'react';
 import { Phone, PhoneOff, Video } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
 import { getInitials, stringToColor, playNotificationSound, showNativeNotification, bringWindowToFront } from '../../utils/helpers';
+import { SERVER_URL } from '../../utils/constants';
 
 const IncomingCall = () => {
   const { incomingCall, acceptCall, rejectCall, callStatus } = useCallStore();
@@ -33,6 +34,7 @@ const IncomingCall = () => {
 
   const isVideoCall = incomingCall.callType === 'video';
   const callerName = incomingCall.callerName || 'Unknown';
+  const callerAvatar = incomingCall.callerAvatar || '';
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in safe-top safe-bottom">
@@ -44,12 +46,20 @@ const IncomingCall = () => {
             <div className="absolute inset-0 rounded-full bg-primary-400/10 animate-ping" style={{ animationDuration: '2s' }} />
             <div className="absolute -inset-3 rounded-full border-2 border-primary-400/10 animate-ping" style={{ animationDuration: '3s' }} />
             
-            <div
-              className="relative w-24 h-24 md:w-28 md:h-28 rounded-full flex items-center justify-center text-3xl md:text-4xl font-bold text-white shadow-2xl"
-              style={{ backgroundColor: stringToColor(callerName) }}
-            >
-              {getInitials(callerName)}
-            </div>
+            {callerAvatar ? (
+              <img
+                src={`${SERVER_URL}${callerAvatar}`}
+                alt={callerName}
+                className="relative w-24 h-24 md:w-28 md:h-28 rounded-full object-cover shadow-2xl"
+              />
+            ) : (
+              <div
+                className="relative w-24 h-24 md:w-28 md:h-28 rounded-full flex items-center justify-center text-3xl md:text-4xl font-bold text-white shadow-2xl"
+                style={{ backgroundColor: stringToColor(callerName) }}
+              >
+                {getInitials(callerName)}
+              </div>
+            )}
             <div className="absolute -bottom-1 -right-1 w-9 h-9 rounded-full bg-dark-700 border-2 border-dark-800 flex items-center justify-center shadow-lg">
               {isVideoCall ? (
                 <Video size={16} className="text-primary-400" />

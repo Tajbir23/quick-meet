@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import useCallStore from '../../store/useCallStore';
 import { formatDuration, getInitials, stringToColor } from '../../utils/helpers';
-import { CALL_STATUS } from '../../utils/constants';
+import { CALL_STATUS, SERVER_URL } from '../../utils/constants';
 
 const MinimizedCall = () => {
   const {
@@ -109,6 +109,12 @@ const MinimizedCall = () => {
         >
           {isGroupCall ? (
             <Users size={16} />
+          ) : remoteUser?.avatar ? (
+            <img
+              src={`${SERVER_URL}${remoteUser.avatar}`}
+              alt={remoteUser?.username}
+              className="w-full h-full rounded-full object-cover"
+            />
           ) : (
             getInitials(remoteUser?.username)
           )}

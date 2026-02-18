@@ -156,12 +156,20 @@ const MessageBubble = ({ message, isMine, showAvatar, onDelete, onForward, onVie
         <div className={`flex gap-2 max-w-[85%] md:max-w-[70%] ${isMine ? 'flex-row-reverse' : ''}`}>
           {/* Avatar (only for received messages) */}
           {!isMine && showAvatar ? (
-            <div
-              className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-[10px] md:text-xs font-bold text-white flex-shrink-0 mt-auto"
-              style={{ backgroundColor: stringToColor(typeof message.sender === 'object' ? message.sender.username : 'Unknown') }}
-            >
-              {getInitials(typeof message.sender === 'object' ? message.sender.username : 'Unknown')}
-            </div>
+            typeof message.sender === 'object' && message.sender.avatar ? (
+              <img
+                src={`${SERVER_URL}${message.sender.avatar}`}
+                alt={typeof message.sender === 'object' ? message.sender.username : 'Unknown'}
+                className="w-7 h-7 md:w-8 md:h-8 rounded-full object-cover flex-shrink-0 mt-auto"
+              />
+            ) : (
+              <div
+                className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-[10px] md:text-xs font-bold text-white flex-shrink-0 mt-auto"
+                style={{ backgroundColor: stringToColor(typeof message.sender === 'object' ? message.sender.username : 'Unknown') }}
+              >
+                {getInitials(typeof message.sender === 'object' ? message.sender.username : 'Unknown')}
+              </div>
+            )
           ) : (
             !isMine && <div className="w-7 md:w-8 flex-shrink-0" />
           )}

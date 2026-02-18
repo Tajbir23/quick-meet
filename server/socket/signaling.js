@@ -93,6 +93,7 @@ function deliverPendingCall(io, socket, userId) {
   socket.emit('call:offer', {
     callerId: pending.callerId,
     callerName: pending.callerName,
+    callerAvatar: pending.callerAvatar || '',
     offer: pending.offer,
     callType: pending.callType,
     isReconnect: false,
@@ -278,6 +279,7 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
         offer,
         callType: callType || 'audio',
         callerName: socket.username,
+        callerAvatar: socket.user?.avatar || '',
         timeout: timeoutId,
         createdAt: Date.now(),
       });
@@ -339,6 +341,7 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
         offer,
         callType: callType || 'audio',
         callerName: socket.username,
+        callerAvatar: socket.user?.avatar || '',
         timeout: timeoutId,
         createdAt: Date.now(),
       });
@@ -347,6 +350,7 @@ const setupSignalingHandlers = (io, socket, onlineUsers) => {
     io.to(targetSocketId).emit('call:offer', {
       callerId: socket.userId,
       callerName: socket.username,
+      callerAvatar: socket.user?.avatar || '',
       offer,
       callType,
       isReconnect: isReconnect || false,

@@ -11,7 +11,7 @@ import CallControls from './CallControls';
 import PingIndicator from './PingIndicator';
 import useSpeakingDetector from '../../hooks/useSpeakingDetector';
 import { getInitials, stringToColor, formatDuration } from '../../utils/helpers';
-import { CALL_STATUS } from '../../utils/constants';
+import { CALL_STATUS, SERVER_URL } from '../../utils/constants';
 
 const AudioCall = () => {
   const {
@@ -55,12 +55,20 @@ const AudioCall = () => {
       <div className="fixed inset-0 bg-dark-900 z-40 flex items-center justify-center">
         {/* Hidden audio — must still play in PiP */}
         <audio ref={remoteAudioRef} autoPlay playsInline />
-        <div
-          className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold text-white"
-          style={{ backgroundColor: stringToColor(remoteUser?.username) }}
-        >
-          {getInitials(remoteUser?.username)}
-        </div>
+        {remoteUser?.avatar ? (
+          <img
+            src={`${SERVER_URL}${remoteUser.avatar}`}
+            alt={remoteUser?.username}
+            className="w-16 h-16 rounded-full object-cover"
+          />
+        ) : (
+          <div
+            className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold text-white"
+            style={{ backgroundColor: stringToColor(remoteUser?.username) }}
+          >
+            {getInitials(remoteUser?.username)}
+          </div>
+        )}
         {/* Duration */}
         {isConnected && (
           <div className="absolute bottom-1 left-1 bg-black/60 px-1.5 py-0.5 rounded text-[9px] text-white">
@@ -104,16 +112,28 @@ const AudioCall = () => {
             <div className="absolute -inset-2 rounded-full border-2 border-emerald-400/20" />
           )}
           
-          <div
-            className={`w-28 h-28 md:w-32 md:h-32 rounded-full flex items-center justify-center text-4xl md:text-5xl font-bold text-white shadow-2xl transition-all duration-200 ${
-              isConnecting ? 'animate-pulse' : ''
-            } ${
-              remoteSpeaking && !remoteAudioMuted ? 'scale-105 shadow-emerald-400/20' : ''
-            }`}
-            style={{ backgroundColor: stringToColor(remoteUser?.username) }}
-          >
-            {getInitials(remoteUser?.username)}
-          </div>
+          {remoteUser?.avatar ? (
+            <img
+              src={`${SERVER_URL}${remoteUser.avatar}`}
+              alt={remoteUser?.username}
+              className={`w-28 h-28 md:w-32 md:h-32 rounded-full object-cover shadow-2xl transition-all duration-200 ${
+                isConnecting ? 'animate-pulse' : ''
+              } ${
+                remoteSpeaking && !remoteAudioMuted ? 'scale-105 shadow-emerald-400/20' : ''
+              }`}
+            />
+          ) : (
+            <div
+              className={`w-28 h-28 md:w-32 md:h-32 rounded-full flex items-center justify-center text-4xl md:text-5xl font-bold text-white shadow-2xl transition-all duration-200 ${
+                isConnecting ? 'animate-pulse' : ''
+              } ${
+                remoteSpeaking && !remoteAudioMuted ? 'scale-105 shadow-emerald-400/20' : ''
+              }`}
+              style={{ backgroundColor: stringToColor(remoteUser?.username) }}
+            >
+              {getInitials(remoteUser?.username)}
+            </div>
+          )}
 
           {/* Remote mute badge on avatar */}
           {remoteAudioMuted && isConnected && (

@@ -59,7 +59,7 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
       if (isGroup) {
         await startGroupCall(activeChat.id, 'audio');
       } else {
-        await startCall({ userId: activeChat.id, username: activeChat.name }, 'audio');
+        await startCall({ userId: activeChat.id, username: activeChat.name, avatar: activeChat.avatar || '' }, 'audio');
       }
     } catch (err) {
       toast.error(err.message || 'Failed to start call');
@@ -75,7 +75,7 @@ const Header = ({ onToggleGroupInfo, showGroupInfo }) => {
       if (isGroup) {
         await startGroupCall(activeChat.id, 'video');
       } else {
-        await startCall({ userId: activeChat.id, username: activeChat.name }, 'video');
+        await startCall({ userId: activeChat.id, username: activeChat.name, avatar: activeChat.avatar || '' }, 'video');
       }
     } catch (err) {
       toast.error(err.message || 'Failed to start call');

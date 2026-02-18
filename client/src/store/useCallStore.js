@@ -29,7 +29,7 @@ const useCallStore = create((set, get) => ({
   callStatus: CALL_STATUS.IDLE,
   callType: null,          // 'audio' | 'video'
   isIncoming: false,
-  remoteUser: null,        // { userId, username }
+  remoteUser: null,        // { userId, username, avatar }
   localStream: null,
   remoteStream: null,
   remoteStreams: {},        // For group calls: { peerId: stream }
@@ -59,7 +59,7 @@ const useCallStore = create((set, get) => ({
   isPipMode: false,        // Android PiP (Picture-in-Picture) mode
 
   // Incoming call data
-  incomingCall: null,      // { callerId, callerName, offer, callType }
+  incomingCall: null,      // { callerId, callerName, callerAvatar, offer, callType }
 
   // Auto-answer flag — set when user taps "Answer" on notification
   // BEFORE the call offer arrives via socket (race condition fix)
@@ -142,7 +142,7 @@ const useCallStore = create((set, get) => ({
       if (!socket) throw new Error('Socket not connected');
 
       // Save call data before clearing (in case of race conditions)
-      const { callerId, callerName, offer, callType } = incomingCall;
+      const { callerId, callerName, callerAvatar, offer, callType } = incomingCall;
 
       // Set state to CALLING (not CONNECTED yet — wait for ICE to actually connect)
       // This shows the call overlay with "Connecting..." status
@@ -152,6 +152,7 @@ const useCallStore = create((set, get) => ({
         remoteUser: {
           userId: callerId,
           username: callerName,
+          avatar: callerAvatar || '',
         },
         isIncoming: true,
         isAudioEnabled: true,

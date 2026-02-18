@@ -11,6 +11,7 @@ import { Users, MessageCircle, Shield } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
 import { getInitials, stringToColor, formatLastSeen, formatTime } from '../../utils/helpers';
+import { SERVER_URL } from '../../utils/constants';
 
 const ActiveUsers = ({ searchQuery = '' }) => {
   const { users, onlineUsers, userLastSeen, conversations, unread, setActiveChat, activeChat } = useChatStore();
@@ -68,6 +69,7 @@ const ActiveUsers = ({ searchQuery = '' }) => {
       id: user._id,
       type: 'user',
       name: user.username,
+      avatar: user.avatar || '',
       role: user.role,
     });
   };
@@ -115,12 +117,20 @@ const ActiveUsers = ({ searchQuery = '' }) => {
               <div className="flex items-center gap-3 w-full">
                 {/* Avatar */}
                 <div className="relative flex-shrink-0">
-                  <div
-                    className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold text-white"
-                    style={{ backgroundColor: stringToColor(user.username) }}
-                  >
-                    {getInitials(user.username)}
-                  </div>
+                  {user.avatar ? (
+                    <img
+                      src={`${SERVER_URL}${user.avatar}`}
+                      alt={user.username}
+                      className="w-11 h-11 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div
+                      className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold text-white"
+                      style={{ backgroundColor: stringToColor(user.username) }}
+                    >
+                      {getInitials(user.username)}
+                    </div>
+                  )}
                   <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-dark-800 ${
                     online ? 'bg-emerald-400' : 'bg-dark-500'
                   }`} />

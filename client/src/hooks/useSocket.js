@@ -220,6 +220,7 @@ const useSocket = () => {
       useCallStore.getState().setIncomingCall({
         callerId,
         callerName,
+        callerAvatar: data.callerAvatar || '',
         offer,
         callType,
       });

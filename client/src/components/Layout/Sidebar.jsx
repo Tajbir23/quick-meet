@@ -8,7 +8,6 @@ import useAuthStore from '../../store/useAuthStore';
 import useChatStore from '../../store/useChatStore';
 import useGroupStore from '../../store/useGroupStore';
 import useOwnerStore from '../../store/useOwnerStore';
-import useChannelStore from '../../store/useChannelStore';
 import { SERVER_URL } from '../../utils/constants';
 import ActiveUsers from '../Users/ActiveUsers';
 import ChatList from '../Chat/ChatList';
