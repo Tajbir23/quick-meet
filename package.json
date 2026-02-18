@@ -1,6 +1,6 @@
 {
   "name": "quick-meet",
-  "version": "1.0.99",
+  "version": "1.0.100",
   "description": "Self-hosted real-time communication ecosystem — MERN + Pure WebRTC",
   "private": true,
   "scripts": {
