@@ -1,38 +1,60 @@
-import { useEffect, memo } from 'react';
+import { useEffect, memo, useCallback } from 'react';
 import { X, Pin, PinOff, FileText, Image as ImageIcon } from 'lucide-react';
 import useChatStore from '../../store/useChatStore';
 import useAuthStore from '../../store/useAuthStore';
 import { formatMessageTime, formatFileSize } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 
+// Safe getter — guards against typeof null === 'object' gotcha
+const getSenderName = (sender) => {
+  if (sender && typeof sender === 'object' && sender.username) return sender.username;
+  return 'Unknown';
+};
+const getPinnedByName = (pinnedBy) => {
+  if (pinnedBy && typeof pinnedBy === 'object' && pinnedBy.username) return pinnedBy.username;
+  return 'Someone';
+};
+const getSenderId = (sender) => {
+  if (sender && typeof sender === 'object' && sender._id) return sender._id;
+  if (typeof sender === 'string') return sender;
+  return null;
+};
+
 const PinnedMessages = ({ chatId, chatType, onScrollToMessage }) => {
-  const pinnedMessages = useChatStore(s => s.pinnedMessages[chatId] || []);
+  // Use stable selector — avoid || [] which creates new ref each render
+  const allPinnedMessages = useChatStore(s => s.pinnedMessages);
   const fetchPinnedMessages = useChatStore(s => s.fetchPinnedMessages);
   const unpinMessage = useChatStore(s => s.unpinMessage);
   const closePinnedPanel = useChatStore(s => s.closePinnedPanel);
   const user = useAuthStore(s => s.user);
 
+  // Safely get the array — defensive
+  const pinnedMessages = (allPinnedMessages && chatId && Array.isArray(allPinnedMessages[chatId]))
+    ? allPinnedMessages[chatId]
+    : [];
+
   useEffect(() => {
     if (chatId) {
       fetchPinnedMessages(chatId, chatType);
     }
-  }, [chatId, chatType]);
+  }, [chatId, chatType, fetchPinnedMessages]);
 
-  const handleUnpin = async (messageId) => {
+  const handleUnpin = useCallback(async (messageId) => {
     try {
       await unpinMessage(messageId, chatId, chatType);
       toast.success('Message unpinned');
     } catch {
       toast.error('Failed to unpin message');
     }
-  };
+  }, [unpinMessage, chatId, chatType]);
 
   const getMessagePreview = (msg) => {
-    if (msg.content) {
+    if (!msg) return 'Message';
+    if (typeof msg.content === 'string' && msg.content.length > 0) {
       return msg.content.length > 120 ? msg.content.substring(0, 120) + '...' : msg.content;
     }
     if (msg.fileUrl) {
-      const isImage = msg.fileMimeType?.startsWith('image/');
+      const isImage = msg.fileMimeType && msg.fileMimeType.startsWith('image/');
       return isImage ? '📷 Photo' : `📎 ${msg.fileName || 'File'}`;
     }
     if (msg.type === 'call') return '📞 Call';
@@ -73,9 +95,10 @@ const PinnedMessages = ({ chatId, chatType, onScrollToMessage }) => {
         ) : (
           <div className="divide-y divide-dark-700/50">
             {pinnedMessages.map((msg) => {
-              const senderName = typeof msg.sender === 'object' ? msg.sender.username : 'Unknown';
-              const pinnedByName = typeof msg.pinnedBy === 'object' ? msg.pinnedBy.username : 'Someone';
-              const isMine = (typeof msg.sender === 'object' ? msg.sender._id : msg.sender) === user?._id;
+              if (!msg || !msg._id) return null;
+              const senderName = getSenderName(msg.sender);
+              const pinnedByName = getPinnedByName(msg.pinnedBy);
+              const isMine = getSenderId(msg.sender) === user?._id;
 
               return (
                 <div
@@ -103,7 +126,7 @@ const PinnedMessages = ({ chatId, chatType, onScrollToMessage }) => {
                       {/* File info */}
                       {msg.fileUrl && msg.fileSize && (
                         <div className="flex items-center gap-1.5 mt-1">
-                          {msg.fileMimeType?.startsWith('image/')
+                          {msg.fileMimeType && msg.fileMimeType.startsWith('image/')
                             ? <ImageIcon size={11} className="text-dark-500" />
                             : <FileText size={11} className="text-dark-500" />
                           }
@@ -114,7 +137,7 @@ const PinnedMessages = ({ chatId, chatType, onScrollToMessage }) => {
                       {/* Pinned by info */}
                       <p className="text-[10px] text-dark-500 mt-1.5 flex items-center gap-1">
                         <Pin size={9} className="text-amber-400/60" />
-                        Pinned by {pinnedByName} · {formatMessageTime(msg.pinnedAt)}
+                        Pinned by {pinnedByName}{msg.pinnedAt ? ` · ${formatMessageTime(msg.pinnedAt)}` : ''}
                       </p>
                     </div>
 

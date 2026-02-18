@@ -129,24 +129,28 @@ const ChatWindow = () => {
   const typing = typingUsers[activeChat.id];
   const isTyping = typing && Object.keys(typing).length > 0;
 
-  // Pinned preview bar data
-  const currentPinnedList = Array.isArray(pinnedMessages[activeChat?.id]) ? pinnedMessages[activeChat.id] : [];
-  const hasPinnedMessages = currentPinnedList && currentPinnedList.length > 0 && !pinnedBarDismissed;
-  const safeIndex = hasPinnedMessages ? pinnedPreviewIndex % currentPinnedList.length : 0;
-  const currentPinnedMsg = hasPinnedMessages && currentPinnedList[safeIndex] ? currentPinnedList[safeIndex] : null;
+  // Pinned preview bar data — defensive
+  const currentPinnedList = (pinnedMessages && activeChat && Array.isArray(pinnedMessages[activeChat.id]))
+    ? pinnedMessages[activeChat.id]
+    : [];
+  const hasPinnedMessages = currentPinnedList.length > 0 && !pinnedBarDismissed;
+  const safeIndex = hasPinnedMessages ? (pinnedPreviewIndex % currentPinnedList.length) : 0;
+  const currentPinnedMsg = hasPinnedMessages ? currentPinnedList[safeIndex] : null;
 
   // Cycle through pinned messages (Telegram-style)
   const handlePinnedBarClick = () => {
-    if (!currentPinnedMsg) return;
+    if (!currentPinnedMsg || !currentPinnedMsg._id) return;
     scrollToMessage(currentPinnedMsg._id);
-    if (hasPinnedMessages && currentPinnedList.length > 1) {
+    if (currentPinnedList.length > 1) {
       setPinnedPreviewIndex((prev) => (prev + 1) % currentPinnedList.length);
     }
   };
 
   const getPinnedPreviewText = (msg) => {
     if (!msg) return '';
-    if (typeof msg.content === 'string' && msg.content.length > 0) return msg.content.length > 80 ? msg.content.substring(0, 80) + '...' : msg.content;
+    if (typeof msg.content === 'string' && msg.content.length > 0) {
+      return msg.content.length > 80 ? msg.content.substring(0, 80) + '...' : msg.content;
+    }
     if (msg.fileUrl) {
       const isImage = msg.fileMimeType && msg.fileMimeType.startsWith('image/');
       return isImage ? '📷 Photo' : `📎 ${msg.fileName || 'File'}`;
@@ -195,7 +199,7 @@ const ChatWindow = () => {
       <div className="flex-1 flex flex-col min-w-0">
 
       {/* Telegram-style pinned message preview bar */}
-      {hasPinnedMessages && currentPinnedMsg && typeof currentPinnedMsg === 'object' && (
+      {hasPinnedMessages && currentPinnedMsg && (
         <div className="flex-shrink-0 flex items-center gap-2 px-3 md:px-4 py-2 bg-dark-800/90 border-b border-dark-700/50 backdrop-blur-sm cursor-pointer hover:bg-dark-750 transition-colors group/pin"
           onClick={handlePinnedBarClick}
         >
@@ -209,7 +213,7 @@ const ChatWindow = () => {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] font-semibold text-primary-400">
-                Pinned Message{currentPinnedList.length > 1 ? ` #${(safeIndex + 1)}` : ''}
+                Pinned Message{currentPinnedList.length > 1 ? ` #${safeIndex + 1}` : ''}
               </span>
               {currentPinnedList.length > 1 && (
                 <span className="text-[10px] text-dark-500">of {currentPinnedList.length}</span>
