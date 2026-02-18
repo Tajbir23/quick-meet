@@ -1331,7 +1331,9 @@ const toggleReaction = async (req, res) => {
     let added = false;
 
     if (reaction) {
-      const userIndex = reaction.users.indexOf(req.user._id);
+      const userIndex = reaction.users.findIndex(
+        u => u.toString() === req.user._id.toString()
+      );
       if (userIndex > -1) {
         reaction.users.splice(userIndex, 1);
         reaction.count -= 1;
@@ -1368,7 +1370,7 @@ const toggleReaction = async (req, res) => {
     res.json({
       success: true,
       message: added ? 'Reaction added' : 'Reaction removed',
-      data: { reactions: post.reactions },
+      data: { reactions: post.reactions, totalReactions: post.totalReactions },
     });
   } catch (error) {
     console.error('Reaction error:', error);
@@ -1730,6 +1732,13 @@ const startLiveStream = async (req, res) => {
 
     const io = req.app.get('io');
     if (io) {
+      // Join broadcaster to the live room (server-side)
+      const sockets = await io.fetchSockets();
+      const broadcasterSocket = sockets.find(s => s.userId === req.user._id.toString());
+      if (broadcasterSocket) {
+        broadcasterSocket.join(`channel-live:${channel._id}`);
+      }
+
       io.to(`channel:${channel._id}`).emit('channel:live-stream-started', {
         channelId: channel._id.toString(),
         liveStream: {
@@ -1788,7 +1797,18 @@ const stopLiveStream = async (req, res) => {
 
     const io = req.app.get('io');
     if (io) {
+      // Clean up stored stream offer
+      if (io._channelStreamOffers) {
+        delete io._channelStreamOffers[channel._id.toString()];
+      }
+
       io.to(`channel:${channel._id}`).emit('channel:live-stream-ended', {
+        channelId: channel._id.toString(),
+        duration,
+      });
+
+      // Also notify live room
+      io.to(`channel-live:${channel._id}`).emit('channel:live-stream-ended', {
         channelId: channel._id.toString(),
         duration,
       });

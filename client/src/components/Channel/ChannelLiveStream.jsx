@@ -59,6 +59,13 @@ const ChannelLiveStream = ({ channel, onClose }) => {
   useEffect(() => {
     return () => {
       cleanupWebRTC();
+      // Remove socket listeners
+      const socket = getSocket();
+      if (socket) {
+        socket.off('channel:live-stream-offer');
+        socket.off('channel:live-stream-answer');
+        socket.off('channel:live-stream-ice');
+      }
     };
   }, []);
 
@@ -112,21 +119,34 @@ const ChannelLiveStream = ({ channel, onClose }) => {
         }
       };
 
-      // Listen for viewer offers
-      socket.on('channel:live-stream-offer', async ({ viewerId, offer }) => {
-        // For each viewer, create answer (simplified — in production use SFU)
-        const answer = await pc.createAnswer();
-        // This is simplified; real implementation would need per-viewer PeerConnection
-        socket.emit('channel:live-stream-answer', {
-          channelId: channel._id,
-          targetUserId: viewerId,
-          answer,
-        });
+      // Listen for viewer answers
+      socket.on('channel:live-stream-answer', async ({ answer, viewerId }) => {
+        try {
+          if (pc.signalingState !== 'closed') {
+            await pc.setRemoteDescription(new RTCSessionDescription(answer));
+          }
+        } catch (err) {
+          console.error('Error setting remote answer:', err);
+        }
+      });
+
+      // Listen for ICE candidates from viewers
+      socket.on('channel:live-stream-ice', async ({ candidate }) => {
+        try {
+          if (pc.signalingState !== 'closed' && candidate) {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          }
+        } catch (err) {
+          console.error('Error adding ICE candidate:', err);
+        }
       });
 
       // Create initial offer for the broadcast
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+
+      // Join live room as broadcaster
+      socket.emit('channel:join-live-room', { channelId: channel._id });
 
       socket.emit('channel:live-stream-offer', {
         channelId: channel._id,
@@ -162,17 +182,32 @@ const ChannelLiveStream = ({ channel, onClose }) => {
         }
       };
 
-      // Listen for broadcaster's answer
-      socket.on('channel:live-stream-answer', async ({ answer }) => {
-        if (pc.signalingState !== 'closed') {
-          await pc.setRemoteDescription(answer);
+      // Listen for broadcaster's offer
+      socket.on('channel:live-stream-offer', async ({ offer, broadcasterId }) => {
+        try {
+          if (pc.signalingState !== 'closed') {
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit('channel:live-stream-answer', {
+              channelId: channel._id,
+              answer,
+              broadcasterId,
+            });
+          }
+        } catch (err) {
+          console.error('Error handling offer:', err);
         }
       });
 
-      // Listen for ICE candidates
+      // Listen for ICE candidates from broadcaster
       socket.on('channel:live-stream-ice', async ({ candidate }) => {
-        if (pc.signalingState !== 'closed') {
-          await pc.addIceCandidate(candidate);
+        try {
+          if (pc.signalingState !== 'closed' && candidate) {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          }
+        } catch (err) {
+          console.error('Error adding ICE candidate:', err);
         }
       });
 

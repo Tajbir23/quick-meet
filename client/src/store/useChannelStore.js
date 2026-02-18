@@ -450,7 +450,17 @@ const useChannelStore = create((set, get) => ({
 
   toggleReaction: async (channelId, postId, emoji) => {
     try {
-      await api.post(`/channels/${channelId}/posts/${postId}/react`, { emoji });
+      const res = await api.post(`/channels/${channelId}/posts/${postId}/react`, { emoji });
+      if (res.data.success) {
+        // Update local state immediately from API response (don't wait for socket)
+        set(state => ({
+          channelPosts: state.channelPosts.map(p =>
+            p._id === postId
+              ? { ...p, reactions: res.data.data.reactions, totalReactions: res.data.data.totalReactions }
+              : p
+          ),
+        }));
+      }
       return { success: true };
     } catch (error) {
       return { success: false };
@@ -461,9 +471,9 @@ const useChannelStore = create((set, get) => ({
   // COMMENTS
   // ══════════════════════════════════════════
 
-  addComment: async (channelId, postId, data) => {
+  addComment: async (channelId, postId, content) => {
     try {
-      const res = await api.post(`/channels/${channelId}/posts/${postId}/comments`, data);
+      const res = await api.post(`/channels/${channelId}/posts/${postId}/comments`, { content });
       return { success: true, comment: res.data.data.comment };
     } catch (error) {
       return { success: false, message: error.response?.data?.message };
@@ -696,19 +706,41 @@ const useChannelStore = create((set, get) => ({
 
   handleLiveStreamStarted: (data) => {
     set(state => {
+      const updates = {};
       if (state.activeChannel?._id === data.channelId) {
-        return { liveStream: data.liveStream, liveChat: [], liveViewerCount: 0 };
+        updates.liveStream = data.liveStream;
+        updates.liveChat = [];
+        updates.liveViewerCount = 0;
+        updates.activeChannel = {
+          ...state.activeChannel,
+          liveStream: { ...state.activeChannel.liveStream, isLive: true, title: data.liveStream?.title },
+        };
       }
-      return {};
+      // Update in myChannels list too
+      updates.myChannels = state.myChannels.map(c =>
+        c._id === data.channelId
+          ? { ...c, liveStream: { ...c.liveStream, isLive: true, title: data.liveStream?.title } }
+          : c
+      );
+      return updates;
     });
   },
 
   handleLiveStreamEnded: (data) => {
     set(state => {
+      const updates = { liveStream: null, liveChat: [], liveViewerCount: 0 };
       if (state.activeChannel?._id === data.channelId) {
-        return { liveStream: null, liveChat: [], liveViewerCount: 0 };
+        updates.activeChannel = {
+          ...state.activeChannel,
+          liveStream: { ...state.activeChannel.liveStream, isLive: false },
+        };
       }
-      return {};
+      updates.myChannels = state.myChannels.map(c =>
+        c._id === data.channelId
+          ? { ...c, liveStream: { ...c.liveStream, isLive: false } }
+          : c
+      );
+      return updates;
     });
   },
 

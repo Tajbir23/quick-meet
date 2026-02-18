@@ -144,14 +144,21 @@ const ChannelView = () => {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold text-white truncate">{activeChat.name}</h2>
-            {isLive && (
+            {isLive ? (
               <button
                 onClick={() => setShowLive(true)}
                 className="bg-red-500 text-white text-[10px] font-bold rounded-full px-2 py-0.5 animate-pulse hover:bg-red-600 transition-colors"
               >
                 LIVE
               </button>
-            )}
+            ) : (isOwner || myRole === 'admin') ? (
+              <button
+                onClick={() => setShowLive(true)}
+                className="bg-dark-600 text-dark-300 text-[10px] font-semibold rounded-full px-2 py-0.5 hover:bg-indigo-500/20 hover:text-indigo-400 transition-colors"
+              >
+                Go Live
+              </button>
+            ) : null}
           </div>
           <p className="text-xs text-dark-400">
             {subscriberCount} subscribers
@@ -194,8 +201,8 @@ const ChannelView = () => {
         </div>
       )}
 
-      {/* Live stream viewer (overlay) */}
-      {showLive && isLive && (
+      {/* Live stream viewer/broadcaster (overlay) */}
+      {showLive && (
         <ChannelLiveStream
           channel={activeChannel}
           onClose={() => setShowLive(false)}

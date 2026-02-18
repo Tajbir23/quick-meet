@@ -34,6 +34,13 @@ const setupChannelHandlers = (io, socket, onlineUsers) => {
     console.log(`📺 ${username} left channel room: ${channelId}`);
   }));
 
+  // ─── JOIN LIVE ROOM (broadcaster + viewer) ────
+  socket.on('channel:join-live-room', socketGuard.wrapHandler(socket, async ({ channelId }) => {
+    if (!channelId) return;
+    socket.join(`channel-live:${channelId}`);
+    console.log(`📺 ${username} joined live room: ${channelId}`);
+  }));
+
   // ─── LIVE STREAM: WebRTC Signaling ────────
   // Broadcaster sends offer to the channel
   socket.on('channel:live-stream-offer', socketGuard.wrapHandler(socket, async ({ channelId, offer }) => {
@@ -77,13 +84,23 @@ const setupChannelHandlers = (io, socket, onlineUsers) => {
     }
   }));
 
-  // ICE candidates for live stream
+  // ICE candidates for live stream — broadcast to the live room
   socket.on('channel:live-stream-ice', socketGuard.wrapHandler(socket, async ({ channelId, candidate, targetId }) => {
-    if (!channelId || !candidate || !targetId) return;
+    if (!channelId || !candidate) return;
 
-    const targetSocketId = onlineUsers.get(targetId);
-    if (targetSocketId) {
-      io.to(targetSocketId).emit('channel:live-stream-ice', {
+    if (targetId) {
+      // Direct ICE to specific user
+      const targetSocketId = onlineUsers.get(targetId);
+      if (targetSocketId) {
+        io.to(targetSocketId).emit('channel:live-stream-ice', {
+          channelId,
+          candidate,
+          fromId: userId,
+        });
+      }
+    } else {
+      // Broadcast ICE to all in the live room (for 1-to-many)
+      socket.to(`channel-live:${channelId}`).emit('channel:live-stream-ice', {
         channelId,
         candidate,
         fromId: userId,
@@ -94,6 +111,9 @@ const setupChannelHandlers = (io, socket, onlineUsers) => {
   // Request current stream offer (late joiner)
   socket.on('channel:live-stream-request-offer', socketGuard.wrapHandler(socket, async ({ channelId }) => {
     if (!channelId) return;
+
+    // Auto-join the live room
+    socket.join(`channel-live:${channelId}`);
 
     const stored = io._channelStreamOffers?.[channelId];
     if (stored) {
