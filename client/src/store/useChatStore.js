@@ -27,6 +27,7 @@ const useChatStore = create((set, get) => ({
   users: [],           // All users
   userLastSeen: {},    // { userId: ISO timestamp } — cached lastSeen per user
   usersLastFetched: 0, // Timestamp of last users fetch (for cache TTL)
+  conversations: {},   // { chatId: { content, type, createdAt, senderId, senderUsername } } — last message per conversation
   isLoadingMessages: false,
   pinnedMessages: {},  // { chatId: [pinnedMessage, ...] }
   showPinnedPanel: false,
@@ -134,6 +135,53 @@ const useChatStore = create((set, get) => ({
   },
 
   // ============================================
+  // CONVERSATIONS (last message per chat)
+  // ============================================
+
+  /**
+   * Fetch last message for each 1-to-1 conversation.
+   * Used for sidebar preview text.
+   */
+  fetchConversations: async () => {
+    try {
+      const res = await api.get('/messages/conversations');
+      set({ conversations: res.data.data.conversations });
+    } catch (error) {
+      console.error('Failed to fetch conversations:', error);
+    }
+  },
+
+  /**
+   * Update a single conversation's last message (called on send/receive).
+   * This avoids re-fetching all conversations for every new message.
+   */
+  updateConversation: (chatId, message, senderUsername) => {
+    // Format preview text based on message type
+    let content = message.content;
+    if (message.type === 'image') content = '📷 Photo';
+    else if (message.type === 'file') content = `📎 ${message.fileName || 'File'}`;
+    else if (message.type === 'audio') content = '🎵 Audio';
+    else if (message.type === 'video') content = '🎬 Video';
+    else if (message.type === 'call') {
+      const icon = message.callType === 'video' ? '📹' : '📞';
+      content = `${icon} ${message.callStatus === 'completed' ? 'Call' : 'Missed call'}`;
+    }
+
+    set((state) => ({
+      conversations: {
+        ...state.conversations,
+        [chatId]: {
+          content: content || '',
+          type: message.type || 'text',
+          createdAt: message.createdAt || new Date().toISOString(),
+          senderId: message.sender?._id || message.sender,
+          senderUsername: senderUsername || message.sender?.username || '',
+        },
+      },
+    }));
+  },
+
+  // ============================================
   // ACTIVE CHAT
   // ============================================
 
@@ -232,6 +280,11 @@ const useChatStore = create((set, get) => ({
         },
       }));
 
+      // Update conversation preview (last message)
+      if (chatType === 'user') {
+        get().updateConversation(chatId, messageData, messageData.sender?.username);
+      }
+
       // Emit via socket for real-time delivery
       const socket = getSocket();
       if (socket) {
@@ -271,6 +324,9 @@ const useChatStore = create((set, get) => ({
             },
       };
     });
+
+    // Update conversation preview (for 1-to-1 messages — chatId is the sender's userId)
+    get().updateConversation(chatId, message, message.sender?.username);
   },
 
   // ============================================

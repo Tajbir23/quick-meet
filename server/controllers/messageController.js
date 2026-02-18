@@ -375,6 +375,128 @@ const getUnreadCounts = async (req, res) => {
 };
 
 /**
+ * GET /api/messages/conversations
+ * Get last message for each 1-to-1 conversation (for sidebar preview).
+ * Returns: { conversations: { [userId]: { content, type, createdAt, senderId, senderUsername } } }
+ */
+const getConversations = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Aggregate to find the latest message per conversation partner
+    const pipeline = [
+      {
+        $match: {
+          group: null,
+          $or: [
+            { sender: userId },
+            { receiver: userId },
+          ],
+        },
+      },
+      {
+        // Sort by newest first so $first in group picks the latest
+        $sort: { createdAt: -1 },
+      },
+      {
+        // Determine the "other user" in each conversation
+        $addFields: {
+          chatPartnerId: {
+            $cond: {
+              if: { $eq: ['$sender', userId] },
+              then: '$receiver',
+              else: '$sender',
+            },
+          },
+        },
+      },
+      {
+        // Group by chat partner, take the first (latest) message
+        $group: {
+          _id: '$chatPartnerId',
+          lastMessage: { $first: '$$ROOT' },
+        },
+      },
+      {
+        // Lookup sender username
+        $lookup: {
+          from: 'users',
+          localField: 'lastMessage.sender',
+          foreignField: '_id',
+          as: 'senderInfo',
+        },
+      },
+      {
+        $unwind: { path: '$senderInfo', preserveNullAndEmptyArrays: true },
+      },
+      {
+        $project: {
+          chatPartnerId: '$_id',
+          content: '$lastMessage.content',
+          type: '$lastMessage.type',
+          createdAt: '$lastMessage.createdAt',
+          senderId: '$lastMessage.sender',
+          senderUsername: '$senderInfo.username',
+          encrypted: '$lastMessage.encrypted',
+          encryptionIV: '$lastMessage.encryptionIV',
+          encryptionTag: '$lastMessage.encryptionTag',
+          fileUrl: '$lastMessage.fileUrl',
+          fileName: '$lastMessage.fileName',
+          callType: '$lastMessage.callType',
+          callStatus: '$lastMessage.callStatus',
+        },
+      },
+    ];
+
+    const results = await Message.aggregate(pipeline);
+
+    // Build conversations map & decrypt content
+    const conversations = {};
+    results.forEach(item => {
+      let content = item.content;
+
+      // Decrypt if encrypted
+      if (item.encrypted && item.encryptionIV && item.encryptionTag) {
+        content = decryptContent({
+          content: item.content,
+          encrypted: item.encrypted,
+          encryptionIV: item.encryptionIV,
+          encryptionTag: item.encryptionTag,
+          _id: item.chatPartnerId,
+        });
+      }
+
+      // Format preview text based on message type
+      let preview = content;
+      if (item.type === 'image') preview = '📷 Photo';
+      else if (item.type === 'file') preview = `📎 ${item.fileName || 'File'}`;
+      else if (item.type === 'audio') preview = '🎵 Audio';
+      else if (item.type === 'video') preview = '🎬 Video';
+      else if (item.type === 'call') {
+        const icon = item.callType === 'video' ? '📹' : '📞';
+        preview = `${icon} ${item.callStatus === 'completed' ? 'Call' : 'Missed call'}`;
+      }
+
+      conversations[item.chatPartnerId.toString()] = {
+        content: preview,
+        type: item.type,
+        createdAt: item.createdAt,
+        senderId: item.senderId?.toString(),
+        senderUsername: item.senderUsername,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: { conversations },
+    });
+  } catch (error) {
+    console.error('Get conversations error:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching conversations' });
+  }
+};
+
+/**
  * DELETE /api/messages/:messageId
  * Delete a message (only sender can delete)
  */
@@ -552,6 +674,7 @@ module.exports = {
   getGroupMessages,
   markAsRead,
   getUnreadCounts,
+  getConversations,
   deleteMessage,
   pinMessage,
   unpinMessage,

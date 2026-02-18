@@ -7,6 +7,7 @@ const {
   getGroupMessages,
   markAsRead,
   getUnreadCounts,
+  getConversations,
   deleteMessage,
   pinMessage,
   unpinMessage,
@@ -21,6 +22,7 @@ router.use(apiLimiter);
 // 1-to-1 messages (send is additionally rate-limited for spam prevention)
 router.post('/', messageLimiter, sendMessage);
 router.get('/unread/count', getUnreadCounts);
+router.get('/conversations', getConversations);
 
 // Pinned messages — must be before /:messageId and /:userId routes
 router.get('/pinned/:chatId', getPinnedMessages);

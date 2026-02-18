@@ -28,6 +28,7 @@ const HomePage = () => {
 
   const fetchUsers = useChatStore(s => s.fetchUsers);
   const fetchUnreadCounts = useChatStore(s => s.fetchUnreadCounts);
+  const fetchConversations = useChatStore(s => s.fetchConversations);
   const fetchMyGroups = useGroupStore(s => s.fetchMyGroups);
   const joinAllGroupRooms = useGroupStore(s => s.joinAllGroupRooms);
   const callStatus = useCallStore(s => s.callStatus);
@@ -39,6 +40,7 @@ const HomePage = () => {
     // Fetch initial data
     fetchUsers();
     fetchUnreadCounts();
+    fetchConversations();
     fetchMyGroups().then(() => {
       joinAllGroupRooms();
     });
