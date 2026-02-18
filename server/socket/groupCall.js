@@ -179,9 +179,9 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
     // Sanitize SDP
     if (offer.sdp) {
       const sanitized = sdpSanitizer.sanitizeSDP(offer.sdp, 'offer');
-      if (!sanitized.safe) {
+      if (!sanitized.valid) {
         securityLogger.log('ALERT', 'WEBRTC', 'Dangerous group call SDP offer rejected', {
-          userId: socket.userId, issues: sanitized.issues,
+          userId: socket.userId, issues: sanitized.warnings,
         });
         return;
       }
@@ -210,9 +210,9 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
     // Sanitize SDP answer
     if (answer.sdp) {
       const sanitized = sdpSanitizer.sanitizeSDP(answer.sdp, 'answer');
-      if (!sanitized.safe) {
+      if (!sanitized.valid) {
         securityLogger.log('ALERT', 'WEBRTC', 'Dangerous group call SDP answer rejected', {
-          userId: socket.userId, issues: sanitized.issues,
+          userId: socket.userId, issues: sanitized.warnings,
         });
         return;
       }
@@ -241,7 +241,7 @@ const setupGroupCallHandlers = (io, socket, onlineUsers) => {
     // Sanitize ICE candidate
     if (candidate) {
       const sanitized = sdpSanitizer.sanitizeICECandidate(candidate);
-      if (!sanitized.safe) {
+      if (!sanitized.valid) {
         return; // Silently drop bad candidates
       }
       candidate = sanitized.candidate;
