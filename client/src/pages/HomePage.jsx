@@ -14,6 +14,7 @@ import useSocket from '../hooks/useSocket';
 import useChatStore from '../store/useChatStore';
 import useGroupStore from '../store/useGroupStore';
 import useCallStore from '../store/useCallStore';
+import useChannelStore from '../store/useChannelStore';
 import MainLayout from '../components/Layout/MainLayout';
 import VideoCall from '../components/Call/VideoCall';
 import AudioCall from '../components/Call/AudioCall';
@@ -31,6 +32,8 @@ const HomePage = () => {
   const fetchConversations = useChatStore(s => s.fetchConversations);
   const fetchMyGroups = useGroupStore(s => s.fetchMyGroups);
   const joinAllGroupRooms = useGroupStore(s => s.joinAllGroupRooms);
+  const fetchMyChannels = useChannelStore(s => s.fetchMyChannels);
+  const joinAllChannelRooms = useChannelStore(s => s.joinAllChannelRooms);
   const callStatus = useCallStore(s => s.callStatus);
   const callType = useCallStore(s => s.callType);
   const isGroupCall = useCallStore(s => s.isGroupCall);
@@ -43,6 +46,9 @@ const HomePage = () => {
     fetchConversations();
     fetchMyGroups().then(() => {
       joinAllGroupRooms();
+    });
+    fetchMyChannels().then(() => {
+      joinAllChannelRooms();
     });
   }, []);
 

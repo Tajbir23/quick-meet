@@ -1,7 +1,8 @@
 import Sidebar from './Sidebar';
 import ChatWindow from '../Chat/ChatWindow';
+import ChannelView from '../Channel/ChannelView';
 import useChatStore from '../../store/useChatStore';
-import { MessageCircle, Shield, Phone, Monitor } from 'lucide-react';
+import { MessageCircle, Shield, Phone, Monitor, Radio } from 'lucide-react';
 
 const MainLayout = () => {
   const activeChat = useChatStore(s => s.activeChat);
@@ -22,8 +23,12 @@ const MainLayout = () => {
         flex-1 min-w-0 h-full relative
       `}>
         {activeChat ? (
-          /* ChatWindow uses absolute inset-0 to fill this container exactly */
-          <ChatWindow />
+          activeChat.type === 'channel' ? (
+            <ChannelView />
+          ) : (
+            /* ChatWindow uses absolute inset-0 to fill this container exactly */
+            <ChatWindow />
+          )
         ) : (
           /* Desktop no-chat state */
           <div className="absolute inset-0 flex flex-col">
@@ -51,6 +56,10 @@ const MainLayout = () => {
                   <div className="flex items-center gap-2 bg-dark-800 border border-dark-700 rounded-full px-4 py-2 text-sm text-dark-300">
                     <Monitor size={14} className="text-purple-400" />
                     <span>Screen Share</span>
+                  </div>
+                  <div className="flex items-center gap-2 bg-dark-800 border border-dark-700 rounded-full px-4 py-2 text-sm text-dark-300">
+                    <Radio size={14} className="text-indigo-400" />
+                    <span>Channels</span>
                   </div>
                 </div>
               </div>

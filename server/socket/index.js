@@ -28,6 +28,8 @@ const setupSignalingHandlers = require('./signaling');
 const { deliverPendingCall, clearPendingCall } = require('./signaling');
 const setupGroupCallHandlers = require('./groupCall');
 const setupFileTransferHandlers = require('./fileTransfer');
+const setupChannelHandlers = require('./channel');
+const { startScheduledPostPublisher, stopScheduledPostPublisher } = require('./channel');
 const socketGuard = require('../security/SocketGuard');
 const securityLogger = require('../security/SecurityEventLogger');
 const { SEVERITY } = require('../security/SecurityEventLogger');
@@ -150,6 +152,7 @@ const registerSocketHandlers = (io) => {
     setupSignalingHandlers(io, socket, onlineUsers);
     setupGroupCallHandlers(io, socket, onlineUsers);
     setupFileTransferHandlers(io, socket, onlineUsers);
+    setupChannelHandlers(io, socket, onlineUsers);
 
     // ============================================
     // Deliver pending calls (user was offline, now reconnected)
@@ -230,6 +233,9 @@ const registerSocketHandlers = (io) => {
       });
     });
   });
+
+  // Start the scheduled post publisher for channels
+  startScheduledPostPublisher(io);
 };
 
 module.exports = registerSocketHandlers;

@@ -17,6 +17,7 @@ import useAuthStore from '../store/useAuthStore';
 import webrtcService from '../services/webrtc';
 import { playNotificationSound, showNativeNotification, bringWindowToFront } from '../utils/helpers';
 import useFileTransferStore from '../store/useFileTransferStore';
+import useChannelStore from '../store/useChannelStore';
 import p2pFileTransfer from '../services/p2pFileTransfer';
 import {
   notifyIncomingCall,
@@ -374,6 +375,10 @@ const useSocket = () => {
       myGroups.forEach(g => socket.emit('group:join-room', { groupId: g._id }));
       socket.emit('group-call:get-active-calls');
 
+      // Re-join all channel rooms
+      const { myChannels } = useChannelStore.getState();
+      myChannels.forEach(ch => socket.emit('channel:join-room', { channelId: ch._id }));
+
       // Re-request online users (server also auto-sends, this is a safety net)
       socket.emit('users:get-online-list');
 
@@ -508,6 +513,103 @@ const useSocket = () => {
     });
 
     // ============================================
+    // CHANNEL EVENTS
+    // ============================================
+
+    socket.on('channel:new-post', (data) => {
+      useChannelStore.getState().handleNewPost(data);
+    });
+
+    socket.on('channel:post-edited', (data) => {
+      useChannelStore.getState().handlePostEdited(data);
+    });
+
+    socket.on('channel:post-deleted', (data) => {
+      useChannelStore.getState().handlePostDeleted(data);
+    });
+
+    socket.on('channel:post-pinned', (data) => {
+      useChannelStore.getState().handlePostPinned(data);
+    });
+
+    socket.on('channel:reaction-updated', (data) => {
+      useChannelStore.getState().handleReactionUpdated(data);
+    });
+
+    socket.on('channel:new-comment', (data) => {
+      useChannelStore.getState().handleNewComment(data);
+    });
+
+    socket.on('channel:comment-deleted', (data) => {
+      useChannelStore.getState().handleCommentDeleted(data);
+    });
+
+    socket.on('channel:poll-updated', (data) => {
+      useChannelStore.getState().handlePollUpdated(data);
+    });
+
+    socket.on('channel:poll-closed', (data) => {
+      useChannelStore.getState().handlePollUpdated(data);
+    });
+
+    socket.on('channel:updated', (data) => {
+      useChannelStore.getState().handleChannelUpdated(data);
+    });
+
+    socket.on('channel:deleted', (data) => {
+      useChannelStore.getState().handleChannelDeleted(data);
+    });
+
+    socket.on('channel:live-stream-started', (data) => {
+      useChannelStore.getState().handleLiveStreamStarted(data);
+    });
+
+    socket.on('channel:live-stream-ended', (data) => {
+      useChannelStore.getState().handleLiveStreamEnded(data);
+    });
+
+    socket.on('channel:live-chat-message', (data) => {
+      useChannelStore.getState().handleLiveChatMessage(data);
+    });
+
+    socket.on('channel:live-viewer-count', (data) => {
+      useChannelStore.getState().handleLiveViewerCount(data);
+    });
+
+    socket.on('channel:typing', (data) => {
+      useChannelStore.getState().handleTyping(data);
+    });
+
+    socket.on('channel:subscriber-joined', ({ channelId }) => {
+      // Refresh channel data to update member count
+      useChannelStore.getState().fetchMyChannels();
+    });
+
+    socket.on('channel:subscriber-left', ({ channelId }) => {
+      useChannelStore.getState().fetchMyChannels();
+    });
+
+    socket.on('channel:role-changed', ({ channelId }) => {
+      useChannelStore.getState().fetchMyChannels();
+    });
+
+    socket.on('channel:banned', ({ channelId, userId: bannedUserId }) => {
+      if (bannedUserId === user?._id) {
+        useChannelStore.getState().fetchMyChannels();
+        const { activeChannel } = useChannelStore.getState();
+        if (activeChannel?._id === channelId) {
+          useChannelStore.getState().setActiveChannel(null);
+          useChatStore.getState().clearActiveChat();
+        }
+      }
+    });
+
+    socket.on('channel:ownership-transferred', ({ channelId }) => {
+      useChannelStore.getState().fetchMyChannels();
+      useChannelStore.getState().getChannelById(channelId);
+    });
+
+    // ============================================
     // OWNER MODE EVENT
     // ============================================
     socket.on('owner:mode-changed', ({ userId, ownerModeVisible }) => {
@@ -534,6 +636,9 @@ const useSocket = () => {
       const { myGroups } = useGroupStore.getState();
       myGroups.forEach(g => socket.emit('group:join-room', { groupId: g._id }));
       socket.emit('group-call:get-active-calls');
+      // Join channel rooms immediately
+      const { myChannels } = useChannelStore.getState();
+      myChannels.forEach(ch => socket.emit('channel:join-room', { channelId: ch._id }));
     }
 
     // Heartbeat + periodic presence sync
@@ -597,6 +702,28 @@ const useSocket = () => {
       socket.off('group-call:media-toggled');
       socket.off('group-call:error');
       socket.off('owner:mode-changed');
+      // Cleanup channel events
+      socket.off('channel:new-post');
+      socket.off('channel:post-edited');
+      socket.off('channel:post-deleted');
+      socket.off('channel:post-pinned');
+      socket.off('channel:reaction-updated');
+      socket.off('channel:new-comment');
+      socket.off('channel:comment-deleted');
+      socket.off('channel:poll-updated');
+      socket.off('channel:poll-closed');
+      socket.off('channel:updated');
+      socket.off('channel:deleted');
+      socket.off('channel:live-stream-started');
+      socket.off('channel:live-stream-ended');
+      socket.off('channel:live-chat-message');
+      socket.off('channel:live-viewer-count');
+      socket.off('channel:typing');
+      socket.off('channel:subscriber-joined');
+      socket.off('channel:subscriber-left');
+      socket.off('channel:role-changed');
+      socket.off('channel:banned');
+      socket.off('channel:ownership-transferred');
       // Cleanup file transfer
       useFileTransferStore.getState().cleanup();
       initialized.current = false;

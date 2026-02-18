@@ -1,26 +1,32 @@
 import { useState, useEffect } from 'react';
 import {
   MessageCircle, Users, Search, LogOut, Plus, Hash, X,
-  Shield, Eye, EyeOff, Settings, HardDrive
+  Shield, Eye, EyeOff, Settings, HardDrive, Radio
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../../store/useAuthStore';
 import useChatStore from '../../store/useChatStore';
 import useGroupStore from '../../store/useGroupStore';
 import useOwnerStore from '../../store/useOwnerStore';
+import useChannelStore from '../../store/useChannelStore';
 import { SERVER_URL } from '../../utils/constants';
 import ActiveUsers from '../Users/ActiveUsers';
 import ChatList from '../Chat/ChatList';
 import GroupList from '../Group/GroupList';
 import CreateGroup from '../Group/CreateGroup';
+import ChannelList from '../Channel/ChannelList';
+import CreateChannel from '../Channel/CreateChannel';
+import ChannelDiscover from '../Channel/ChannelDiscover';
 import UserSettings from '../Common/UserSettings';
 import { getInitials, stringToColor } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 
 const Sidebar = () => {
-  const [activeTab, setActiveTab] = useState('chats'); // 'chats' | 'groups' | 'users'
+  const [activeTab, setActiveTab] = useState('chats'); // 'chats' | 'groups' | 'channels' | 'users'
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showCreateChannel, setShowCreateChannel] = useState(false);
+  const [showDiscoverChannels, setShowDiscoverChannels] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const user = useAuthStore(s => s.user);
   const logout = useAuthStore(s => s.logout);
@@ -54,6 +60,7 @@ const Sidebar = () => {
   const tabs = [
     { id: 'chats', icon: MessageCircle, label: 'Chats' },
     { id: 'groups', icon: Hash, label: 'Groups' },
+    { id: 'channels', icon: Radio, label: 'Channels' },
     { id: 'users', icon: Users, label: 'Users' },
     { id: 'transfer', icon: HardDrive, label: 'Transfer' },
   ];
@@ -195,6 +202,28 @@ const Sidebar = () => {
           </>
         )}
 
+        {activeTab === 'channels' && (
+          <>
+            <div className="p-3 space-y-2">
+              <button
+                onClick={() => setShowCreateChannel(true)}
+                className="w-full flex items-center justify-center gap-2 py-2.5 text-sm bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl transition-colors"
+              >
+                <Plus size={16} />
+                Create Channel
+              </button>
+              <button
+                onClick={() => setShowDiscoverChannels(true)}
+                className="btn-secondary w-full flex items-center justify-center gap-2 py-2.5 text-sm"
+              >
+                <Search size={16} />
+                Discover Channels
+              </button>
+            </div>
+            <ChannelList searchQuery={searchQuery} />
+          </>
+        )}
+
         {activeTab === 'users' && (
           <ActiveUsers searchQuery={searchQuery} />
         )}
@@ -203,6 +232,16 @@ const Sidebar = () => {
       {/* Create Group Modal */}
       {showCreateGroup && (
         <CreateGroup onClose={() => setShowCreateGroup(false)} />
+      )}
+
+      {/* Create Channel Modal */}
+      {showCreateChannel && (
+        <CreateChannel onClose={() => setShowCreateChannel(false)} />
+      )}
+
+      {/* Discover Channels Modal */}
+      {showDiscoverChannels && (
+        <ChannelDiscover onClose={() => setShowDiscoverChannels(false)} />
       )}
 
       {/* Settings Modal */}
