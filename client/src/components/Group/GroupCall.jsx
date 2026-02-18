@@ -260,18 +260,23 @@ const GroupCall = () => {
     : allParticipants;
 
   // Grid class for non-pinned layout
+  // IMPORTANT: Tailwind purges dynamic class names like `grid-cols-${n}`.
+  // Always use full string literals so classes are included in the build.
   const gridClass = useMemo(() => {
     if (hasPinned) {
-      // Thumbnail strip — horizontal on bottom or side
       const thumbCount = unpinnedParticipants.length;
       if (thumbCount <= 1) return 'grid-cols-1';
-      if (thumbCount <= 3) return `grid-cols-${thumbCount}`;
+      if (thumbCount === 2) return 'grid-cols-2';
+      if (thumbCount === 3) return 'grid-cols-3';
       return 'grid-cols-3 md:grid-cols-4';
     }
-    if (totalParticipants <= 1) return 'grid-cols-1';
-    if (totalParticipants <= 2) return 'grid-cols-1 md:grid-cols-2';
-    if (totalParticipants <= 4) return 'grid-cols-2 grid-rows-2';
-    return 'grid-cols-2 md:grid-cols-3 grid-rows-2';
+    // Full-screen grid for all participants
+    if (totalParticipants <= 1) return 'grid-cols-1 grid-rows-1';
+    if (totalParticipants === 2) return 'grid-cols-1 md:grid-cols-2 grid-rows-2 md:grid-rows-1';
+    if (totalParticipants === 3) return 'grid-cols-1 md:grid-cols-3 auto-rows-fr';
+    if (totalParticipants === 4) return 'grid-cols-2 grid-rows-2';
+    if (totalParticipants <= 6) return 'grid-cols-2 md:grid-cols-3 auto-rows-fr';
+    return 'grid-cols-3 auto-rows-fr';
   }, [totalParticipants, hasPinned, unpinnedParticipants.length]);
 
   return (
@@ -356,9 +361,9 @@ const GroupCall = () => {
         </div>
       ) : (
         /* ===== DEFAULT GRID LAYOUT ===== */
-        <div className={`flex-1 p-1.5 md:p-2 grid ${gridClass} gap-1.5 md:gap-2`}>
+        <div className={`flex-1 p-1.5 md:p-2 grid ${gridClass} gap-1.5 md:gap-2 min-h-0 overflow-hidden`}>
           {allParticipants.map(p => (
-            <div key={p.userId} className="group/tile">
+            <div key={p.userId} className="group/tile min-h-0 h-full w-full">
               <VideoTile
                 stream={p.stream}
                 name={p.username}
@@ -373,7 +378,7 @@ const GroupCall = () => {
 
           {/* Empty slot when alone */}
           {totalParticipants === 1 && (
-            <div className="bg-dark-800 rounded-2xl flex items-center justify-center">
+            <div className="bg-dark-800 rounded-2xl flex items-center justify-center h-full">
               <div className="text-center">
                 <Users size={28} className="mx-auto text-dark-600 mb-2" />
                 <p className="text-dark-500 text-sm">Waiting for others...</p>
