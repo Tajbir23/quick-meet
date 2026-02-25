@@ -193,7 +193,7 @@ const useSocket = () => {
     // 1-TO-1 CALL EVENTS
     // ============================================
 
-    socket.on('call:offer', async ({ callerId, callerName, offer, callType, isReconnect }) => {
+    socket.on('call:offer', async ({ callerId, callerName, callerAvatar, offer, callType, isReconnect }) => {
       const { callStatus, remoteUser } = useCallStore.getState();
 
       // If this is a reconnect offer and we're still in a call with this user,
@@ -225,7 +225,7 @@ const useSocket = () => {
       useCallStore.getState().setIncomingCall({
         callerId,
         callerName,
-        callerAvatar: data.callerAvatar || '',
+        callerAvatar: callerAvatar || '',
         offer,
         callType,
       });
